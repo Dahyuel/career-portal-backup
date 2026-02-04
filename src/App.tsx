@@ -2,6 +2,7 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import { ResetPasswordForm } from './components/ResetPasswordForm';
 import { ErrorBoundary } from './components/ErrorBoundary';
 
@@ -13,6 +14,9 @@ import { AuthRegistration } from './components/AuthRegistration';
 import { VolunteerAuthRegistration } from './components/VolunteerAuthRegistration';
 import { RoleChanger } from './components/RoleChanger';
 import { UnauthorizedPage } from './components/UnauthorizedPage';
+import { LandingPage } from './components/LandingPage';
+import { SmartAssistant } from './components/shared/SmartAssistant';
+import { Footer } from './components/shared/Footer';
 
 // Lazy load dashboards
 const AttendeeDashboard = React.lazy(() => import('./pages/user/AttendeeDashboard'));
@@ -132,17 +136,17 @@ const ProtectedRoute: React.FC<{
 };
 
 // OPTIMIZED PublicRoute with better state management
-const PublicRoute: React.FC<{ 
+const PublicRoute: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
-  const { 
-    isAuthenticated, 
-    profile, 
-    loading, 
-    sessionLoaded, 
+  const {
+    isAuthenticated,
+    profile,
+    loading,
+    sessionLoaded,
     getRoleBasedRedirect
   } = useAuth();
-  
+
   const [routeState, setRouteState] = useState<'checking' | 'redirecting' | 'ready'>('checking');
 
   useEffect(() => {
@@ -200,7 +204,7 @@ const LazyLoadingFallback: React.FC = () => (
 );
 
 // Lazy Route Helper
-const LazyRoute: React.FC<{ 
+const LazyRoute: React.FC<{
   component: React.LazyExoticComponent<React.ComponentType<any>>;
   requiredRole?: string | string[];
   requireCompleteProfile?: boolean;
@@ -215,7 +219,7 @@ const LazyRoute: React.FC<{
 // Add Auth State Debugger (optional - remove in production)
 const AuthStateDebugger: React.FC = () => {
   const { isAuthenticated, profile, loading, sessionLoaded } = useAuth();
-  
+
   useEffect(() => {
     console.log('🔐 Auth State:', {
       isAuthenticated,
@@ -225,7 +229,7 @@ const AuthStateDebugger: React.FC = () => {
       sessionLoaded
     });
   }, [isAuthenticated, profile, loading, sessionLoaded]);
-  
+
   return null;
 };
 
@@ -235,6 +239,9 @@ const AppRouter: React.FC = () => {
     <>
       <AuthStateDebugger />
       <Routes>
+        {/* Landing Page */}
+        <Route path="/" element={<LandingPage />} />
+
         {/* Public Routes */}
         <Route path="/login" element={<PublicRoute><LoginForm /></PublicRoute>} />
         <Route path="/volunteer-auth-register" element={<PublicRoute><VolunteerAuthRegistrationWrapper /></PublicRoute>} />
@@ -244,14 +251,14 @@ const AppRouter: React.FC = () => {
 
         {/* Unauthorized Page */}
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
-        
+
         {/* Registration Forms */}
         <Route path="/attendee-register" element={
           <ProtectedRoute requireCompleteProfile={false}>
             <RegistrationForm />
           </ProtectedRoute>
         } />
-        
+
         <Route path="/V0lunt33ringR3g" element={
           <ProtectedRoute requireCompleteProfile={false} allowIncompleteVolunteer={true}>
             <Suspense fallback={<LoadingScreen message="Loading registration form..." />}>
@@ -261,11 +268,11 @@ const AppRouter: React.FC = () => {
         } />
 
         {/* Role Changer - Only accessible by marketing role */}
-<Route path="/rolechangingform" element={
-  <ProtectedRoute requiredRole={["marketing", "team_leader"]} requireCompleteProfile={true}>
-    <RoleChanger />
-  </ProtectedRoute>
-} />
+        <Route path="/rolechangingform" element={
+          <ProtectedRoute requiredRole={["marketing", "team_leader"]} requireCompleteProfile={true}>
+            <RoleChanger />
+          </ProtectedRoute>
+        } />
 
         {/* Dashboards */}
         <Route path="/attendee" element={<LazyRoute component={AttendeeDashboard} requiredRole="attendee" />} />
@@ -276,11 +283,10 @@ const AppRouter: React.FC = () => {
         <Route path="/teamleader" element={<LazyRoute component={TeamLeaderDashboard} requiredRole="team_leader" />} />
         <Route path="/secure-9821panel" element={<LazyRoute component={AdminPanel} requiredRole="admin" />} />
         <Route path="/super-ctrl-92k1x" element={<LazyRoute component={SuperAdminPanel} requiredRole="sadmin" />} />
-        
+
         {/* Redirects */}
         <Route path="/register" element={<Navigate to="/auth-register" replace />} />
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
@@ -290,11 +296,15 @@ const AppRouter: React.FC = () => {
 function App() {
   return (
     <ErrorBoundary>
-      <Router>
-        <AuthProvider>
-          <AppRouter />
-        </AuthProvider>
-      </Router>
+      <ThemeProvider>
+        <Router>
+          <AuthProvider>
+            <AppRouter />
+            <SmartAssistant />
+            <Footer />
+          </AuthProvider>
+        </Router>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }

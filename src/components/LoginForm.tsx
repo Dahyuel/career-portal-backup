@@ -5,20 +5,21 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { LoginData, ValidationError } from '../types';
 import { validateEmail, validatePassword } from '../utils/validation';
+import { Navbar } from './shared/Navbar';
 
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
-  const { 
-    signIn, 
+  const {
+    signIn,
     signOut,
-    isAuthenticated, 
-    getRoleBasedRedirect, 
-    loading: authLoading, 
-    profile, 
+    isAuthenticated,
+    getRoleBasedRedirect,
+    loading: authLoading,
+    profile,
     user,
     isUserAuthorized
   } = useAuth();
-  
+
   const [formData, setFormData] = useState<LoginData>({
     email: '',
     password: ''
@@ -55,7 +56,7 @@ export const LoginForm: React.FC = () => {
       if (isUserAuthorized === true) {
         console.log('✅ User is authorized, proceeding to redirect');
         setCheckedAuthorization(true);
-        
+
         const redirectPath = getRoleBasedRedirect(profile.role, profile.profile_complete);
         console.log('🔄 Authorized user redirecting to:', redirectPath);
         navigate(redirectPath, { replace: true });
@@ -96,10 +97,10 @@ export const LoginForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Prevent double submission
     if (loading) return;
-    
+
     const validationErrors = validateForm();
     if (validationErrors.length > 0) {
       setErrors(validationErrors);
@@ -120,9 +121,9 @@ export const LoginForm: React.FC = () => {
           setUnauthorizedUser(true);
           setCheckedAuthorization(true);
         } else {
-          setErrors([{ 
-            field: 'general', 
-            message: result.error?.message || 'Invalid email or password' 
+          setErrors([{
+            field: 'general',
+            message: result.error?.message || 'Invalid email or password'
           }]);
         }
         setLoading(false);
@@ -130,12 +131,12 @@ export const LoginForm: React.FC = () => {
       }
 
       // The useEffect will handle the authorization check and redirect
-      
+
     } catch (error: any) {
       console.error('Login exception:', error);
-      setErrors([{ 
-        field: 'general', 
-        message: error.message || 'Login failed. Please try again.' 
+      setErrors([{
+        field: 'general',
+        message: error.message || 'Login failed. Please try again.'
       }]);
       setLoading(false);
     }
@@ -210,9 +211,9 @@ export const LoginForm: React.FC = () => {
   // Show loading state during authorization check
   if (authLoading && isAuthenticated && !checkedAuthorization) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white flex items-center justify-center">
         <div className="text-center fade-in-scale">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto mb-4"></div>
           <p className="text-gray-600">Checking authorization...</p>
         </div>
       </div>
@@ -222,9 +223,9 @@ export const LoginForm: React.FC = () => {
   // Show loading state during initial auth load
   if (authLoading && !isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white flex items-center justify-center">
         <div className="text-center fade-in-scale">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading...</p>
         </div>
       </div>
@@ -234,9 +235,9 @@ export const LoginForm: React.FC = () => {
   // Don't show the login form if we're authenticated and checking authorization
   if (isAuthenticated && !checkedAuthorization) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white flex items-center justify-center">
         <div className="text-center fade-in-scale">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500 mx-auto mb-4"></div>
           <p className="text-gray-600">Verifying your access...</p>
         </div>
       </div>
@@ -244,29 +245,31 @@ export const LoginForm: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen relative">
-      <div 
+    <div className="min-h-screen relative bg-white dark:bg-gray-950 transition-colors duration-300">
+      {/* Navbar */}
+      <Navbar />
+      <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
         style={{
           backgroundImage: 'url("/images/careercenter.png")',
         }}
       >
-        <div className="absolute inset-0 bg-black bg-opacity-20"></div>
+        <div className="absolute inset-0 bg-black bg-opacity-20 dark:bg-opacity-60"></div>
       </div>
 
-      <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-        <div className="bg-white rounded-2xl shadow-2xl border border-orange-100 w-full max-w-md overflow-hidden fade-in-up-blur modal-content-blur">
+      <div className="relative z-10 flex items-center justify-center min-h-screen p-4 pt-20 md:pt-24">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-red-100 dark:border-gray-700 w-full max-w-md overflow-hidden fade-in-up-blur modal-content-blur">
           {/* Header */}
-          <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-4 text-center fade-in-blur">
+          <div className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-4 text-center fade-in-blur">
             <div className="mx-auto w-28 h-28 bg-white rounded-full flex items-center justify-center mb-2 shadow-lg fade-in-scale">
-              <img 
+              <img
                 src="/images/logo.png"
-                alt="ASU Career Week Logo" 
+                alt="ASU Career Week Logo"
                 className="w-24 h-24 rounded-full object-cover"
               />
             </div>
             <h1 className="text-2xl font-bold text-white mb-2">Welcome Back</h1>
-            <p className="text-orange-100">Sign in to ASU Career Week</p>
+            <p className="text-red-100">Sign in to ASU Employment Fair</p>
           </div>
 
           {/* Form */}
@@ -281,16 +284,15 @@ export const LoginForm: React.FC = () => {
             <div className="space-y-6">
               {/* Email */}
               <div className="fade-in-blur">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Email Address
                 </label>
                 <input
                   type="email"
                   value={formData.email}
                   onChange={(e) => updateField('email', e.target.value)}
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all duration-300 ${
-                    getFieldError('email') ? 'border-red-300' : 'border-gray-300'
-                  }`}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 ${getFieldError('email') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                    }`}
                   placeholder="Enter your email address"
                   disabled={loading}
                   autoComplete="email"
@@ -302,7 +304,7 @@ export const LoginForm: React.FC = () => {
 
               {/* Password */}
               <div className="fade-in-blur">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Password
                 </label>
                 <div className="relative">
@@ -310,9 +312,8 @@ export const LoginForm: React.FC = () => {
                     type={showPassword ? 'text' : 'password'}
                     value={formData.password}
                     onChange={(e) => updateField('password', e.target.value)}
-                    className={`w-full px-4 py-3 pr-12 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all duration-300 ${
-                      getFieldError('password') ? 'border-red-300' : 'border-gray-300'
-                    }`}
+                    className={`w-full px-4 py-3 pr-12 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                      }`}
                     placeholder="Enter your password"
                     disabled={loading}
                     autoComplete="current-password"
@@ -320,7 +321,7 @@ export const LoginForm: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-orange-600 transition-colors"
+                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-red-600 transition-colors"
                     disabled={loading}
                   >
                     {showPassword ? (
@@ -340,7 +341,7 @@ export const LoginForm: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => navigate('/forgot-password')}
-                  className="text-sm text-orange-600 hover:text-orange-700 hover:underline font-medium transition-colors"
+                  className="text-sm text-red-600 hover:text-red-700 hover:underline font-medium transition-colors"
                   disabled={loading}
                 >
                   Forgot Password?
@@ -351,7 +352,7 @@ export const LoginForm: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-3 px-4 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed fade-in-blur smooth-hover"
+                className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-4 rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed fade-in-blur smooth-hover"
               >
                 {loading ? (
                   <div className="flex items-center justify-center space-x-2">
@@ -364,13 +365,13 @@ export const LoginForm: React.FC = () => {
               </button>
 
               {/* Register Link */}
-              <div className="text-center pt-4 border-t border-gray-200 fade-in-blur">
-                <p className="text-gray-600">
+              <div className="text-center pt-4 border-t border-gray-200 dark:border-gray-600 fade-in-blur">
+                <p className="text-gray-600 dark:text-gray-400">
                   Don't have an account?{' '}
                   <button
                     type="button"
                     onClick={() => navigate('/auth-register')}
-                    className="text-orange-600 hover:text-orange-700 font-medium hover:underline transition-colors"
+                    className="text-red-600 hover:text-red-700 font-medium hover:underline transition-colors"
                     disabled={loading}
                   >
                     Create Attendee Account
