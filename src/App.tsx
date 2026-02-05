@@ -10,7 +10,6 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { LoginForm } from './components/LoginForm';
 import { RegistrationForm } from './components/RegistrationForm';
 import { ForgotPasswordForm } from './components/ForgotPasswordForm';
-import { AuthRegistration } from './components/AuthRegistration';
 import { VolunteerAuthRegistration } from './components/VolunteerAuthRegistration';
 import { RoleChanger } from './components/RoleChanger';
 import { UnauthorizedPage } from './components/UnauthorizedPage';
@@ -28,6 +27,8 @@ const InfoDeskDashboard = React.lazy(() => import('./pages/team/InfoDeskDashboar
 const TeamLeaderDashboard = React.lazy(() => import('./pages/team/TeamLeaderDashboard').then(module => ({ default: module.TeamLeaderDashboard })));
 const AdminPanel = React.lazy(() => import('./pages/admin/AdminPanel').then(module => ({ default: module.AdminPanel })));
 const SuperAdminPanel = React.lazy(() => import('./pages/admin/SuperAdminPanel').then(module => ({ default: module.SuperAdminPanel })));
+const EmployerRegistration = React.lazy(() => import('./pages/Employer/EmployerRegistration').then(module => ({ default: module.EmployerRegistration })));
+const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
 
 const LoadingScreen: React.FC<{ message?: string }> = ({ message = "Loading..." }) => (
   <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
@@ -173,7 +174,7 @@ const PublicRoute: React.FC<{
 
   // Redirect authenticated users to their dashboard
   if (routeState === 'redirecting') {
-    const redirectPath = getRoleBasedRedirect(profile?.role, profile?.profile_complete);
+    const redirectPath = getRoleBasedRedirect(profile?.role, profile?.profile_complete, profile?.authorized);
     console.log(`🔄 PublicRoute redirecting to: ${redirectPath}`);
     return <Navigate to={redirectPath} replace />;
   }
@@ -188,10 +189,7 @@ const VolunteerAuthRegistrationWrapper: React.FC = () => {
   return <VolunteerAuthRegistration onSuccess={() => navigate('/V0lunt33ringR3g')} />;
 };
 
-const AuthRegistrationWrapper: React.FC = () => {
-  const navigate = useNavigate();
-  return <AuthRegistration onSuccess={() => navigate('/attendee-register')} />;
-};
+
 
 // LazyLoadingFallback
 const LazyLoadingFallback: React.FC = () => (
@@ -245,9 +243,16 @@ const AppRouter: React.FC = () => {
         {/* Public Routes */}
         <Route path="/login" element={<PublicRoute><LoginForm /></PublicRoute>} />
         <Route path="/volunteer-auth-register" element={<PublicRoute><VolunteerAuthRegistrationWrapper /></PublicRoute>} />
-        <Route path="/auth-register" element={<PublicRoute><AuthRegistrationWrapper /></PublicRoute>} />
+        <Route path="/auth-register" element={<PublicRoute><RegistrationForm /></PublicRoute>} />
         <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordForm /></PublicRoute>} />
         <Route path="/reset-password" element={<PublicRoute><ResetPasswordForm /></PublicRoute>} />
+        <Route path="/employerreg" element={
+          <PublicRoute>
+            <Suspense fallback={<LoadingScreen message="Loading registration form..." />}>
+              <EmployerRegistration />
+            </Suspense>
+          </PublicRoute>
+        } />
 
         {/* Unauthorized Page */}
         <Route path="/unauthorized" element={<UnauthorizedPage />} />
@@ -260,11 +265,11 @@ const AppRouter: React.FC = () => {
         } />
 
         <Route path="/V0lunt33ringR3g" element={
-          <ProtectedRoute requireCompleteProfile={false} allowIncompleteVolunteer={true}>
+          <PublicRoute>
             <Suspense fallback={<LoadingScreen message="Loading registration form..." />}>
               <VolunteerRegistration />
             </Suspense>
-          </ProtectedRoute>
+          </PublicRoute>
         } />
 
         {/* Role Changer - Only accessible by marketing role */}
@@ -283,6 +288,7 @@ const AppRouter: React.FC = () => {
         <Route path="/teamleader" element={<LazyRoute component={TeamLeaderDashboard} requiredRole="team_leader" />} />
         <Route path="/secure-9821panel" element={<LazyRoute component={AdminPanel} requiredRole="admin" />} />
         <Route path="/super-ctrl-92k1x" element={<LazyRoute component={SuperAdminPanel} requiredRole="sadmin" />} />
+        <Route path="/employer" element={<LazyRoute component={EmployerDashboard} requiredRole="employer" />} />
 
         {/* Redirects */}
         <Route path="/register" element={<Navigate to="/auth-register" replace />} />

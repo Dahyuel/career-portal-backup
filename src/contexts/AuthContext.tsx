@@ -109,11 +109,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Profile completeness check
   const isProfileComplete = useCallback((profile: any, role?: string): boolean => {
     if (!profile) return false;
-    
+
     // Trust the database field
     if (profile.profile_complete === true) return true;
     if (profile.profile_complete === false) return false;
-    
+
     // Fallback logic
     const actualRole = role || profile.role;
     if (actualRole === 'attendee') {
@@ -122,7 +122,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (actualRole && actualRole !== 'attendee') {
       return !!(profile.personal_id && profile.phone);
     }
-    
+
     return false;
   }, []);
 
@@ -150,7 +150,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             return null;
           }
-          
+
           if (attempt < maxRetries - 1) {
             await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, attempt)));
             continue;
@@ -174,7 +174,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await new Promise(resolve => setTimeout(resolve, baseDelay * Math.pow(2, attempt)));
       }
     }
-    
+
     return null;
   }, [sessionHelpers]);
 
@@ -223,82 +223,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [fetchProfile, sessionHelpers]);
 
-// In AuthContext.tsx - FIXED initialization
-useEffect(() => {
-  let mounted = true;
-  let initializationTimeout: NodeJS.Timeout;
+  // In AuthContext.tsx - FIXED initialization
+  useEffect(() => {
+    let mounted = true;
+    let initializationTimeout: NodeJS.Timeout;
 
-  const initialize = async () => {
-    // Set timeout to prevent infinite loading
-    initializationTimeout = setTimeout(() => {
-      if (mounted && loading) {
-        console.warn('Auth initialization timeout - forcing completion');
-        setLoading(false);
-        setSessionLoaded(true);
-      }
-    }, 3000);
-
-    try {
-      console.log('🚀 Starting optimized auth initialization...');
-      
-      // Get session first
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!mounted) return;
-
-      if (session?.user) {
-        console.log('✅ Session found for user:', session.user.id);
-        setUser(session.user);
-        
-        // Try to get profile quickly
-        const cachedProfile = sessionHelpers.getProfile();
-        if (cachedProfile && cachedProfile.id === session.user.id) {
-          console.log('✅ Using cached profile');
-          setProfile(cachedProfile);
-          setSessionLoaded(true);
+    const initialize = async () => {
+      // Set timeout to prevent infinite loading
+      initializationTimeout = setTimeout(() => {
+        if (mounted && loading) {
+          console.warn('Auth initialization timeout - forcing completion');
           setLoading(false);
-          clearTimeout(initializationTimeout);
-          return;
+          setSessionLoaded(true);
         }
+      }, 3000);
 
-        // Fetch fresh profile with timeout
-        const profileFetch = fetchProfile(session.user.id);
-        const profileTimeout = new Promise((resolve) => 
-          setTimeout(() => resolve(null), 2000)
-        );
+      try {
+        console.log('🚀 Starting optimized auth initialization...');
 
-        const profileResult = await Promise.race([profileFetch, profileTimeout]);
-        
+        // Get session first
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        if (session?.user) {
+          console.log('✅ Session found for user:', session.user.id);
+          setUser(session.user);
+
+          // Try to get profile quickly
+          const cachedProfile = sessionHelpers.getProfile();
+          if (cachedProfile && cachedProfile.id === session.user.id) {
+            console.log('✅ Using cached profile');
+            setProfile(cachedProfile);
+            setSessionLoaded(true);
+            setLoading(false);
+            clearTimeout(initializationTimeout);
+            return;
+          }
+
+          // Fetch fresh profile with timeout
+          const profileFetch = fetchProfile(session.user.id);
+          const profileTimeout = new Promise((resolve) =>
+            setTimeout(() => resolve(null), 2000)
+          );
+
+          const profileResult = await Promise.race([profileFetch, profileTimeout]);
+
+          if (mounted) {
+            setSessionLoaded(true);
+            setLoading(false);
+            clearTimeout(initializationTimeout);
+          }
+        } else {
+          console.log('ℹ️ No session found');
+          if (mounted) {
+            setSessionLoaded(true);
+            setLoading(false);
+            clearTimeout(initializationTimeout);
+          }
+        }
+      } catch (error) {
+        console.error('Initialization error:', error);
         if (mounted) {
           setSessionLoaded(true);
           setLoading(false);
           clearTimeout(initializationTimeout);
         }
-      } else {
-        console.log('ℹ️ No session found');
-        if (mounted) {
-          setSessionLoaded(true);
-          setLoading(false);
-          clearTimeout(initializationTimeout);
-        }
       }
-    } catch (error) {
-      console.error('Initialization error:', error);
-      if (mounted) {
-        setSessionLoaded(true);
-        setLoading(false);
-        clearTimeout(initializationTimeout);
-      }
-    }
-  };
+    };
 
-  initialize();
+    initialize();
 
-  return () => {
-    mounted = false;
-    clearTimeout(initializationTimeout);
-  };
-}, []); // Empty deps - only run once
+    return () => {
+      mounted = false;
+      clearTimeout(initializationTimeout);
+    };
+  }, []); // Empty deps - only run once
 
   // Check if user is authorized (only for attendees)
   const isUserAuthorized = useCallback(() => {
@@ -326,8 +326,8 @@ useEffect(() => {
       return '/unauthorized';
     }
 
-    // Then check profile completion
-    if (!isComplete) {
+    // Then check profile completion (exempt employers and admins from this forced redirect if needed)
+    if (!isComplete && r !== 'employer') {
       return r === 'attendee' ? '/attendee-register' : '/V0lunt33ringR3g';
     }
 
@@ -339,6 +339,7 @@ useEffect(() => {
       building: '/buildteam',
       info_desk: '/infodesk',
       attendee: '/attendee',
+      employer: '/employer',
     };
 
     return roleMap[r] || '/volunteer';
@@ -349,27 +350,29 @@ useEffect(() => {
     try {
       setAuthActionLoading(true);
       setAuthActionMessage('Creating your account...');
-      
+
       const result = await signUpUser(email, password, profileData);
-      
+
       if (result.success && result.data?.user) {
         setUser(result.data.user);
-        
+
         // Wait a bit for trigger to create profile
         await new Promise(resolve => setTimeout(resolve, 1000));
         const userProfile = await fetchProfile(result.data.user.id);
-        
+
         setAuthActionMessage('Account created successfully!');
-        
-        const redirectPath = userProfile?.role === 'attendee' 
-          ? '/attendee-register' 
-          : '/V0lunt33ringR3g';
-        
+
+        const redirectPath = getRoleBasedRedirect(
+          userProfile?.role,
+          false, // Profile is new so generally incomplete
+          userProfile?.authorized
+        );
+
         return { success: true, data: result.data, redirectPath };
       }
-      
+
       return { success: false, error: result.error };
-      
+
     } catch (error: any) {
       return { success: false, error: { message: error.message || 'Registration failed' } };
     } finally {
@@ -382,16 +385,16 @@ useEffect(() => {
     try {
       setAuthActionLoading(true);
       setAuthActionMessage('Creating volunteer account...');
-      
+
       const result = await signUpVolunteer(email, password, profileData);
-      
+
       if (result.error) {
         return { success: false, error: result.error };
       }
 
       if (result.data?.user?.id) {
         setUser(result.data.user);
-        
+
         sessionHelpers.setRegistrationState({
           hasAuth: true,
           role: null,
@@ -404,10 +407,10 @@ useEffect(() => {
           sessionHelpers.saveProfile(result.data.profile);
         }
       }
-      
+
       setAuthActionMessage('Volunteer account created!');
       return { success: true, data: result.data, redirectPath: "/V0lunt33ringR3g" };
-      
+
     } catch (error: any) {
       return { success: false, error: { message: error.message || 'Registration failed' } };
     } finally {
@@ -449,7 +452,7 @@ useEffect(() => {
         return { success: true, redirectPath };
       }
 
-      return { success: true, redirectPath: '/V0lunt33ringR3g' };
+      return { success: true, redirectPath: '/' };
 
     } catch (error: any) {
       return { success: false, error: { message: error.message || 'Sign in failed' } };
