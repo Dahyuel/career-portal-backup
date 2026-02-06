@@ -1,294 +1,162 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, Trophy, Activity, Clock, Star } from 'lucide-react';
-import DashboardLayout from '../../components/shared/DashboardLayout';
+import React from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { getUserRankingAndScore, getRecentActivities } from '../../lib/supabase';
-
-interface VolunteerStats {
-  score: number;
-  rank: number;
-  total_users: number;
-}
-
-interface RecentActivity {
-  id: string;
-  points: number;
-  activity_type: string;
-  activity_description: string;
-  awarded_at: string;
-}
-
-// Role display name mapping
-const getRoleDisplayName = (role: string): string => {
-  const roleMap: { [key: string]: string } = {
-    'admin': 'Admin',
-    'team_leader': 'Team Leader',
-    'attendee': 'Attendee',
-    'volunteer': 'Volunteer',
-    'registration': 'Registration',
-    'building': 'Building',
-    'info_desk': 'Info Desk',
-    'ushers': 'Ushers',
-    'marketing': 'Marketing',
-    'media': 'Media',
-    'ER': 'Employer Relation',
-    'BD': 'Business Development',
-    'catering': 'Catering',
-    'feedback': 'Feedback',
-    'stage': 'Stage'
-  };
-
-  return roleMap[role] || role.split('_').map(word => 
-    word.charAt(0).toUpperCase() + word.slice(1)
-  ).join(' ');
-};
-
-const getDashboardTitle = (role: string): string => {
-  const roleName = getRoleDisplayName(role);
-  return `${roleName} Dashboard`;
-};
+import { mockActivities } from '../../mocks';
+import SharedNavigation from '../../components/shared/SharedNavigation';
 
 export const VolunteerDashboard: React.FC = () => {
-  const { profile } = useAuth();
-  const [stats, setStats] = useState<VolunteerStats | null>(null);
-  const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
 
-  // Get dashboard title based on user role
-  const dashboardTitle = profile?.role ? getDashboardTitle(profile.role) : 'Dashboard';
-  const roleDisplayName = profile?.role ? getRoleDisplayName(profile.role) : 'User';
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, [profile?.id]);
-
-  const fetchDashboardData = async () => {
-    if (!profile?.id) return;
-    
-    try {
-      setLoading(true);
-      
-      // Fetch user ranking and score using the existing function
-      const { data: statsData, error: statsError } = await getUserRankingAndScore(profile.id);
-      
-      if (statsError) {
-        console.error('Error fetching volunteer stats:', statsError);
-        // Set default stats on error
-        setStats({
-          score: profile.score || 0,
-          rank: 0,
-          total_users: 0
-        });
-      } else if (statsData) {
-        setStats(statsData);
-      }
-
-      // Fetch recent activities
-      const { data: activitiesData, error: activitiesError } = await getRecentActivities(profile.id, 5);
-      
-      if (activitiesError) {
-        console.error('Error fetching recent activities:', activitiesError);
-        setRecentActivities([]);
-      } else {
-        setRecentActivities(activitiesData || []);
-      }
-
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-      // Set default stats on error
-      setStats({
-        score: profile.score || 0,
-        rank: 0,
-        total_users: 0
-      });
-      setRecentActivities([]);
-    } finally {
-      setLoading(false);
-    }
+  // Get user stats from mock data
+  const userStats = {
+    score: user?.score || 1250,
+    rank: 12
   };
 
-  const formatActivityType = (activityType: string) => {
-    return activityType
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+  // Get recent activities
+  const recentActivities = mockActivities.slice(0, 3);
+
+  // Activity type to icon mapping
+  const getActivityIcon = (type: string) => {
+    const icons: Record<string, string> = {
+      'check_in': 'check_circle',
+      'qr_scan': 'qr_code_scanner',
+      'session_booking': 'event_available',
+      'session': 'event_available',
+      'volunteer': 'volunteer_activism',
+      'profile_complete': 'account_circle',
+      'booth_visit': 'store'
+    };
+    return icons[type] || 'check_circle';
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-    
-    if (diffInHours < 1) {
-      return 'Just now';
-    } else if (diffInHours < 24) {
-      return `${diffInHours}h ago`;
-    } else {
-      const diffInDays = Math.floor(diffInHours / 24);
-      return `${diffInDays}d ago`;
-    }
+  // Activity type to color mapping
+  const getActivityColor = (type: string) => {
+    const colors: Record<string, string> = {
+      'check_in': 'bg-orange-100 dark:bg-orange-500/10 text-primary',
+      'qr_scan': 'bg-blue-50 dark:bg-blue-500/10 text-blue-500',
+      'session_booking': 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300',
+      'session': 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300',
+      'volunteer': 'bg-green-100 dark:bg-green-500/10 text-green-500',
+      'profile_complete': 'bg-green-100 dark:bg-green-500/10 text-green-500',
+      'booth_visit': 'bg-purple-100 dark:bg-purple-500/10 text-purple-500'
+    };
+    return colors[type] || 'bg-gray-100 text-gray-500';
   };
-
-  if (loading) {
-    return (
-      <DashboardLayout title={dashboardTitle} subtitle={`Welcome to your ${roleDisplayName.toLowerCase()} portal`}>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-        </div>
-      </DashboardLayout>
-    );
-  }
 
   return (
-    <DashboardLayout 
-      title={dashboardTitle} 
-      subtitle={`Welcome back, ${profile?.first_name}!`}
+    <SharedNavigation
+      navItems={[]}
+      activeItem=""
+      onItemChange={() => { }}
     >
-      <div className="fade-in-up-blur">
-        {/* Stats Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto grid-stagger-blur">
-          {/* Points Card */}
-          <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-6 card-hover-enhanced dashboard-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Points Earned</p>
-                <p className="text-3xl font-bold text-green-600">{stats?.score || 0}</p>
-              </div>
-              <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                <Heart className="h-6 w-6 text-green-600" />
-              </div>
-            </div>
-          </div>
-
-          {/* Rank Card - Added similar to AttendeeDashboard */}
-          <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-6 card-hover-enhanced dashboard-card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Your Rank</p>
-                <p className="text-3xl font-bold text-blue-600">
-                  #{stats?.rank || 0}
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-12">
+        <div className="space-y-6 lg:space-y-0 lg:grid lg:grid-cols-12 lg:gap-8">
+          {/* Left Column */}
+          <div className="lg:col-span-8 space-y-6 lg:space-y-8">
+            {/* Welcome Banner */}
+            <div className="relative rounded-2xl overflow-hidden shadow-xl shadow-primary/10 p-8 md:p-12 min-h-[300px] flex flex-col justify-center text-white" style={{
+              background: 'linear-gradient(135deg, #FF7E47 0%, #FF7E47 60%, #ffffff 130%)'
+            }}>
+              <div className="relative z-10">
+                <p className="uppercase tracking-widest text-orange-100 font-semibold text-xs mb-2">Volunteer Dashboard</p>
+                <h1 className="text-4xl md:text-5xl font-bold mb-4">
+                  Welcome, {user?.first_name || 'Volunteer'}
+                </h1>
+                <p className="text-lg text-orange-50 opacity-90 max-w-md mb-8">
+                  Your support makes this event possible. Thank you for your dedication!
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  of {stats?.total_users || 0} volunteers
-                </p>
+                <button className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit">
+                  <span className="material-symbols-outlined text-xl">account_circle</span>
+                  Show Profile
+                </button>
               </div>
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Star className="h-6 w-6 text-blue-600" />
-              </div>
+              <div className="absolute bottom-0 right-0 w-64 h-64 bg-white/20 rounded-full -mb-32 -mr-32 blur-3xl"></div>
             </div>
-          </div>
 
-          {/* Recent Activities Card */}
-          <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-6 card-hover-enhanced dashboard-card">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-sm font-medium text-gray-600">Recent Activity</p>
-                <p className="text-2xl font-bold text-purple-600">
-                  {recentActivities.length > 0 ? `+${recentActivities[0]?.points || 0}` : '0'}
-                </p>
-                {recentActivities.length > 0 && (
-                  <p className="text-xs text-gray-500">Latest points</p>
-                )}
+            {/* Stats Cards - Mobile Only */}
+            <div className="grid grid-cols-2 gap-4 lg:hidden">
+              {/* Score Card */}
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center mb-3">
+                  <span className="material-symbols-outlined text-amber-500 text-lg">emoji_events</span>
+                </div>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Current Score</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">{userStats.score}</p>
               </div>
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Activity className="h-6 w-6 text-purple-600" />
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Recent Activities List */}
-        <div className="max-w-6xl mx-auto mt-8">
-          <div className="bg-white rounded-xl shadow-sm border border-orange-100 p-6 fade-in-blur card-hover dashboard-card">
-            <div className="flex items-center gap-2 mb-4">
-              <Clock className="h-5 w-5 text-gray-600" />
-              <h3 className="text-lg font-semibold text-gray-900">Recent Activities</h3>
+              {/* Rank Card */}
+              <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 relative">
+                <div className="absolute top-3 right-3 bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[9px] font-bold">
+                  Top 5%
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center mb-3">
+                  <span className="material-symbols-outlined text-blue-600 text-lg">bar_chart</span>
+                </div>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Current Rank</p>
+                <p className="text-2xl font-bold text-slate-800 mt-1">#{userStats.rank}</p>
+              </div>
             </div>
-            
-            {recentActivities.length > 0 ? (
-              <div className="space-y-3 stagger-children">
-                {recentActivities.map((activity) => (
-                  <div 
-                    key={activity.id} 
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg smooth-hover"
-                  >
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">
-                        {formatActivityType(activity.activity_type)}
-                      </p>
-                      {activity.activity_description && (
-                        <p className="text-sm text-gray-600">
-                          {activity.activity_description}
+
+            {/* Recent Activity */}
+            <div>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-slate-800">Recent Activity</h2>
+                <a className="text-primary font-semibold hover:underline flex items-center gap-1" href="#">
+                  View All <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                </a>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+                <div className="space-y-8 relative">
+                  {/* Activity Timeline Line */}
+                  <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100"></div>
+
+                  {recentActivities.map((activity) => (
+                    <div key={activity.id} className="relative flex gap-6 items-start">
+                      <div className={`relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border-4 border-white ${getActivityColor(activity.type)}`}>
+                        <span className="material-symbols-outlined text-xl">{getActivityIcon(activity.type)}</span>
+                      </div>
+                      <div className="flex-grow pt-1">
+                        <h4 className="font-semibold text-slate-800">{activity.description}</h4>
+                        <p className="text-sm text-slate-500 mt-0.5 flex items-center gap-2">
+                          <span className="material-symbols-outlined text-xs">schedule</span>
+                          {new Date(activity.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </p>
-                      )}
-                      <p className="text-xs text-gray-500">
-                        {formatDate(activity.awarded_at)}
-                      </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                        activity.points > 0 
-                          ? 'bg-green-100 text-green-800' 
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {activity.points > 0 ? '+' : ''}{activity.points} pts
-                      </span>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            ) : (
-              <div className="text-center py-8 fade-in-scale">
-                <Activity className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">No recent activities</p>
-                <p className="text-sm text-gray-400">
-                  Start participating to earn points and see your activities here!
-                </p>
-              </div>
-            )}
+            </div>
           </div>
-        </div>
 
-        {/* Role-Specific Information */}
-        <div className="max-w-6xl mx-auto mt-8 text-center">
-          <div className="bg-gradient-to-r from-orange-50 to-orange-100 rounded-xl p-6 border border-orange-200 fade-in-blur card-hover">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">{roleDisplayName} Information</h3>
-            <p className="text-gray-700 leading-relaxed">
-              {profile?.role === 'marketing' && 
-                "Thank you for promoting our event! Your marketing efforts help us reach more attendees and create buzz around the event."}
-              {profile?.role === 'media' && 
-                "Thank you for capturing our event moments! Your media coverage helps us document and share the experience with everyone."}
-              {profile?.role === 'registration' && 
-                "Thank you for managing registrations! You're the first point of contact for our attendees and help create a smooth check-in experience."}
-              {profile?.role === 'building' && 
-                "Thank you for maintaining our venue! Your work ensures everything runs smoothly and safely throughout the event."}
-              {profile?.role === 'info_desk' && 
-                "Thank you for assisting attendees! You provide valuable information and help create a positive experience for everyone."}
-              {profile?.role === 'ushers' && 
-                "Thank you for guiding our attendees! You help maintain order and ensure everyone finds their way around the venue."}
-{profile?.role === 'ER' && 
-  "Thank you for connecting employers with talent! Your efforts help build strong partnerships and meaningful career opportunities throughout the event."}
-              {profile?.role === 'BD' && 
-                "Thank you for your business development efforts! You help build valuable partnerships and opportunities."}
-              {profile?.role === 'catering' && 
-                "Thank you for keeping everyone nourished! Your catering services help maintain energy and satisfaction throughout the event."}
-              {profile?.role === 'feedback' && 
-                "Thank you for gathering valuable feedback! Your work helps us improve future events and understand attendee needs."}
-              {profile?.role === 'stage' && 
-                "Thank you for managing the stage! You ensure smooth transitions and technical excellence for all presentations."}
-              {!['marketing', 'media', 'registration', 'building', 'info_desk', 'ushers', 'ER', 'BD', 'catering', 'feedback', 'stage'].includes(profile?.role || '') && 
-                "Thank you for your dedication and hard work! Your contributions make this event possible."}
-              <br />
-              If anything comes up, refer to your team leader.
-            </p>
-            {profile?.volunteer_id && (
-              <div className="mt-4 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-orange-200 text-orange-800">
-                ID: {profile.volunteer_id}
+          {/* Right Column - Stats (Desktop Only) */}
+          <div className="hidden lg:block lg:col-span-4 space-y-6">
+            {/* Score Card */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 relative group overflow-hidden">
+              <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center mb-4">
+                <span className="material-symbols-outlined text-amber-500">emoji_events</span>
               </div>
-            )}
+              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Current Score</p>
+              <p className="text-4xl font-bold text-slate-800 mt-1">{userStats.score}</p>
+            </div>
+
+            {/* Rank Card */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 relative group overflow-hidden">
+              <div className="absolute top-4 right-4 bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-bold">
+                Top 5%
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center mb-4">
+                <span className="material-symbols-outlined text-blue-600">bar_chart</span>
+              </div>
+              <p className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Current Rank</p>
+              <p className="text-4xl font-bold text-slate-800 mt-1">#{userStats.rank}</p>
+            </div>
           </div>
         </div>
       </div>
-    </DashboardLayout>
+    </SharedNavigation>
   );
 };
+
+export default VolunteerDashboard;

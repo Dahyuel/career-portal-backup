@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Shield, 
-  Users, 
-  Database, 
-  Server, 
-  Lock, 
-  Key, 
+import {
+  Shield,
+  Users,
+  Database,
+  Server,
+  Lock,
   AlertTriangle,
   Settings,
   Monitor,
@@ -13,7 +12,7 @@ import {
   Cpu,
   Network
 } from 'lucide-react';
-import DashboardLayout from '../../components/shared/DashboardLayout';
+import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 
@@ -49,11 +48,15 @@ interface SecurityLog {
 
 export const SuperAdminPanel: React.FC = () => {
   const { profile } = useAuth();
+
+  const navItems: NavItem[] = [
+    { key: 'home', label: 'System Admin', icon: Shield }
+  ];
+  const [activeTab, setActiveTab] = useState('home');
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
-  const [securityLogs, setSecurityLogs] = useState<SecurityLog[]>([]);
+  const [securityLogs] = useState<SecurityLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'system' | 'admins' | 'security' | 'database' | 'config'>('system');
 
   useEffect(() => {
     fetchSuperAdminData();
@@ -117,7 +120,7 @@ export const SuperAdminPanel: React.FC = () => {
   const createAdminUser = async () => {
     const email = prompt('Enter admin email:');
     const role = prompt('Enter role (admin/team_leader):');
-    
+
     if (email && role && ['admin', 'team_leader'].includes(role)) {
       try {
         const { error } = await supabase
@@ -199,18 +202,20 @@ export const SuperAdminPanel: React.FC = () => {
 
   if (loading) {
     return (
-      <DashboardLayout title="Super Admin Panel" subtitle="Advanced system administration">
+      <SharedNavigation navItems={navItems} activeItem={activeTab} onItemChange={setActiveTab} title="Super Admin">
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
         </div>
-      </DashboardLayout>
+      </SharedNavigation>
     );
   }
 
   return (
-    <DashboardLayout 
-      title="Super Admin Panel" 
-      subtitle="Advanced system administration and security management"
+    <SharedNavigation
+      navItems={navItems}
+      activeItem={activeTab}
+      onItemChange={setActiveTab}
+      title="Super Admin"
     >
       <div className="space-y-8">
         {/* System Health Overview */}
@@ -313,11 +318,10 @@ export const SuperAdminPanel: React.FC = () => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex items-center py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === tab.id
-                      ? 'border-orange-500 text-orange-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={`flex items-center py-4 px-1 border-b-2 font-medium text-sm ${activeTab === tab.id
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
                 >
                   <tab.icon className="h-4 w-4 mr-2" />
                   {tab.label}
@@ -330,7 +334,7 @@ export const SuperAdminPanel: React.FC = () => {
             {activeTab === 'system' && (
               <div className="space-y-6">
                 <h3 className="text-lg font-semibold text-gray-900">Real-time System Monitoring</h3>
-                
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <h4 className="font-medium text-gray-900">Resource Usage</h4>
@@ -418,9 +422,8 @@ export const SuperAdminPanel: React.FC = () => {
                             </div>
                           </td>
                           <td className="py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              admin.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
-                            }`}>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${admin.role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'
+                              }`}>
                               {admin.role}
                             </span>
                           </td>
@@ -428,7 +431,7 @@ export const SuperAdminPanel: React.FC = () => {
                             {new Date(admin.created_at).toLocaleDateString()}
                           </td>
                           <td className="py-3 px-4 text-gray-600">
-                            {admin.last_login 
+                            {admin.last_login
                               ? new Date(admin.last_login).toLocaleDateString()
                               : 'Never'
                             }
@@ -483,7 +486,7 @@ export const SuperAdminPanel: React.FC = () => {
             {activeTab === 'database' && (
               <div className="space-y-6">
                 <h3 className="text-lg font-semibold text-gray-900">Database Administration</h3>
-                
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <h4 className="font-medium text-gray-900">Database Status</h4>
@@ -538,7 +541,7 @@ export const SuperAdminPanel: React.FC = () => {
             {activeTab === 'config' && (
               <div className="space-y-6">
                 <h3 className="text-lg font-semibold text-gray-900">System Configuration</h3>
-                
+
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <h4 className="font-medium text-gray-900">Security Configuration</h4>
@@ -631,6 +634,6 @@ export const SuperAdminPanel: React.FC = () => {
           </div>
         </div>
       </div>
-    </DashboardLayout>
+    </SharedNavigation>
   );
 };

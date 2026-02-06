@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import { KeyRound, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { resetPassword } from '../lib/supabase'; // Use the direct resetPassword function
-
-interface ForgotPasswordData {
-  email: string;
-}
+import { resetPassword } from '../lib/supabase';
 
 interface ValidationError {
   field: string;
   message: string;
 }
 
+interface ForgotPasswordData {
+  email: string;
+}
+
+
 export const ForgotPasswordForm: React.FC = () => {
   const navigate = useNavigate();
-  
+
   const [formData, setFormData] = useState<ForgotPasswordData>({
     email: ''
   });
@@ -24,16 +25,16 @@ export const ForgotPasswordForm: React.FC = () => {
 
   const validateEmail = (email: string): string | null => {
     const trimmed = email.trim();
-    
+
     if (!trimmed) {
       return 'Email is required';
     }
-    
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(trimmed)) {
       return 'Please enter a valid email address';
     }
-    
+
     return null;
   };
 
@@ -54,7 +55,7 @@ export const ForgotPasswordForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const validationErrors = validateForm();
     if (validationErrors.length > 0) {
       setErrors(validationErrors);
@@ -73,7 +74,7 @@ export const ForgotPasswordForm: React.FC = () => {
       }
 
       setSuccess(true);
-      
+
     } catch (error) {
       setErrors([{ field: 'general', message: 'Password reset failed. Please try again.' }]);
     } finally {
@@ -89,7 +90,7 @@ export const ForgotPasswordForm: React.FC = () => {
     return (
       <div className="min-h-screen relative">
         {/* Responsive Wallpaper */}
-        <div 
+        <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
           style={{
             backgroundImage: 'url("/images/careercenter.png")',
@@ -122,7 +123,7 @@ export const ForgotPasswordForm: React.FC = () => {
   return (
     <div className="min-h-screen relative">
       {/* Responsive Wallpaper */}
-      <div 
+      <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
         style={{
           backgroundImage: 'url("/images/careercenter.png")',
@@ -134,12 +135,12 @@ export const ForgotPasswordForm: React.FC = () => {
 
       {/* Forgot Password Form */}
       <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-        <div className="bg-white rounded-2xl shadow-2xl border border-orange-100 w-full max-w-md overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-red-100 dark:border-gray-700 w-full max-w-md overflow-hidden fade-in-up-blur modal-content-blur">
           {/* Header */}
-          <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-6 py-6 text-center">
+          <div className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-6 text-center">
             <KeyRound className="mx-auto h-12 w-12 text-white mb-3" />
             <h1 className="text-2xl font-bold text-white mb-2">Reset Password</h1>
-            <p className="text-orange-100">Enter your email to reset your password</p>
+            <p className="text-red-100">Enter your email to reset your password</p>
           </div>
 
           {/* Form */}
@@ -162,9 +163,8 @@ export const ForgotPasswordForm: React.FC = () => {
                   type="email"
                   value={formData.email}
                   onChange={(e) => updateField('email', e.target.value)}
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors ${
-                    getFieldError('email') ? 'border-red-300' : 'border-gray-300'
-                  }`}
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('email') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                    }`}
                   placeholder="Enter your registered email address"
                 />
                 {getFieldError('email') && (
@@ -176,7 +176,7 @@ export const ForgotPasswordForm: React.FC = () => {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-3 px-4 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-4 rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <div className="flex items-center justify-center space-x-2">
@@ -187,18 +187,16 @@ export const ForgotPasswordForm: React.FC = () => {
                   'Send Reset Link'
                 )}
               </button>
-
-              {/* Back to Login */}
-              <button
-                type="button"
-                onClick={() => navigate('/login')}
-                className="w-full flex items-center justify-center space-x-2 text-orange-600 hover:text-orange-700 font-medium py-2 transition-colors"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back to Login</span>
-              </button>
             </div>
           </form>
+          {/* Back Button */}
+          <button
+            onClick={() => navigate('/login')}
+            className="absolute top-4 left-4 z-20 p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors shadow-sm"
+            aria-label="Go back"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
         </div>
       </div>
     </div>

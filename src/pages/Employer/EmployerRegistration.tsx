@@ -4,10 +4,9 @@
 // pages/employer/EmployerRegistration.tsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, Building2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, Building2, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { validateEmail, validatePassword, validateConfirmPassword, validateName } from '../../utils/validation';
-import { Navbar } from '../../components/shared/Navbar';
 
 export const EmployerRegistration: React.FC = () => {
     const navigate = useNavigate();
@@ -125,7 +124,6 @@ export const EmployerRegistration: React.FC = () => {
     if (showSuccess) {
         return (
             <div className="min-h-screen relative bg-white dark:bg-gray-950 transition-colors duration-300">
-                <Navbar />
                 <div
                     className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
                     style={{
@@ -154,8 +152,6 @@ export const EmployerRegistration: React.FC = () => {
 
     return (
         <div className="min-h-screen relative bg-white dark:bg-gray-950 transition-colors duration-300">
-            <Navbar />
-
             <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
                 style={{
@@ -165,8 +161,16 @@ export const EmployerRegistration: React.FC = () => {
                 <div className="absolute inset-0 bg-black bg-opacity-10 dark:bg-opacity-60"></div>
             </div>
 
-            <div className="relative z-10 min-h-screen flex items-center justify-center p-4 pt-24 md:pt-28">
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-red-100 dark:border-gray-700 transition-colors duration-300">
+            <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-red-100 dark:border-gray-700 transition-colors duration-300 relative">
+                    {/* Back Button */}
+                    <button
+                        onClick={() => navigate('/')}
+                        className="absolute top-4 left-4 z-20 p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors shadow-sm"
+                        aria-label="Go back"
+                    >
+                        <ArrowLeft className="h-5 w-5" />
+                    </button>
                     {/* Header */}
                     <div className="text-center mb-8">
                         <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">

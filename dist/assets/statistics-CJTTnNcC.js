@@ -1,0 +1,1 @@
+const t=[{id:"1",type:"session",description:"Attended AI Workshop",timestamp:"2025-10-19T10:30:00Z",points:50},{id:"2",type:"volunteer",description:"Helped with registration",timestamp:"2025-10-19T09:00:00Z",points:30}];export{t as m};

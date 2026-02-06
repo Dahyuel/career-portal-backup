@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 export const ResetPasswordForm: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  
+
   const [formData, setFormData] = useState({
     password: '',
     confirmPassword: ''
@@ -19,101 +19,101 @@ export const ResetPasswordForm: React.FC = () => {
   const [tokenValid, setTokenValid] = useState<boolean | null>(null);
 
   // Check if we have valid reset token on component mount
-// Check if we have valid reset token on component mount
-useEffect(() => {
-  const checkToken = async () => {
-    console.log('Checking reset password tokens...');
-    
-    // Check URL search parameters first (newer Supabase format)
-    const typeFromParams = searchParams.get('type');
-    const accessTokenFromParams = searchParams.get('access_token');
-    const refreshTokenFromParams = searchParams.get('refresh_token');
+  // Check if we have valid reset token on component mount
+  useEffect(() => {
+    const checkToken = async () => {
+      console.log('Checking reset password tokens...');
 
-    // Check URL hash parameters (older Supabase format)
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const typeFromHash = hashParams.get('type');
-    const accessTokenFromHash = hashParams.get('access_token');
-    const refreshTokenFromHash = hashParams.get('refresh_token');
+      // Check URL search parameters first (newer Supabase format)
+      const typeFromParams = searchParams.get('type');
+      const accessTokenFromParams = searchParams.get('access_token');
+      const refreshTokenFromParams = searchParams.get('refresh_token');
 
-    // Handle malformed URL with double hash (like #type=recovery#access_token=...)
-    let malformedAccessToken = null;
-    let malformedRefreshToken = null;
-    let malformedType = null;
-    
-    const hash = window.location.hash;
-    if (hash.includes('#type=recovery#')) {
-      console.log('Detected malformed URL with double hash');
-      // Extract everything after the second #
-      const secondHashIndex = hash.indexOf('#', hash.indexOf('#') + 1);
-      if (secondHashIndex !== -1) {
-        const malformedParams = new URLSearchParams(hash.substring(secondHashIndex + 1));
-        malformedType = 'recovery';
-        malformedAccessToken = malformedParams.get('access_token');
-        malformedRefreshToken = malformedParams.get('refresh_token');
-        
-        console.log('Malformed params extracted:', {
-          malformedType,
-          hasMalformedAccessToken: !!malformedAccessToken,
-          hasMalformedRefreshToken: !!malformedRefreshToken
-        });
-      }
-    }
+      // Check URL hash parameters (older Supabase format)
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const typeFromHash = hashParams.get('type');
+      const accessTokenFromHash = hashParams.get('access_token');
+      const refreshTokenFromHash = hashParams.get('refresh_token');
 
-    // Use whichever has the tokens (priority: malformed > hash > params)
-    const type = malformedType || typeFromParams || typeFromHash;
-    const accessToken = malformedAccessToken || accessTokenFromParams || accessTokenFromHash;
-    const refreshToken = malformedRefreshToken || refreshTokenFromParams || refreshTokenFromHash;
+      // Handle malformed URL with double hash (like #type=recovery#access_token=...)
+      let malformedAccessToken = null;
+      let malformedRefreshToken = null;
+      let malformedType = null;
 
-    console.log('Final token check results:', {
-      type,
-      hasAccessToken: !!accessToken,
-      hasRefreshToken: !!refreshToken,
-      source: malformedAccessToken ? 'malformed' : accessTokenFromParams ? 'params' : accessTokenFromHash ? 'hash' : 'none'
-    });
+      const hash = window.location.hash;
+      if (hash.includes('#type=recovery#')) {
+        console.log('Detected malformed URL with double hash');
+        // Extract everything after the second #
+        const secondHashIndex = hash.indexOf('#', hash.indexOf('#') + 1);
+        if (secondHashIndex !== -1) {
+          const malformedParams = new URLSearchParams(hash.substring(secondHashIndex + 1));
+          malformedType = 'recovery';
+          malformedAccessToken = malformedParams.get('access_token');
+          malformedRefreshToken = malformedParams.get('refresh_token');
 
-    if (type === 'recovery' && accessToken && refreshToken) {
-      try {
-        console.log('Setting session with recovery tokens...');
-        
-        // Set the session with the tokens
-        const { data, error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken
-        });
-
-        if (error) {
-          console.error('Token validation error:', error);
-          setTokenValid(false);
-        } else {
-          console.log('✅ Token validated successfully');
-          setTokenValid(true);
+          console.log('Malformed params extracted:', {
+            malformedType,
+            hasMalformedAccessToken: !!malformedAccessToken,
+            hasMalformedRefreshToken: !!malformedRefreshToken
+          });
         }
-      } catch (error) {
-        console.error('Session setup error:', error);
+      }
+
+      // Use whichever has the tokens (priority: malformed > hash > params)
+      const type = malformedType || typeFromParams || typeFromHash;
+      const accessToken = malformedAccessToken || accessTokenFromParams || accessTokenFromHash;
+      const refreshToken = malformedRefreshToken || refreshTokenFromParams || refreshTokenFromHash;
+
+      console.log('Final token check results:', {
+        type,
+        hasAccessToken: !!accessToken,
+        hasRefreshToken: !!refreshToken,
+        source: malformedAccessToken ? 'malformed' : accessTokenFromParams ? 'params' : accessTokenFromHash ? 'hash' : 'none'
+      });
+
+      if (type === 'recovery' && accessToken && refreshToken) {
+        try {
+          console.log('Setting session with recovery tokens...');
+
+          // Set the session with the tokens
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+
+          if (error) {
+            console.error('Token validation error:', error);
+            setTokenValid(false);
+          } else {
+            console.log('✅ Token validated successfully');
+            setTokenValid(true);
+          }
+        } catch (error) {
+          console.error('Session setup error:', error);
+          setTokenValid(false);
+        }
+      } else {
+        console.error('Missing required parameters for password reset');
+        console.log('Available parameters:', {
+          searchParams: Object.fromEntries(searchParams.entries()),
+          hashParams: Object.fromEntries(hashParams.entries()),
+          malformedParams: {
+            type: malformedType,
+            accessToken: malformedAccessToken,
+            refreshToken: malformedRefreshToken
+          }
+        });
         setTokenValid(false);
       }
-    } else {
-      console.error('Missing required parameters for password reset');
-      console.log('Available parameters:', {
-        searchParams: Object.fromEntries(searchParams.entries()),
-        hashParams: Object.fromEntries(hashParams.entries()),
-        malformedParams: {
-          type: malformedType,
-          accessToken: malformedAccessToken,
-          refreshToken: malformedRefreshToken
-        }
-      });
-      setTokenValid(false);
-    }
-  };
+    };
 
-  checkToken();
-}, [searchParams]);
+    checkToken();
+  }, [searchParams]);
 
   // Rest of your component remains the same...
   const validatePassword = (password: string): string[] => {
     const errors: string[] = [];
-    
+
     if (password.length < 8) {
       errors.push('Password must be at least 8 characters long');
     }
@@ -129,7 +129,7 @@ useEffect(() => {
     if (!/(?=.*[@$!%*?&])/.test(password)) {
       errors.push('Password must contain at least one special character (@$!%*?&)');
     }
-    
+
     return errors;
   };
 
@@ -152,7 +152,7 @@ useEffect(() => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const validationErrors = validateForm();
     if (validationErrors.length > 0) {
       setErrors(validationErrors);
@@ -164,7 +164,7 @@ useEffect(() => {
 
     try {
       console.log('Updating user password...');
-      
+
       // Update the user's password
       const { error } = await supabase.auth.updateUser({
         password: formData.password
@@ -178,12 +178,12 @@ useEffect(() => {
 
       console.log('✅ Password updated successfully');
       setSuccess(true);
-      
+
       // Auto-redirect to login after 3 seconds
       setTimeout(() => {
         navigate('/login');
       }, 3000);
-      
+
     } catch (error: any) {
       console.error('Password reset exception:', error);
       setErrors(['Password reset failed. Please try again.']);
@@ -205,7 +205,7 @@ useEffect(() => {
     return (
       <div className="min-h-screen relative">
         {/* Background */}
-        <div 
+        <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
           style={{
             backgroundImage: 'url("/images/careercenter.png")',
@@ -216,8 +216,8 @@ useEffect(() => {
 
         {/* Loading */}
         <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-orange-100 w-full max-w-md p-8 text-center">
-            <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="bg-white rounded-2xl shadow-2xl border border-red-100 w-full max-w-md p-8 text-center">
+            <div className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
             <p className="text-gray-600">Validating reset link...</p>
           </div>
         </div>
@@ -230,7 +230,7 @@ useEffect(() => {
     return (
       <div className="min-h-screen relative">
         {/* Background */}
-        <div 
+        <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
           style={{
             backgroundImage: 'url("/images/careercenter.png")',
@@ -253,13 +253,13 @@ useEffect(() => {
             <div className="space-y-3">
               <button
                 onClick={() => navigate('/forgot-password')}
-                className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-3 px-4 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 transition-all duration-200"
+                className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-4 rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-200"
               >
                 Request New Reset Link
               </button>
               <button
                 onClick={() => navigate('/login')}
-                className="w-full flex items-center justify-center space-x-2 text-orange-600 hover:text-orange-700 font-medium py-2 transition-colors"
+                className="w-full flex items-center justify-center space-x-2 text-red-600 hover:text-red-700 font-medium py-2 transition-colors"
               >
                 <ArrowLeft className="h-4 w-4" />
                 <span>Back to Login</span>
@@ -276,7 +276,7 @@ useEffect(() => {
     return (
       <div className="min-h-screen relative">
         {/* Background */}
-        <div 
+        <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
           style={{
             backgroundImage: 'url("/images/careercenter.png")',
@@ -295,7 +295,7 @@ useEffect(() => {
             </p>
             <button
               onClick={() => navigate('/login')}
-              className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-3 px-4 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 transition-all duration-200"
+              className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-4 rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-200"
             >
               Go to Login Now
             </button>
@@ -309,7 +309,7 @@ useEffect(() => {
   return (
     <div className="min-h-screen relative">
       {/* Background */}
-      <div 
+      <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
         style={{
           backgroundImage: 'url("/images/careercenter.png")',
