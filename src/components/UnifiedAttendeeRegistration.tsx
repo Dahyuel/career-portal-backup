@@ -847,20 +847,22 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                 <div className="absolute inset-0 bg-black bg-opacity-10 dark:bg-opacity-60"></div>
             </div>
 
+
             <div className="relative z-10 min-h-screen flex items-center justify-center py-8 px-4">
                 <div className="max-w-4xl mx-auto">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 border border-red-100 dark:border-gray-700 fade-in-up-blur modal-content-blur transition-colors duration-300">
                         {/* Back Button */}
                         <button
                             onClick={prevStep}
-                            className="absolute top-6 left-6 z-20 p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors shadow-sm"
+                            className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 hover:scale-105 transition-all duration-300 shadow-sm group"
                             aria-label="Go back"
                         >
                             <ArrowLeft className="h-5 w-5" />
+                            <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 transition-all duration-300">Back</span>
                         </button>
 
                         {/* Step Progress */}
-                        <div className="mb-8">
+                        <div className="mb-8 pt-10 md:pt-0">
                             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4 text-center">
                                 Attendee Registration
                             </h1>

@@ -125,19 +125,21 @@ export const LoginForm: React.FC = () => {
         <div className="absolute inset-0 bg-black bg-opacity-20 dark:bg-opacity-60"></div>
       </div>
 
+
       <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-red-100 dark:border-gray-700 w-full max-w-md overflow-hidden fade-in-up-blur modal-content-blur">
           {/* Back Button */}
           <button
             onClick={() => window.history.back()}
-            className="absolute top-4 left-4 z-20 p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors shadow-sm"
+            className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 hover:scale-105 transition-all duration-300 shadow-sm group"
             aria-label="Go back"
           >
             <ArrowLeft className="h-5 w-5" />
+            <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 transition-all duration-300">Back</span>
           </button>
 
           {/* Header */}
-          <div className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-4 text-center fade-in-blur">
+          <div className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-4 pt-16 text-center fade-in-blur">
             <div className="mx-auto w-28 h-28 bg-white rounded-full flex items-center justify-center mb-2 shadow-lg fade-in-scale">
               <img
                 src="/images/logo.png"
@@ -247,7 +249,7 @@ export const LoginForm: React.FC = () => {
                   Don't have an account?{' '}
                   <button
                     type="button"
-                    onClick={() => navigate('/auth-register')}
+                    onClick={() => navigate('/attendee-register')}
                     className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium hover:underline transition-colors"
                     disabled={loading}
                   >

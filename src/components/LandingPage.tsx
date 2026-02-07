@@ -17,10 +17,10 @@ export const LandingPage: React.FC = () => {
                 <div
                     className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
                     style={{
-                        backgroundImage: 'url("/images/t.jpg")',
+                        backgroundImage: 'url("/images/w.JPG")',
                     }}
                 >
-                    <div className="absolute inset-0 bg-gradient-to-br from-gray-900/70 via-gray-800/60 to-gray-900/80 dark:from-gray-950/95 dark:via-gray-900/90 dark:to-red-950/60"></div>
+                    <div className="absolute inset-0 bg-gradient-to-br from-gray-900/85 via-gray-800/80 to-gray-900/85 dark:from-gray-950/95 dark:via-gray-900/90 dark:to-red-950/60"></div>
                 </div>
 
                 {/* Animated background elements - more subtle and reddish */}
@@ -40,13 +40,13 @@ export const LandingPage: React.FC = () => {
                                 className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover"
                             />
                         </div>
-                        <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold text-white mb-4 tracking-tight">
-                            ASU <span className="text-red-400">Employment Fair 2026 </span>
+                        <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold text-white mb-4 tracking-tight drop-shadow-lg">
+                            ASU <span className="text-red-400 drop-shadow-md">Employment Fair 2026 </span>
                         </h1>
-                        <p className="text-lg sm:text-xl md:text-2xl text-red-100/90 max-w-3xl mx-auto leading-relaxed mb-4">
+                        <p className="text-lg sm:text-xl md:text-2xl text-red-100 max-w-3xl mx-auto leading-relaxed mb-4 drop-shadow-md">
                             Your gateway to exceptional career opportunities and professional growth
                         </p>
-                        <div className="flex flex-wrap items-center justify-center gap-4 text-red-200/80 text-sm md:text-base mb-8">
+                        <div className="flex flex-wrap items-center justify-center gap-4 text-red-200 text-sm md:text-base mb-8 drop-shadow-md">
                             <span className="flex items-center gap-2">
                                 <Calendar className="h-4 w-4" />
                                 April, 2026
@@ -60,21 +60,21 @@ export const LandingPage: React.FC = () => {
 
                     {/* Feature highlights */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-10 fade-in-blur" style={{ animationDelay: '0.3s' }}>
-                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center border border-white/20 hover:bg-white/20 transition-all duration-300 transform hover:-translate-y-1">
-                            <Briefcase className="h-7 w-7 md:h-8 md:w-8 text-red-400 mx-auto mb-2" />
-                            <p className="text-white font-medium text-sm">50+ Companies</p>
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
+                            <Briefcase className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
+                            <p className="text-gray-900 dark:text-white font-medium text-sm">50+ Companies</p>
                         </div>
-                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center border border-white/20 hover:bg-white/20 transition-all duration-300 transform hover:-translate-y-1">
-                            <Users className="h-7 w-7 md:h-8 md:w-8 text-red-400 mx-auto mb-2" />
-                            <p className="text-white font-medium text-sm">2000+ Attendees</p>
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
+                            <Users className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
+                            <p className="text-gray-900 dark:text-white font-medium text-sm">2000+ Attendees</p>
                         </div>
-                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center border border-white/20 hover:bg-white/20 transition-all duration-300 transform hover:-translate-y-1">
-                            <Calendar className="h-7 w-7 md:h-8 md:w-8 text-red-400 mx-auto mb-2" />
-                            <p className="text-white font-medium text-sm">6 Days Event</p>
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
+                            <Calendar className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
+                            <p className="text-gray-900 dark:text-white font-medium text-sm">6 Days Event</p>
                         </div>
-                        <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 text-center border border-white/20 hover:bg-white/20 transition-all duration-300 transform hover:-translate-y-1">
-                            <Award className="h-7 w-7 md:h-8 md:w-8 text-red-400 mx-auto mb-2" />
-                            <p className="text-white font-medium text-sm">Career Growth</p>
+                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
+                            <Award className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
+                            <p className="text-gray-900 dark:text-white font-medium text-sm">Career Growth</p>
                         </div>
                     </div>
 
@@ -87,28 +87,14 @@ export const LandingPage: React.FC = () => {
                     </div>
 
                     {/* CTA Buttons - ASU and Non-ASU Login */}
-                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4 md:gap-6 fade-in-up-blur" style={{ animationDelay: '0.5s' }}>
+                    <div className="flex flex-col items-center justify-center fade-in-up-blur" style={{ animationDelay: '0.5s' }}>
                         <button
                             onClick={() => navigate('/login')}
-                            className="group relative w-72 sm:w-80 inline-flex items-center justify-between px-8 py-6 text-xl font-semibold text-white bg-gradient-to-r from-red-500 to-red-600 rounded-2xl shadow-xl hover:shadow-red-500/30 hover:shadow-2xl transition-all duration-300 transform hover:scale-105 hover:-translate-y-1 overflow-hidden border-2 border-red-400"
+                            className="group relative w-72 sm:w-80 inline-flex items-center justify-center gap-3 px-8 py-6 text-xl font-bold text-white bg-gradient-to-r from-red-500 to-red-600 rounded-2xl shadow-xl hover:shadow-red-500/40 hover:shadow-2xl transition-all duration-300 transform hover:scale-105 hover:-translate-y-1 overflow-hidden border-2 border-red-400"
                         >
                             <span className="absolute inset-0 bg-gradient-to-r from-red-600 to-red-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-                            <span className="relative flex-1 flex flex-col items-center text-center">
-                                <span className="text-xl font-bold">ASU Students</span>
-                                <span className="text-sm text-red-100">Login</span>
-                            </span>
-                            <ArrowRight className="relative h-6 w-6 ml-2 transform group-hover:translate-x-1 transition-transform duration-300" />
-                        </button>
-                        <button
-                            onClick={() => navigate('/login')}
-                            className="group relative w-72 sm:w-80 inline-flex items-center justify-between px-8 py-6 text-xl font-semibold text-white bg-gradient-to-r from-gray-700 to-gray-800 dark:from-gray-600 dark:to-gray-700 rounded-2xl shadow-xl hover:shadow-gray-500/30 hover:shadow-2xl transition-all duration-300 transform hover:scale-105 hover:-translate-y-1 overflow-hidden border-2 border-gray-500"
-                        >
-                            <span className="absolute inset-0 bg-gradient-to-r from-gray-800 to-gray-900 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-                            <span className="relative flex-1 flex flex-col items-center text-center">
-                                <span className="text-xl font-bold">Non-ASU Students</span>
-                                <span className="text-sm text-gray-300">Login</span>
-                            </span>
-                            <ArrowRight className="relative h-6 w-6 ml-2 transform group-hover:translate-x-1 transition-transform duration-300" />
+                            <span className="relative z-10">Get Started</span>
+                            <ArrowRight className="relative z-10 h-6 w-6 transform group-hover:translate-x-1 transition-transform duration-300" />
                         </button>
                     </div>
                 </div>

@@ -11,7 +11,7 @@ export const Navbar: React.FC = () => {
     const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
 
     return (
-        <nav className="fixed top-0 left-0 right-0 z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-md border-b border-red-100 dark:border-gray-800 transition-colors duration-300">
+        <nav className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[95%] max-w-7xl bg-white/75 dark:bg-gray-900/75 backdrop-blur-md border border-white/20 dark:border-gray-700/30 shadow-lg ease-in-out transform-gpu ${isMenuOpen ? 'rounded-3xl duration-0' : 'rounded-full duration-300 transition-[border-radius,background-color]'}`}>
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="flex items-center justify-between h-16 md:h-20">
                     {/* Left Logo - Career Center - Links to Home */}
