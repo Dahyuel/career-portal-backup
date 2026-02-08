@@ -1,12 +1,14 @@
 // Navbar with mobile hamburger menu
 
 import React, { useState } from 'react';
-import { Sun, Moon, Menu, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Sun, Moon, Menu, X, ArrowRight } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 export const Navbar: React.FC = () => {
     const { toggleTheme, isDark } = useTheme();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const navigate = useNavigate();
 
     const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
 
@@ -29,13 +31,25 @@ export const Navbar: React.FC = () => {
 
                     {/* Center - Navigation / Title (Desktop) */}
                     <div className="hidden md:flex items-center space-x-8">
-                        <a href="/#about" className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">About</a>
+                        <a href="/#schedule" className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">Event Details</a>
                         <a href="/#features" className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">Why Attend</a>
-                        <a href="/#schedule" className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">Schedule</a>
+                        <button onClick={() => navigate('/about')} className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">About</button>
                     </div>
 
                     {/* Right Side - Theme Toggle, ASU Logo, Mobile Menu Button */}
                     <div className="flex items-center space-x-3 md:space-x-4">
+                        {/* Get Started Button (Desktop only) */}
+                        <button
+                            onClick={() => navigate('/login')}
+                            className="hidden md:inline-flex group relative items-center justify-center px-6 py-2 bg-gradient-to-r from-red-500 to-red-600 rounded-full shadow-md hover:shadow-red-500/30 hover:shadow-lg transition-all duration-300 transform hover:scale-105 overflow-hidden border border-red-400"
+                        >
+                            <span className="absolute inset-0 bg-gradient-to-r from-red-600 to-red-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
+                            <div className="relative z-10 flex items-center gap-2">
+                                <span className="text-sm font-bold text-white tracking-wide">Login</span>
+                                <ArrowRight className="h-4 w-4 text-white transform group-hover:translate-x-1 transition-transform duration-300" />
+                            </div>
+                        </button>
+
                         {/* Theme Toggle */}
                         <button
                             onClick={toggleTheme}
@@ -78,11 +92,11 @@ export const Navbar: React.FC = () => {
                     <div className="md:hidden border-t border-gray-200 dark:border-gray-700 py-4 animate-fadeIn">
                         <div className="flex flex-col space-y-3">
                             <a
-                                href="/#about"
+                                href="/#schedule"
                                 onClick={() => setIsMenuOpen(false)}
                                 className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors px-2 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-gray-800"
                             >
-                                About
+                                Event Details
                             </a>
                             <a
                                 href="/#features"
@@ -91,13 +105,27 @@ export const Navbar: React.FC = () => {
                             >
                                 Why Attend
                             </a>
-                            <a
-                                href="/#schedule"
-                                onClick={() => setIsMenuOpen(false)}
-                                className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors px-2 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-gray-800"
+                            <button
+                                onClick={() => {
+                                    navigate('/about');
+                                    setIsMenuOpen(false);
+                                }}
+                                className="text-left text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors px-2 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-gray-800 w-full"
                             >
-                                Schedule
-                            </a>
+                                About
+                            </button>
+
+                            {/* Mobile Login Button */}
+                            <button
+                                onClick={() => {
+                                    navigate('/login');
+                                    setIsMenuOpen(false);
+                                }}
+                                className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95"
+                            >
+                                <span className="font-bold">Login</span>
+                                <ArrowRight className="h-4 w-4" />
+                            </button>
                         </div>
                     </div>
                 )}

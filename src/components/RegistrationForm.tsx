@@ -14,34 +14,57 @@ import { Navbar } from './shared/Navbar';
 const ErrorPopup: React.FC<{
   message: string;
   onClose: () => void;
-  type?: 'error' | 'warning';
+  type?: 'error' | 'warning' | 'success';
 }> = ({ message, onClose, type = 'error' }) => {
   useEffect(() => {
     const timer = setTimeout(onClose, 5000);
     return () => clearTimeout(timer);
   }, [onClose]);
 
+  const getStyles = () => {
+    switch (type) {
+      case 'success':
+        return {
+          container: 'bg-green-50 border-green-200',
+          icon: 'text-green-600',
+          text: 'text-green-800',
+          button: 'text-green-600'
+        };
+      case 'warning':
+        return {
+          container: 'bg-yellow-50 border-yellow-200',
+          icon: 'text-yellow-600',
+          text: 'text-yellow-800',
+          button: 'text-yellow-600'
+        };
+      case 'error':
+      default:
+        return {
+          container: 'bg-red-50 border-red-200',
+          icon: 'text-red-600',
+          text: 'text-red-800',
+          button: 'text-red-600'
+        };
+    }
+  };
+
+  const styles = getStyles();
+
   return (
     <div className="fixed top-4 right-4 z-50 animate-fade-in">
-      <div className={`rounded-lg shadow-lg border p-4 max-w-sm ${type === 'error'
-        ? 'bg-red-50 border-red-200'
-        : 'bg-yellow-50 border-yellow-200'
-        }`}>
+      <div className={`rounded-lg shadow-lg border p-4 max-w-sm ${styles.container}`}>
         <div className="flex items-start space-x-3">
-          <div className={`flex-shrink-0 ${type === 'error' ? 'text-red-600' : 'text-yellow-600'
-            }`}>
-            <AlertCircle className="w-5 h-5" />
+          <div className={`flex-shrink-0 ${styles.icon}`}>
+            {type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           </div>
           <div className="flex-1">
-            <p className={`text-sm font-medium ${type === 'error' ? 'text-red-800' : 'text-yellow-800'
-              }`}>
+            <p className={`text-sm font-medium ${styles.text}`}>
               {message}
             </p>
           </div>
           <button
             onClick={onClose}
-            className={`flex-shrink-0 hover:opacity-70 transition-opacity ${type === 'error' ? 'text-red-600' : 'text-yellow-600'
-              }`}
+            className={`flex-shrink-0 hover:opacity-70 transition-opacity ${styles.button}`}
           >
             <X className="w-4 h-4" />
           </button>
@@ -175,7 +198,7 @@ export const RegistrationForm: React.FC = () => {
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAuthTransition, setShowAuthTransition] = useState(false);
-  const [errorPopup, setErrorPopup] = useState<{ message: string; type?: 'error' | 'warning' } | null>(null);
+  const [errorPopup, setErrorPopup] = useState<{ message: string; type?: 'error' | 'warning' | 'success' } | null>(null);
   const [accountCreated, setAccountCreated] = useState(false);
 
   // Refs to prevent form resets
@@ -217,7 +240,7 @@ export const RegistrationForm: React.FC = () => {
     'Other'
   ];
 
-  const showErrorPopup = useCallback((message: string, type: 'error' | 'warning' = 'error') => {
+  const showErrorPopup = useCallback((message: string, type: 'error' | 'warning' | 'success' = 'error') => {
     setErrorPopup({ message, type });
   }, []);
 

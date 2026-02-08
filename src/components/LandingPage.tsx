@@ -59,18 +59,14 @@ export const LandingPage: React.FC = () => {
                     </div>
 
                     {/* Feature highlights */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-10 fade-in-blur" style={{ animationDelay: '0.3s' }}>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 mb-10 fade-in-blur" style={{ animationDelay: '0.3s' }}>
                         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
                             <Briefcase className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
-                            <p className="text-gray-900 dark:text-white font-medium text-sm">50+ Companies</p>
-                        </div>
-                        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
-                            <Users className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
-                            <p className="text-gray-900 dark:text-white font-medium text-sm">2000+ Attendees</p>
+                            <p className="text-gray-900 dark:text-white font-medium text-md"><strong >90+</strong> Companies</p>
                         </div>
                         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
                             <Calendar className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
-                            <p className="text-gray-900 dark:text-white font-medium text-sm">6 Days Event</p>
+                            <p className="text-gray-900 dark:text-white font-medium text-sm">2-Day Event</p>
                         </div>
                         <div className="bg-white dark:bg-gray-800 rounded-xl p-4 text-center border border-gray-100 dark:border-gray-700 shadow-md hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1">
                             <Award className="h-7 w-7 md:h-8 md:w-8 text-red-600 dark:text-red-400 mx-auto mb-2" />
@@ -90,11 +86,16 @@ export const LandingPage: React.FC = () => {
                     <div className="flex flex-col items-center justify-center fade-in-up-blur" style={{ animationDelay: '0.5s' }}>
                         <button
                             onClick={() => navigate('/login')}
-                            className="group relative w-72 sm:w-80 inline-flex items-center justify-center gap-3 px-8 py-6 text-xl font-bold text-white bg-gradient-to-r from-red-500 to-red-600 rounded-2xl shadow-xl hover:shadow-red-500/40 hover:shadow-2xl transition-all duration-300 transform hover:scale-105 hover:-translate-y-1 overflow-hidden border-2 border-red-400"
+                            className="group relative w-80 sm:w-96 inline-flex items-center justify-center gap-3 px-10 py-6 text-white bg-gradient-to-r from-red-500 to-red-600 rounded-2xl shadow-xl hover:shadow-red-500/40 hover:shadow-2xl transition-all duration-300 transform hover:scale-105 hover:-translate-y-1 overflow-hidden border-2 border-red-400"
                         >
                             <span className="absolute inset-0 bg-gradient-to-r from-red-600 to-red-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
-                            <span className="relative z-10">Get Started</span>
-                            <ArrowRight className="relative z-10 h-6 w-6 transform group-hover:translate-x-1 transition-transform duration-300" />
+                            <div className="relative z-10 flex flex-col items-center">
+                                <div className="flex items-center gap-3">
+                                    <span className="text-2xl font-bold uppercase tracking-wide drop-shadow-sm">Get Started</span>
+                                    <ArrowRight className="h-6 w-6 stroke-[3] transform group-hover:translate-x-1 transition-transform duration-300" />
+                                </div>
+                                <span className="text-sm font-medium text-red-50/95 mt-1 tracking-wide">or login if you have an account</span>
+                            </div>
                         </button>
                     </div>
                 </div>
