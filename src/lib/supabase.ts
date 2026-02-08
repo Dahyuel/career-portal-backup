@@ -261,6 +261,7 @@ export const registerAttendee = async (data: AttendeeRegistrationData): Promise<
       .from('user_profiles')
       .insert({
         id: authUserId,
+        email: data.email.trim().toLowerCase(),
         full_name: data.fullName.trim(),
         phone: data.phone.trim(),
         personal_id: data.personalId.trim(),
@@ -293,7 +294,7 @@ export const registerAttendee = async (data: AttendeeRegistrationData): Promise<
     const isAsuStudent = data.university.toLowerCase() === 'ain shams university';
     console.log(`📊 [ATTENDEE] ASU Student: ${isAsuStudent}`);
 
-    const { data: attendeeData, error: attendeeError } = await supabase
+    const { error: attendeeError } = await supabase
       .from('attendees')
       .insert({
         user_id: authUserId,
@@ -306,9 +307,8 @@ export const registerAttendee = async (data: AttendeeRegistrationData): Promise<
         enrollment_proof_url: null, // Will be updated after file upload
         registration_status: 'pending',
         payment_status: isAsuStudent ? null : 'pending'
-      })
-      .select()
-      .single();
+      });
+    // .select().single() removed as id column is gone
 
     if (attendeeError) {
       console.error('❌ [ATTENDEE] Attendee record creation failed:', attendeeError.message);
@@ -324,6 +324,9 @@ export const registerAttendee = async (data: AttendeeRegistrationData): Promise<
         }
       };
     }
+
+    const attendeeData = { user_id: authUserId }; // Placeholder for data
+
 
     console.log('✅ [ATTENDEE] Attendee record created');
 
@@ -603,6 +606,7 @@ export const registerVolunteer = async (data: VolunteerRegistrationData): Promis
       .from('user_profiles')
       .insert({
         id: authUserId,
+        email: data.email.trim().toLowerCase(),
         full_name: data.fullName.trim(),
         phone: data.phone.trim(),
         personal_id: data.personalId.trim(),
@@ -641,7 +645,7 @@ export const registerVolunteer = async (data: VolunteerRegistrationData): Promis
     // ========================================================================
     console.log('🎫 [VOLUNTEER] Step 3: Creating volunteer record...');
 
-    const { data: volunteerData, error: volunteerError } = await supabase
+    const { error: volunteerError } = await supabase
       .from('volunteers')
       .insert({
         user_id: authUserId,
@@ -650,9 +654,8 @@ export const registerVolunteer = async (data: VolunteerRegistrationData): Promis
         volunteer_id: null, // explicit null as requested
         total_points: 0,
         hours_volunteered: 0
-      })
-      .select()
-      .single();
+      });
+    // .select().single() removed
 
     if (volunteerError) {
       console.error('❌ [VOLUNTEER] Volunteer record creation failed:', volunteerError.message);
@@ -676,6 +679,9 @@ export const registerVolunteer = async (data: VolunteerRegistrationData): Promis
         error: { message: 'Failed to create volunteer record' }
       };
     }
+
+    const volunteerData = { user_id: authUserId }; // Placeholder
+
 
     console.log('✅ [VOLUNTEER] Step 3 complete. Volunteer record created.');
 
@@ -835,6 +841,7 @@ export const registerEmployer = async (data: EmployerRegistrationData): Promise<
       .from('user_profiles')
       .insert({
         id: authUserId,
+        email: data.email.trim().toLowerCase(),
         full_name: data.fullName.trim(),
         phone: data.phone.trim(),
         personal_id: data.personalId.trim(),
@@ -1118,7 +1125,7 @@ export const getAttendeeByPersonalId = async (personalId: string) => {
         ...attendee,
         ...profile,
         // Ensure consistent ID usage
-        id: attendee.id || profile.id
+        id: profile.id // Use profile.id (user_id) as primary identifier
       },
       error: null
     };
@@ -1133,7 +1140,7 @@ export const getAttendeeByUUID = async (uuid: string) => {
     const { data: attendee, error: attendeeError } = await supabase
       .from('attendees')
       .select('*')
-      .or(`id.eq.${uuid},user_id.eq.${uuid}`)
+      .eq('user_id', uuid) // Only user_id is checked now
       .single();
 
     if (attendeeError || !attendee) {

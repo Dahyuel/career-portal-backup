@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import NotificationDetailModal, { Notification } from './NotificationDetailModal';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -38,7 +37,6 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
     const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
-    const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
     const [loggingOut, setLoggingOut] = useState(false);
 
     const profileDropdownRef = useRef<HTMLDivElement>(null);
@@ -93,9 +91,8 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
         if (e) {
             e.stopPropagation();
         }
-        setSelectedNotification(notification);
-        setShowNotificationDropdown(false);
-        onNotificationClick?.(notification);
+        setShowNotificationDropdown(false); // Close the dropdown
+        onNotificationClick?.(notification); // Pass to parent only
     };
 
     const unreadCount = notifications.filter((n: any) => !n.is_read).length;
@@ -306,14 +303,6 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                         </button>
                     </div>
                 </header>
-
-                {/* Notification Detail Modal */}
-                {selectedNotification && (
-                    <NotificationDetailModal
-                        notification={selectedNotification}
-                        onClose={() => setSelectedNotification(null)}
-                    />
-                )}
 
                 {/* Mobile Notification Dropdown */}
                 {showNotificationDropdown && (

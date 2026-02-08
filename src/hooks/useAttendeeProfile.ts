@@ -68,7 +68,7 @@ export const useAttendeeProfile = (userId: string | undefined) => {
                     score: userProfile.score || 0,
                     created_at: userProfile.created_at,
                     // Attendee-specific data (may be null if not found)
-                    attendee_id: attendeeData?.id,
+                    attendee_id: userProfile.id, // ID is now same as user_id
                     is_asu_student: attendeeData?.is_asu_student,
                     student_id: attendeeData?.student_id,
                     university: attendeeData?.university,

@@ -1,7 +1,7 @@
-// Simple QR Scanner component with camera controls
+// QR Scanner component using html5-qrcode library - Floating Card Version
 import React, { useEffect, useRef, useState } from 'react';
 import { X, FlipHorizontal, Flashlight } from 'lucide-react';
-import jsQR from 'jsqr';
+import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
 
 interface QRScannerProps {
   isOpen: boolean;
@@ -18,173 +18,197 @@ export const QRScanner: React.FC<QRScannerProps> = ({
   title = 'Scan QR Code',
   description = 'Point your camera at a QR code'
 }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   const [flashOn, setFlashOn] = useState(false);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const scanIntervalRef = useRef<number | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+  const scannerContainerId = 'qr-scanner-container';
 
-  // Start camera
+  // Start scanner when modal opens
   useEffect(() => {
     if (!isOpen) return;
 
-    const startCamera = async () => {
+    const startScanner = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode }
-        });
+        setError(null);
+        setIsScanning(true);
 
-        setStream(mediaStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
-        }
+        // Create scanner instance
+        const html5QrCode = new Html5Qrcode(scannerContainerId);
+        html5QrCodeRef.current = html5QrCode;
+
+        // Get camera configuration
+        const cameraConfig = {
+          facingMode: facingMode
+        };
 
         // Start scanning
-        scanIntervalRef.current = window.setInterval(() => {
-          scanQRCode();
-        }, 300);
-      } catch (error) {
-        console.error('Error accessing camera:', error);
-        alert('Unable to access camera. Please check permissions.');
+        await html5QrCode.start(
+          cameraConfig,
+          {
+            fps: 10,
+            qrbox: { width: 200, height: 200 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            // On successful scan
+            console.log('QR Code scanned:', decodedText);
+            onScan(decodedText);
+            handleClose();
+          },
+          () => {
+            // Ignore scanning errors (happens when no QR code is visible)
+          }
+        );
+      } catch (err: any) {
+        console.error('Error starting scanner:', err);
+        setError(err.message || 'Unable to access camera. Please check permissions.');
+        setIsScanning(false);
       }
     };
 
-    startCamera();
+    // Small delay to ensure DOM is ready
+    const timeout = setTimeout(() => {
+      startScanner();
+    }, 100);
 
     return () => {
-      // Cleanup
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-      }
-      if (scanIntervalRef.current) {
-        clearInterval(scanIntervalRef.current);
-      }
+      clearTimeout(timeout);
+      stopScanner();
     };
   }, [isOpen, facingMode]);
 
-  // Scan QR Code
-  const scanQRCode = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-
-    if (!context || video.readyState !== video.HAVE_ENOUGH_DATA) return;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-    if (code && code.data) {
-      onScan(code.data);
-      handleClose();
+  // Stop scanner
+  const stopScanner = async () => {
+    if (html5QrCodeRef.current) {
+      try {
+        const state = html5QrCodeRef.current.getState();
+        if (state === Html5QrcodeScannerState.SCANNING) {
+          await html5QrCodeRef.current.stop();
+        }
+        html5QrCodeRef.current.clear();
+      } catch (err) {
+        console.error('Error stopping scanner:', err);
+      }
+      html5QrCodeRef.current = null;
     }
+    setIsScanning(false);
   };
 
   // Flip camera
-  const handleFlipCamera = () => {
+  const handleFlipCamera = async () => {
+    await stopScanner();
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
   };
 
   // Toggle flash (if supported)
   const handleToggleFlash = async () => {
-    if (!stream) return;
+    if (!html5QrCodeRef.current) return;
 
-    const track = stream.getVideoTracks()[0];
-    const capabilities = track.getCapabilities() as any;
+    try {
+      const capabilities = html5QrCodeRef.current.getRunningTrackCameraCapabilities();
+      const torchFeature = capabilities.torchFeature();
 
-    if (capabilities.torch) {
-      try {
-        await track.applyConstraints({
-          // @ts-ignore
-          advanced: [{ torch: !flashOn }]
-        });
+      if (torchFeature && torchFeature.isSupported()) {
+        await torchFeature.apply(!flashOn);
         setFlashOn(!flashOn);
-      } catch (error) {
-        console.error('Flash not supported:', error);
+      } else {
+        setError('Flash is not supported on this device');
+        setTimeout(() => setError(null), 3000);
       }
-    } else {
-      alert('Flash is not supported on this device');
+    } catch (err: any) {
+      console.error('Flash error:', err);
+      setError('Flash is not supported on this device');
+      setTimeout(() => setError(null), 3000);
     }
   };
 
-  const handleClose = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-    }
+  const handleClose = async () => {
+    await stopScanner();
     onClose();
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black z-50 flex flex-col">
-      {/* Header */}
-      <div className="bg-gray-900 text-white p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold">{title}</h2>
-            <p className="text-sm text-gray-300">{description}</p>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      {/* Floating Card */}
+      <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-primary to-orange-500 text-white p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold">{title}</h2>
+              <p className="text-sm text-white/80">{description}</p>
+            </div>
+            <button
+              onClick={handleClose}
+              className="p-2 hover:bg-white/20 rounded-full transition-colors"
+            >
+              <X className="h-6 w-6" />
+            </button>
           </div>
         </div>
-      </div>
 
-      {/* Camera View */}
-      <div className="flex-1 relative flex items-center justify-center bg-black">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="max-w-full max-h-full"
-        />
-        <canvas ref={canvasRef} className="hidden" />
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-500 text-white px-4 py-2 text-center text-sm">
+            {error}
+          </div>
+        )}
 
-        {/* Scanning overlay */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-64 h-64 border-4 border-orange-500 rounded-lg"></div>
+        {/* Camera View */}
+        <div className="relative bg-black aspect-square overflow-hidden">
+          <div
+            id={scannerContainerId}
+            className="w-full h-full"
+          />
+
+          {/* Loading indicator */}
+          {!isScanning && !error && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+              <div className="text-white text-center">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-orange-500 mx-auto mb-3"></div>
+                <p className="text-sm">Starting camera...</p>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* Controls */}
-      <div className="bg-gray-900 p-6">
-        <div className="flex justify-center gap-4">
-          {/* Cancel Button */}
-          <button
-            onClick={handleClose}
-            className="flex-1 max-w-xs bg-red-600 text-white py-4 px-6 rounded-lg hover:bg-red-700 transition-colors font-medium flex items-center justify-center gap-2"
-          >
-            <X className="h-5 w-5" />
-            Cancel
-          </button>
+        {/* Controls */}
+        <div className="bg-slate-100 dark:bg-zinc-800 p-4">
+          <div className="flex justify-center gap-3">
+            {/* Cancel Button */}
+            <button
+              onClick={handleClose}
+              className="flex-1 bg-red-500 hover:bg-red-600 text-white py-3 px-4 rounded-xl transition-colors font-medium flex items-center justify-center gap-2 text-sm"
+            >
+              <X className="h-4 w-4" />
+              Cancel
+            </button>
 
-          {/* Flip Camera Button */}
-          <button
-            onClick={handleFlipCamera}
-            className="flex-1 max-w-xs bg-gray-700 text-white py-4 px-6 rounded-lg hover:bg-gray-600 transition-colors font-medium flex items-center justify-center gap-2"
-          >
-            <FlipHorizontal className="h-5 w-5" />
-            Flip Camera
-          </button>
+            {/* Flip Camera Button */}
+            <button
+              onClick={handleFlipCamera}
+              className="flex-1 bg-slate-600 hover:bg-slate-700 text-white py-3 px-4 rounded-xl transition-colors font-medium flex items-center justify-center gap-2 text-sm"
+            >
+              <FlipHorizontal className="h-4 w-4" />
+              Flip
+            </button>
 
-          {/* Flash Button */}
-          <button
-            onClick={handleToggleFlash}
-            className={`flex-1 max-w-xs py-4 px-6 rounded-lg transition-colors font-medium flex items-center justify-center gap-2 ${flashOn
+            {/* Flash Button */}
+            <button
+              onClick={handleToggleFlash}
+              className={`flex-1 py-3 px-4 rounded-xl transition-colors font-medium flex items-center justify-center gap-2 text-sm ${flashOn
                 ? 'bg-yellow-500 text-black hover:bg-yellow-400'
-                : 'bg-gray-700 text-white hover:bg-gray-600'
-              }`}
-          >
-            <Flashlight className="h-5 w-5" />
-            Flash
-          </button>
+                : 'bg-slate-600 text-white hover:bg-slate-700'
+                }`}
+            >
+              <Flashlight className="h-4 w-4" />
+              Flash
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -26,7 +26,8 @@ const AttendeeDashboard = () => {
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
 
   // Schedule and Sessions state
-  const [attendeeId, setAttendeeId] = useState<string | null>(null);
+  const attendeeId = user?.id; // ID is now the user_id (shared PK)
+  // const [attendeeId, setAttendeeId] = useState<string | null>(null); // Removed
   const [scheduleEvents, setScheduleEvents] = useState<any[]>([]);
   const [uniqueDates, setUniqueDates] = useState<string[]>([]);
   const [bookedSessions, setBookedSessions] = useState<any[]>([]);
@@ -77,7 +78,10 @@ const AttendeeDashboard = () => {
         .order('publish_at', { ascending: false });
 
       if (!error && data) {
+        console.log('Notifications loaded:', data); // Add this for debugging
         setNotifications(data);
+      } else if (error) {
+        console.error('Error fetching notifications:', error);
       }
     };
 
@@ -123,24 +127,15 @@ const AttendeeDashboard = () => {
     fetchUpcomingEvents();
   }, []);
 
-  // Fetch attendee ID
+  // Fetch attendee ID (Removed - id column is gone, using user.id)
+  /*
   useEffect(() => {
     const fetchAttendeeId = async () => {
-      if (!user?.id) return;
-
-      const { data, error } = await supabase
-        .from('attendees')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (!error && data) {
-        setAttendeeId(data.id);
-      }
+       // ... removed
     };
-
-    fetchAttendeeId();
+    // fetchAttendeeId();
   }, [user?.id]);
+  */
 
   // Fetch schedule events and extract unique dates
   useEffect(() => {
@@ -1258,7 +1253,7 @@ const AttendeeDashboard = () => {
       activeItem={activeTab}
       onItemChange={setActiveTab}
       onProfileClick={() => setShowProfile(true)}
-      notifications={notifications}
+      notifications={notifications}  // Make sure this line exists
       onNotificationClick={(notification) => setSelectedNotification(notification)}
       hideDock={showProfile || !!selectedNotification || !!selectedEvent}
     >
