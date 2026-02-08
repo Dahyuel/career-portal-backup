@@ -5,12 +5,13 @@
 - **Consistent**: Unified design language
 - **Accessible**: Clear hierarchy, good contrast
 - **Responsive**: Mobile-first approach
-- **Primary Color**: Orange `#FF7E47`
+- **Primary Color**: Red-600 `#DC2626`
 
 ## 🌈 Color System
 
 ### Primary
-- Orange: `#FF7E47`
+- Red: `#DC2626` (Red-600)
+- Dark Red: `#B91C1C` (Red-700)
 
 ### Semantic Colors
 - Success: `bg-green-100 text-green-800` / `bg-emerald-100 text-emerald-800`
@@ -54,15 +55,15 @@
 ```jsx
 <div 
   className="relative rounded-2xl overflow-hidden shadow-xl p-8 md:p-12 min-h-[300px] flex flex-col justify-center text-white" 
-  style={{ background: 'linear-gradient(135deg, #FF7E47 0%, #FF7E47 60%, #ffffff 130%)' }}
+  style={{ background: 'linear-gradient(135deg, #DC2626 0%, #B91C1C 60%, #ffffff 130%)' }}
 >
-  <p className="uppercase tracking-widest text-orange-100 font-semibold text-xs mb-2">
+  <p className="uppercase tracking-widest text-red-100 font-semibold text-xs mb-2">
     Dashboard
   </p>
   <h1 className="text-4xl md:text-5xl font-bold mb-4">
     Welcome, {user?.first_name}
   </h1>
-  <p className="text-lg text-orange-50 opacity-90 max-w-md mb-8">
+  <p className="text-lg text-red-50 opacity-90 max-w-md mb-8">
     Description text
   </p>
   <button className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit">
@@ -103,7 +104,7 @@
         </span>
       </div>
       <p className="text-gray-600 text-sm mb-3">Description</p>
-      <button className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-6 py-2 rounded-lg font-semibold hover:shadow-md transition-shadow">
+      <button className="bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-2 rounded-lg font-semibold hover:shadow-md transition-shadow">
         Action
       </button>
     </div>
@@ -115,14 +116,14 @@
 
 **Primary (Gradient)**
 ```jsx
-<button className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-6 py-2 rounded-lg font-semibold hover:shadow-md transition-shadow">
+<button className="bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-2 rounded-lg font-semibold hover:shadow-md transition-shadow">
   Action
 </button>
 ```
 
 **Secondary**
 ```jsx
-<button className="bg-white border border-gray-200 px-6 py-3 rounded-xl font-semibold hover:border-orange-300 transition-colors">
+<button className="bg-white border border-gray-200 px-6 py-3 rounded-xl font-semibold hover:border-red-300 transition-colors">
   Action
 </button>
 ```
@@ -153,7 +154,7 @@ const colors = {
   <input
     type="text"
     placeholder="Search..."
-    className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+    className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600"
   />
 </div>
 
@@ -168,12 +169,12 @@ const colors = {
 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={onClose}>
   <div className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
     <div className="text-center">
-      <div className="bg-gradient-to-r from-orange-500 to-red-500 w-24 h-24 rounded-full mx-auto flex items-center justify-center mb-4">
+      <div className="bg-gradient-to-r from-red-600 to-red-700 w-24 h-24 rounded-full mx-auto flex items-center justify-center mb-4">
         <span className="material-symbols-outlined text-white text-5xl">person</span>
       </div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Title</h2>
       <p className="text-gray-600 mb-6">Description</p>
-      <button className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white py-3 rounded-xl font-semibold mb-3">
+      <button className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white py-3 rounded-xl font-semibold mb-3">
         Primary
       </button>
       <button className="w-full bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold">
@@ -254,7 +255,7 @@ transition-transform
 // Hover effects
 hover:shadow-md transition-shadow
 hover:scale-105 transition-transform
-hover:border-orange-300 transition-colors
+hover:border-red-300 transition-colors
 
 // Active (mobile)
 active:scale-95 transition-transform
@@ -276,13 +277,13 @@ Common classes:
 ## ✅ Best Practices
 
 ### DO
-- Use orange `#FF7E47` for CTAs and active states
-- Use gradient: `linear-gradient(135deg, #FF7E47 0%, #FF7E47 60%, #ffffff 130%)`
+- Use red `#DC2626` for CTAs and active states
+- Use gradient: `linear-gradient(135deg, #DC2626 0%, #B91C1C 60%, #ffffff 130%)`
 - Add hover effects: `hover:shadow-md transition-shadow`
 - Use Material Icons consistently
 - Apply rounded corners: `rounded-xl`, `rounded-full`
 - Maintain spacing: `gap-6`, `p-6`
-- Include focus states: `focus:ring-2 focus:ring-orange-500`
+- Include focus states: `focus:ring-2 focus:ring-red-600`
 
 ### DON'T
 - Mix icon libraries

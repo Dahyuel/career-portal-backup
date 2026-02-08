@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import NotificationDetailModal, { Notification } from './NotificationDetailModal';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -16,8 +17,9 @@ interface SharedNavigationProps {
     onItemChange: (key: string) => void;
     title?: string;
     notifications?: any[];
-    onNotificationClick?: () => void;
+    onNotificationClick?: (notification: any) => void;
     onProfileClick?: () => void;
+    hideDock?: boolean;
 }
 
 const SharedNavigation: React.FC<SharedNavigationProps> = ({
@@ -25,19 +27,23 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     navItems,
     activeItem,
     onItemChange,
-    title = "ASU Career Week",
+    title = "ASU Employment Fair",
     notifications = [],
     onNotificationClick,
-    onProfileClick
+    onProfileClick,
+    hideDock = false
 }) => {
-    const { signOut } = useAuth();
+    const { signOut, profile } = useAuth();
     const navigate = useNavigate();
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
+    const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
+    const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null);
     const [loggingOut, setLoggingOut] = useState(false);
 
     const profileDropdownRef = useRef<HTMLDivElement>(null);
     const mobileProfileDropdownRef = useRef<HTMLDivElement>(null);
+    const notificationDropdownRef = useRef<HTMLDivElement>(null);
 
     // Click outside to close dropdowns
     useEffect(() => {
@@ -47,6 +53,9 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
             }
             if (mobileProfileDropdownRef.current && !mobileProfileDropdownRef.current.contains(event.target as Node)) {
                 setShowMobileProfileDropdown(false);
+            }
+            if (notificationDropdownRef.current && !notificationDropdownRef.current.contains(event.target as Node)) {
+                setShowNotificationDropdown(false);
             }
         };
 
@@ -80,18 +89,25 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
         }
     };
 
+    const handleNotificationClick = (notification: any, e?: React.MouseEvent) => {
+        if (e) {
+            e.stopPropagation();
+        }
+        setSelectedNotification(notification);
+        setShowNotificationDropdown(false);
+        onNotificationClick?.(notification);
+    };
+
     const unreadCount = notifications.filter((n: any) => !n.is_read).length;
 
     return (
         <div className="flex min-h-screen bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 transition-colors duration-200">
             {/* Desktop Sidebar */}
             {/* Desktop Sidebar */}
-            <aside className={`${navItems.length > 0 ? 'lg:flex' : 'hidden'} hidden flex-col w-72 h-screen sticky top-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-50`}>
+            <aside className={`${navItems.length > 0 ? 'lg:flex' : 'hidden'} hidden flex-col w-80 h-screen sticky top-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-50`}>
                 {/* Logo and Brand */}
                 <div className="p-6 flex items-center gap-3">
-                    <div className="bg-primary p-2 rounded-lg shrink-0" style={{ backgroundColor: '#FF7E47' }}>
-                        <span className="material-symbols-outlined text-white">school</span>
-                    </div>
+                    <img src="/images/logo.png" alt="Logo" className="w-12 h-12 object-contain shrink-0" />
                     <span className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
                         {title}
                     </span>
@@ -107,7 +123,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                 ? 'bg-primary/10 text-primary'
                                 : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-primary'
                                 }`}
-                            style={activeItem === item.key ? { color: '#FF7E47', backgroundColor: 'rgba(255, 126, 71, 0.1)' } : {}}
+                            style={activeItem === item.key ? { color: '#DC2626', backgroundColor: 'rgba(220, 38, 38, 0.1)' } : {}}
                         >
                             <span className="material-symbols-outlined">{item.icon}</span>
                             <span>{item.label}</span>
@@ -122,9 +138,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                 <header className={`hidden lg:flex ${navItems.length === 0 ? 'justify-between' : 'justify-end'} items-center px-8 py-4 lg:py-6 gap-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-40`}>
                     {navItems.length === 0 && (
                         <div className="flex items-center gap-3">
-                            <div className="bg-primary p-2 rounded-lg shrink-0" style={{ backgroundColor: '#FF7E47' }}>
-                                <span className="material-symbols-outlined text-white">school</span>
-                            </div>
+                            <img src="/images/logo.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
                             <span className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
                                 {title}
                             </span>
@@ -132,16 +146,72 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                     )}
 
                     <div className="flex items-center gap-4">
-                        {/* Notification Icon */}
-                        <button
-                            onClick={onNotificationClick}
-                            className="relative h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400 cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
-                        >
-                            <span className="material-symbols-outlined">notifications</span>
-                            {unreadCount > 0 && (
-                                <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-900"></span>
+                        {/* Notification Icon with Dropdown */}
+                        <div className="relative" ref={notificationDropdownRef}>
+                            <button
+                                onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
+                                className="relative h-10 w-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400 cursor-pointer hover:ring-2 hover:ring-primary/50 transition-all"
+                            >
+                                <span className="material-symbols-outlined">notifications</span>
+                                {unreadCount > 0 && (
+                                    <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-slate-900"></span>
+                                )}
+                            </button>
+
+                            {/* Desktop Notification Dropdown */}
+                            {showNotificationDropdown && (
+                                <div className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] w-80 max-h-96 overflow-y-auto">
+                                    <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                                        <h3 className="text-lg font-bold text-slate-800 dark:text-white">Notifications</h3>
+                                    </div>
+                                    <div className="py-2">
+                                        {notifications.length > 0 ? (
+                                            notifications.map((notification: any, index: number) => (
+                                                <div
+                                                    key={index}
+                                                    className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer border-b border-slate-100 dark:border-slate-800/50 last:border-0 ${!notification.is_read ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
+                                                        }`}
+                                                    onClick={(e) => handleNotificationClick(notification, e)}
+                                                >
+                                                    <div className="flex gap-3">
+                                                        <div className="shrink-0 mt-1">
+                                                            <span className="material-symbols-outlined text-primary" style={{ color: '#DC2626' }}>
+                                                                {notification.type === 'success' ? 'check_circle' : 'info'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
+                                                                {notification.title || 'Notification'}
+                                                            </p>
+                                                            <p className="text-xs text-slate-600 dark:text-slate-400">
+                                                                {notification.message}
+                                                            </p>
+                                                            {notification.created_at && (
+                                                                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                                                                    {new Date(notification.created_at).toLocaleDateString()}
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                        {!notification.is_read && (
+                                                            <div className="shrink-0">
+                                                                <span className="w-2 h-2 bg-blue-500 rounded-full block"></span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="px-4 py-8 text-center">
+                                                <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-700 mb-2 block">
+                                                    notifications_off
+                                                </span>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400">No notifications</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
                             )}
-                        </button>
+                        </div>
 
                         {/* Profile Icon with Dropdown */}
                         <div className="relative" ref={profileDropdownRef}>
@@ -154,7 +224,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
 
                             {/* Desktop Profile Dropdown */}
                             {showProfileDropdown && (
-                                <div className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-50 min-w-[180px]">
+                                <div className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] min-w-[180px]">
                                     <nav className="py-2">
                                         <button
                                             onClick={() => {
@@ -166,16 +236,18 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                             <span className="material-symbols-outlined text-xl">person</span>
                                             <span className="font-medium">Profile</span>
                                         </button>
-                                        <button
-                                            onClick={() => {
-                                                setShowProfileDropdown(false);
-                                                // TODO: Implement leaderboard modal
-                                            }}
-                                            className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                                        >
-                                            <span className="material-symbols-outlined text-xl">leaderboard</span>
-                                            <span className="font-medium">Leaderboard</span>
-                                        </button>
+                                        {profile?.role !== 'attendee' && (
+                                            <button
+                                                onClick={() => {
+                                                    setShowProfileDropdown(false);
+                                                    // TODO: Implement leaderboard modal
+                                                }}
+                                                className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                                            >
+                                                <span className="material-symbols-outlined text-xl">leaderboard</span>
+                                                <span className="font-medium">Leaderboard</span>
+                                            </button>
+                                        )}
                                         <button
                                             onClick={() => {
                                                 setShowProfileDropdown(false);
@@ -207,9 +279,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                 <header className="lg:hidden bg-white dark:bg-slate-900 px-6 py-4 flex items-center justify-between z-40 sticky top-0 border-b border-slate-200 dark:border-slate-800">
                     {/* Logo */}
                     <div className="flex items-center gap-3">
-                        <div className="bg-primary p-2 rounded-lg shrink-0" style={{ backgroundColor: '#FF7E47' }}>
-                            <span className="material-symbols-outlined text-white">school</span>
-                        </div>
+                        <img src="/images/logo.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
                         <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
                             {title}
                         </h1>
@@ -218,7 +288,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                     <div className="flex items-center gap-3">
                         {/* Notification Icon */}
                         <button
-                            onClick={onNotificationClick}
+                            onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
                             className="relative h-9 w-9 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400 cursor-pointer active:scale-95 transition-transform"
                         >
                             <span className="material-symbols-outlined text-xl">notifications</span>
@@ -237,9 +307,71 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                     </div>
                 </header>
 
+                {/* Notification Detail Modal */}
+                {selectedNotification && (
+                    <NotificationDetailModal
+                        notification={selectedNotification}
+                        onClose={() => setSelectedNotification(null)}
+                    />
+                )}
+
+                {/* Mobile Notification Dropdown */}
+                {showNotificationDropdown && (
+                    <div ref={notificationDropdownRef} className="lg:hidden absolute top-[73px] right-6 left-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] max-h-96 overflow-y-auto">
+                        <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-white">Notifications</h3>
+                        </div>
+                        <div className="py-2">
+                            {notifications.length > 0 ? (
+                                notifications.map((notification: any, index: number) => (
+                                    <div
+                                        key={index}
+                                        className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer border-b border-slate-100 dark:border-slate-800/50 last:border-0 ${!notification.is_read ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
+                                            }`}
+                                        onClick={(e) => handleNotificationClick(notification, e)}
+                                    >
+                                        <div className="flex gap-3">
+                                            <div className="shrink-0 mt-1">
+                                                <span className="material-symbols-outlined text-primary" style={{ color: '#DC2626' }}>
+                                                    {notification.type === 'success' ? 'check_circle' : 'info'}
+                                                </span>
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
+                                                    {notification.title || 'Notification'}
+                                                </p>
+                                                <p className="text-xs text-slate-600 dark:text-slate-400">
+                                                    {notification.message}
+                                                </p>
+                                                {notification.created_at && (
+                                                    <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                                                        {new Date(notification.created_at).toLocaleDateString()}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            {!notification.is_read && (
+                                                <div className="shrink-0">
+                                                    <span className="w-2 h-2 bg-blue-500 rounded-full block"></span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="px-4 py-8 text-center">
+                                    <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-700 mb-2 block">
+                                        notifications_off
+                                    </span>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">No notifications</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Mobile Profile Dropdown Menu */}
                 {showMobileProfileDropdown && (
-                    <div ref={mobileProfileDropdownRef} className="lg:hidden absolute top-[73px] right-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-30 min-w-[180px]">
+                    <div ref={mobileProfileDropdownRef} className="lg:hidden absolute top-[73px] right-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[55] min-w-[180px]">
                         <nav className="py-2">
                             <button
                                 onClick={() => {
@@ -251,16 +383,18 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                 <span className="material-symbols-outlined text-xl">person</span>
                                 <span className="font-medium">Profile</span>
                             </button>
-                            <button
-                                onClick={() => {
-                                    setShowMobileProfileDropdown(false);
-                                    // TODO: Implement leaderboard modal
-                                }}
-                                className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                            >
-                                <span className="material-symbols-outlined text-xl">leaderboard</span>
-                                <span className="font-medium">Leaderboard</span>
-                            </button>
+                            {profile?.role !== 'attendee' && (
+                                <button
+                                    onClick={() => {
+                                        setShowMobileProfileDropdown(false);
+                                        // TODO: Implement leaderboard modal
+                                    }}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                                >
+                                    <span className="material-symbols-outlined text-xl">leaderboard</span>
+                                    <span className="font-medium">Leaderboard</span>
+                                </button>
+                            )}
                             <button
                                 onClick={() => {
                                     setShowMobileProfileDropdown(false);
@@ -292,7 +426,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
             </main>
 
             {/* Mobile Bottom Navigation - Floating Dock */}
-            {navItems.length > 0 && (
+            {!hideDock && navItems.length > 0 && (
                 <div className="lg:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[450px] z-50">
                     <nav className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 px-4 py-3 rounded-[28px] shadow-2xl flex justify-between items-center overflow-x-auto">
                         {navItems.map((item) => (
@@ -303,7 +437,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                     ? 'text-primary'
                                     : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
                                     }`}
-                                style={activeItem === item.key ? { color: '#FF7E47' } : {}}
+                                style={activeItem === item.key ? { color: '#DC2626' } : {}}
                             >
                                 <span className="material-symbols-outlined">{item.icon}</span>
                                 <span className="text-[10px] font-bold">{item.label}</span>

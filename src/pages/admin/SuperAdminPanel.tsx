@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAttendeeProfile } from '../../hooks/useAttendeeProfile';
+import AttendeeProfileCard from '../../components/AttendeeProfileCard';
 import { supabase } from '../../lib/supabase';
 
 interface SystemMetrics {
@@ -47,7 +49,9 @@ interface SecurityLog {
 }
 
 export const SuperAdminPanel: React.FC = () => {
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
+  const { attendeeProfile } = useAttendeeProfile(user?.id);
+  const [showProfile, setShowProfile] = useState(false);
 
   const navItems: NavItem[] = [
     { key: 'home', label: 'System Admin', icon: Shield }
@@ -216,6 +220,8 @@ export const SuperAdminPanel: React.FC = () => {
       activeItem={activeTab}
       onItemChange={setActiveTab}
       title="Super Admin"
+      onProfileClick={() => setShowProfile(true)}
+      hideDock={showProfile}
     >
       <div className="space-y-8">
         {/* System Health Overview */}

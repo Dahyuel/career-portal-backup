@@ -1,6 +1,8 @@
-// AdminPanel.tsx - Frontend-only Admin Dashboard
 import React, { useState } from 'react';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
+import { useAuth } from '../../contexts/AuthContext';
+import { useAttendeeProfile } from '../../hooks/useAttendeeProfile';
+import AttendeeProfileCard from '../../components/AttendeeProfileCard';
 import {
   Plus,
   TrendingUp,
@@ -141,6 +143,10 @@ const mockJobs = [
 ];
 
 export function AdminPanel() {
+  const { user } = useAuth();
+  const { attendeeProfile } = useAttendeeProfile(user?.id);
+  const [showProfile, setShowProfile] = useState(false);
+
   const navItems: NavItem[] = [
     { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
     { key: 'statistics', label: 'Statistics', icon: 'bar_chart' },
@@ -172,6 +178,7 @@ export function AdminPanel() {
           Monitor and manage all aspects of the career fair event from one central hub.
         </p>
         <button
+          onClick={() => setShowProfile(true)}
           className="bg-white text-orange-600 px-6 py-3 rounded-xl font-semibold hover:bg-orange-50 transition-all flex items-center gap-2 shadow-lg"
         >
           <UserCheck className="h-5 w-5" />
@@ -687,6 +694,8 @@ export function AdminPanel() {
       activeItem={activeTab}
       onItemChange={setActiveTab}
       title="ASU Career Week"
+      onProfileClick={() => setShowProfile(true)}
+      hideDock={showProfile}
     >
       <div className="max-w-7xl mx-auto">
         {activeTab === 'dashboard' && renderDashboard()}
@@ -728,6 +737,14 @@ export function AdminPanel() {
         onClose={() => setShowAnnouncementModal(false)}
         title="Send Announcement"
       />
+
+      {/* Profile Card */}
+      {showProfile && attendeeProfile && (
+        <AttendeeProfileCard
+          profile={attendeeProfile}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
     </SharedNavigation>
   );
 }

@@ -1,14 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAttendeeProfile } from '../../hooks/useAttendeeProfile';
 import { mockActivities } from '../../mocks';
 import SharedNavigation from '../../components/shared/SharedNavigation';
+import AttendeeProfileCard from '../../components/AttendeeProfileCard';
 
 export const VolunteerDashboard: React.FC = () => {
   const { user } = useAuth();
+  const { attendeeProfile } = useAttendeeProfile(user?.id);
+  const [showProfile, setShowProfile] = useState(false);
 
   // Get user stats from mock data
   const userStats = {
-    score: user?.score || 1250,
+    score: attendeeProfile?.score || 1250,
     rank: 12
   };
 
@@ -48,6 +52,8 @@ export const VolunteerDashboard: React.FC = () => {
       navItems={[]}
       activeItem=""
       onItemChange={() => { }}
+      onProfileClick={() => setShowProfile(true)}
+      hideDock={showProfile}
     >
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-12">
@@ -61,12 +67,15 @@ export const VolunteerDashboard: React.FC = () => {
               <div className="relative z-10">
                 <p className="uppercase tracking-widest text-orange-100 font-semibold text-xs mb-2">Volunteer Dashboard</p>
                 <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                  Welcome, {user?.first_name || 'Volunteer'}
+                  Welcome, {attendeeProfile?.full_name?.split(' ')[0] || 'Volunteer'}
                 </h1>
                 <p className="text-lg text-orange-50 opacity-90 max-w-md mb-8">
                   Your support makes this event possible. Thank you for your dedication!
                 </p>
-                <button className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit">
+                <button
+                  onClick={() => setShowProfile(true)}
+                  className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit"
+                >
                   <span className="material-symbols-outlined text-xl">account_circle</span>
                   Show Profile
                 </button>
@@ -155,6 +164,14 @@ export const VolunteerDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Profile Card */}
+      {showProfile && attendeeProfile && (
+        <AttendeeProfileCard
+          profile={attendeeProfile}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
     </SharedNavigation>
   );
 };
