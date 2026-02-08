@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
 // Navigation item type
@@ -30,6 +31,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     onProfileClick
 }) => {
     const { signOut } = useAuth();
+    const navigate = useNavigate();
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
@@ -61,11 +63,20 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
 
         try {
             await signOut();
+            // Navigate to login page after successful logout
+            navigate('/login', { replace: true });
         } catch (error) {
             console.error('Logout error:', error);
+            // Force redirect on error
             window.location.href = '/login';
         } finally {
-            setLoggingOut(false);
+            // Fallback redirect if navigation hasn't happened
+            setTimeout(() => {
+                if (window.location.pathname !== '/login') {
+                    window.location.href = '/login';
+                }
+                setLoggingOut(false);
+            }, 1000);
         }
     };
 
@@ -177,6 +188,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                         </button>
                                         <div className="border-t border-slate-200 dark:border-slate-800 my-1"></div>
                                         <button
+                                            type="button"
                                             onClick={handleSignOut}
                                             disabled={loggingOut}
                                             className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all disabled:opacity-50"
@@ -261,6 +273,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                             </button>
                             <div className="border-t border-slate-200 dark:border-slate-800 my-1"></div>
                             <button
+                                type="button"
                                 onClick={handleSignOut}
                                 disabled={loggingOut}
                                 className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all disabled:opacity-50"
@@ -287,8 +300,8 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                 key={item.key}
                                 onClick={() => onItemChange(item.key)}
                                 className={`flex flex-col items-center gap-1 transition-colors min-w-[60px] ${activeItem === item.key
-                                        ? 'text-primary'
-                                        : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                                    ? 'text-primary'
+                                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
                                     }`}
                                 style={activeItem === item.key ? { color: '#FF7E47' } : {}}
                             >

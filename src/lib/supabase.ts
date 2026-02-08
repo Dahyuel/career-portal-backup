@@ -1,2465 +1,1714 @@
-// lib/supabase.ts - Enhanced with UUID search support, dynamic attendee search, and session booking
+// lib/supabase.ts - Optimized Supabase Integration for Employment Fair
 import { createClient } from '@supabase/supabase-js';
 
-// Get environment variables for Vite
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
+// Initialize Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
-// Validate that environment variables are set
+// Default event ID for EF2026
+export const DEFAULT_EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+
+// Validate environment variables
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('Missing Supabase environment variables. Please check your .env file.');
-  console.error('VITE_SUPABASE_URL:', supabaseUrl ? 'Set' : 'Missing');
-  console.error('VITE_SUPABASE_ANON_KEY:', supabaseAnonKey ? 'Set' : 'Missing');
-  
-  // You might want to throw an error in production
-  // throw new Error('Missing Supabase environment variables');
+  throw new Error('Missing Supabase environment variables');
 }
 
+// Create clients
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-interface ValidationResult {
-  isValid: boolean;
-  error: string | null;
+const supabaseAdmin = supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+      storageKey: 'supabase.admin.auth.token' // Explicitly separate storage
+    }
+  })
+  : null;
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface ValidationError {
+  field: string;
+  message: string;
 }
 
-export const isValidEnumValue = <T extends readonly string[]>(
-  value: string, 
-  enumArray: T
-): value is T[number] => {
-  return enumArray.includes(value as T[number]);
-};
-type BucketType = 'Assets' | 'cvs' | 'university-ids';
-// Check if user exists by personal ID or email
-export const checkUserExists = async (personalId: string, email: string): Promise<{exists: boolean, byPersonalId: boolean, byEmail: boolean}> => {
+export interface AuthResult {
+  success: boolean;
+  data: {
+    user: any;
+    session: any;
+    profile?: any;
+    attendee?: any;
+    volunteer?: any;
+  } | null;
+  error: {
+    message: string;
+    validationErrors?: ValidationError[];
+  } | null;
+}
+
+export interface AttendeeRegistrationData {
+  email: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  personalId: string;
+  gender?: string;
+  nationality?: string;
+  university: string;
+  faculty: string;
+  degreeLevel?: string;
+  department: string;
+  classYear?: string;
+  cvFile?: File;
+  enrollmentProofFile?: File;
+  volunteerId?: string;
+}
+
+export interface VolunteerRegistrationData {
+  email: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  personalId: string;
+  gender: string;
+  teamId: string;
+}
+
+export interface EmployerRegistrationData {
+  email: string;
+  password: string;
+  fullName: string;
+  phone: string;
+  personalId: string;
+  jobTitle: string;
+  companyKey: string;
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Delete auth user (admin only) - Used for cleanup on registration failures
+ */
+const deleteAuthUser = async (userId: string): Promise<void> => {
+  if (!supabaseAdmin) {
+    console.warn('⚠️ Cannot delete auth user - admin client unavailable');
+    return;
+  }
+
   try {
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .select('personal_id, email')
-      .or(`personal_id.eq.${personalId.trim()},email.eq.${email.trim().toLowerCase()}`)
-      .limit(1);
-    
+    console.log('🗑️ [CLEANUP] Deleting auth user:', userId);
+
+    // First, sign out the client to ensure no lingering session state
+    await supabase.auth.signOut();
+
+    // Then delete the user from admin
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+
     if (error) {
-      console.error('Error checking user existence:', error);
-      return { exists: false, byPersonalId: false, byEmail: false };
+      console.error('❌ [CLEANUP] Failed to delete auth user:', error.message);
+    } else {
+      console.log('✅ [CLEANUP] Auth user deleted successfully');
     }
-    
-    if (data && data.length > 0) {
-      const user = data[0];
+  } catch (error: any) {
+    console.error('❌ [CLEANUP] Exception deleting auth user:', error.message);
+  }
+};
+
+
+
+/**
+ * Upload file to Supabase Storage
+ */
+type FileCategory = 'CV' | 'Uni_ID';
+
+export const uploadFile = async (
+  category: FileCategory,
+  userId: string,
+  file: File
+): Promise<{ data: { path: string; url: string } | null; error: { message: string } | null }> => {
+  try {
+    // Validate file type
+    const allowedTypes: Record<FileCategory, string[]> = {
+      'CV': ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+      'Uni_ID': ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']
+    };
+
+    if (!allowedTypes[category].includes(file.type)) {
       return {
-        exists: true,
-        byPersonalId: user.personal_id === personalId.trim(),
-        byEmail: user.email === email.trim().toLowerCase()
-      };
-    }
-    
-    return { exists: false, byPersonalId: false, byEmail: false };
-  } catch (error: any) {
-    console.error('User existence check error:', error);
-    return { exists: false, byPersonalId: false, byEmail: false };
-  }
-};
-
-// Check if personal ID is unique
-export const checkPersonalIdUnique = async (personalId: string): Promise<ValidationResult> => {
-  try {
-    const { data, error } = await supabase.rpc('check_personal_id_exists', {
-      p_personal_id: personalId.trim()
-    });
-
-    if (error) {
-      console.error('Personal ID check error:', error);
-      return { isValid: false, error: 'Failed to validate Personal ID' };
-    }
-
-    return {
-      isValid: !data.exists,
-      error: data.error
-    };
-  } catch (error: any) {
-    console.error('Personal ID check exception:', error);
-    return { isValid: false, error: 'Failed to validate Personal ID' };
-  }
-};
-
-// Check if email is unique in users_profiles
-export const checkEmailUnique = async (email: string): Promise<ValidationResult> => {
-  try {
-    const { data, error } = await supabase.rpc('check_email_exists', {
-      p_email: email.trim().toLowerCase()
-    });
-
-    if (error) {
-      console.error('Email check error:', error);
-      return { isValid: false, error: 'Failed to validate email' };
-    }
-
-    return {
-      isValid: !data.exists,
-      error: data.error
-    };
-  } catch (error: any) {
-    console.error('Email check exception:', error);
-    return { isValid: false, error: 'Failed to validate email' };
-  }
-};
-
-export const checkVolunteerIdExists = async (volunteerId: string): Promise<ValidationResult> => {
-  if (!volunteerId || !volunteerId.trim()) {
-    return { isValid: true, error: null };
-  }
-
-  try {
-    const { data, error } = await supabase.rpc('validate_volunteer_id', {
-      p_volunteer_id: volunteerId.trim()
-    });
-
-    if (error) {
-      console.error('Volunteer ID check error:', error);
-      return { isValid: false, error: 'Failed to validate Volunteer ID' };
-    }
-
-    return {
-      isValid: data.is_valid,
-      error: data.error
-    };
-  } catch (error: any) {
-    console.error('Volunteer ID check exception:', error);
-    return { isValid: false, error: 'Failed to validate Volunteer ID' };
-  }
-};
-
-// Enhanced error handling for validation
-export const validateRegistrationData = async (
-  email: string,
-  personalId: string,
-  volunteerId?: string,
-  phone?: string
-): Promise<{ isValid: boolean; errors: string[]; volunteerInfo?: any }> => {
-  const errors: string[] = [];
-
-  // Basic email validation
-  if (!email || !email.includes('@')) {
-    errors.push('Valid email is required');
-  }
-
-  // Personal ID validation (14 digits)
-  if (!personalId || !/^\d{14}$/.test(personalId.trim())) {
-    errors.push('Personal ID must be exactly 14 digits');
-  }
-
-  // Phone validation if provided
-  if (phone && !/^(010|011|012|015)\d{8}$/.test(phone.trim())) {
-    errors.push('Phone number must be valid Egyptian format (01X-XXXXXXXX)');
-  }
-
-  // Check for existing users
-  const userExists = await checkUserExists(personalId, email);
-  if (userExists.exists) {
-    if (userExists.byPersonalId) errors.push('Personal ID already registered');
-    if (userExists.byEmail) errors.push('Email already registered');
-  }
-
-  // Validate volunteer ID if provided
-  let volunteerInfo = null;
-  if (volunteerId && volunteerId.trim()) {
-    const volunteerValidation = await checkVolunteerIdExists(volunteerId);
-    if (!volunteerValidation.isValid && volunteerValidation.error) {
-      errors.push(volunteerValidation.error);
-    } else if (volunteerValidation.isValid) {
-      const { data: volunteer } = await getVolunteerByVolunteerId(volunteerId);
-      volunteerInfo = volunteer;
-    }
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors,
-    volunteerInfo
-  };
-};
-
-export const getVolunteerByVolunteerId = async (volunteerId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .select(`
-        id,
-        first_name,
-        last_name,
-        role,
-        volunteer_id
-      `)
-      .eq('volunteer_id', volunteerId.trim())
-      .neq('role', 'attendee')
-      .single();
-
-    if (error) {
-      console.error('Get volunteer error:', error);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Get volunteer exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Replace validateRegistrationWithVolunteer with this:
-export const validateRegistrationWithEdgeFunction = async (
-  personalId: string,
-  email: string,
-  firstName: string,
-  lastName: string,
-  volunteerId?: string,
-  phone?: string,
-  userType: 'attendee' | 'volunteer' = 'attendee',
-  role?: string,
-  gender?: string,
-  tl_team?: string
-): Promise<{ 
-  isValid: boolean; 
-  errors: string[]; 
-  volunteerInfo?: any;
-  volunteerUuid?: string;
-  warnings?: string[];
-}> => {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    const response = await fetch(`${supabaseUrl}/functions/v1/validate-registration`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session?.access_token || supabaseAnonKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: email?.trim().toLowerCase(),
-        personalId: personalId?.trim(),
-        firstName: firstName?.trim(),
-        lastName: lastName?.trim(),
-        volunteerId: volunteerId?.trim() || null,
-        phone: phone?.trim() || null,
-        userType,
-        role: role || null,
-        gender: gender || null,
-        tl_team: tl_team || null
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Edge function validation error:', response.status, errorText);
-      throw new Error(`Validation service error: ${response.status}`);
-    }
-
-    const validation = await response.json();
-    return validation;
-
-  } catch (error: any) {
-    console.error('Edge function validation error:', error);
-    return {
-      isValid: false,
-      errors: ['Validation failed. Please try again.'],
-      warnings: []
-    };
-  }
-};
-
-// Add building entry score for volunteer
-export const addBuildingEntryScoreForVolunteer = async (volunteerId: string, attendeeName: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('user_scores')
-      .insert([{
-        user_id: volunteerId,
-        points: 1,
-        activity_type: 'building_entry',
-        activity_description: `Building entry processed for attendee: ${attendeeName}`
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding building entry score for volunteer:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add building entry score exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Add session entry score for volunteer
-export const addSessionEntryScoreForVolunteer = async (volunteerId: string, attendeeName: string, sessionTitle: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('user_scores')
-      .insert([{
-        user_id: volunteerId,
-        points: 1,
-        activity_type: 'session_entry',
-        activity_description: `Session entry processed for ${attendeeName} in: ${sessionTitle}`
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding session entry score for volunteer:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add session entry score exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Check if attendee has building entry today
-export const hasAttendeeBuildingEntryToday = async (attendeeId: string): Promise<boolean> => {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const { data, error } = await supabase
-      .from('user_scores')
-      .select('id')
-      .eq('user_id', attendeeId)
-      .eq('activity_type', 'building_entry_bonus')
-      .gte('awarded_at', today.toISOString())
-      .limit(1);
-
-    if (error) {
-      console.error('Error checking building entry bonus:', error);
-      return false;
-    }
-
-    return data && data.length > 0;
-  } catch (error: any) {
-    console.error('Check building entry bonus exception:', error);
-    return false;
-  }
-};
-
-// Add building entry bonus for attendee (once per day)
-export const addBuildingEntryBonusForAttendee = async (attendeeId: string) => {
-  try {
-    // Check if already got bonus today
-    const hasBonusToday = await hasAttendeeBuildingEntryToday(attendeeId);
-    if (hasBonusToday) {
-      return { data: null, error: { message: 'Building entry bonus already awarded today' } };
-    }
-
-    const { data, error } = await supabase
-      .from('user_scores')
-      .insert([{
-        user_id: attendeeId,
-        points: 10,
-        activity_type: 'building_entry_bonus',
-        activity_description: 'Daily building entry bonus'
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding building entry bonus for attendee:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add building entry bonus exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Add session entry bonus for attendee (unlimited)
-export const addSessionEntryBonusForAttendee = async (attendeeId: string, sessionTitle: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('user_scores')
-      .insert([{
-        user_id: attendeeId,
-        points: 10,
-        activity_type: 'session_entry_bonus',
-        activity_description: `Session attendance bonus: ${sessionTitle}`
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding session entry bonus for attendee:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add session entry bonus exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// In supabase.ts - Fix the signUpUser function
-export const signUpUser = async (email: string, password: string, userData: any) => {
-  try {
-    console.log('Starting auth user creation (two-step flow)...');
-    
-    // Step 1: Create auth user only using Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
-      password: password,
-      options: {
-        data: {
-          first_name: userData.first_name,
-          last_name: userData.last_name,
-          role: userData.role || 'attendee'
-        }
-      }
-    });
-
-    if (authError) {
-      console.error('Auth user creation error:', authError);
-      return {
-        success: false,
         data: null,
-        error: {
-          message: authError.message,
-          validationErrors: [authError.message]
-        }
+        error: { message: `Invalid file type for ${category}. Allowed: ${allowedTypes[category].join(', ')}` }
       };
     }
 
-    if (!authData.user) {
-      console.error('No user returned from auth creation');
-      return {
-        success: false,
-        data: null,
-        error: {
-          message: 'Failed to create user account',
-          validationErrors: ['User creation failed']
-        }
-      };
+    // Check size (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      return { data: null, error: { message: `File must be under 10MB` } };
     }
 
-    console.log('✅ Auth user created successfully:', authData.user.id);
-
-    // Step 2: Create basic profile with the auth user's ID
-    const profileData = {
-      id: authData.user.id, // CRITICAL: Use the auth user's ID as foreign key
-      email: email.trim().toLowerCase(),
-      first_name: userData.first_name,
-      last_name: userData.last_name,
-      role: userData.role || 'attendee',
-      personal_id: null,
-      phone: null,
-      university: null,
-      faculty: null,
-      gender: null,
-      nationality: null,
-      degree_level: null,
-      program: null,
-      class: null,
-      how_did_hear_about_event: null,
-      volunteer_id: null,
-      university_id_path: null,
-      cv_path: null,
-      score: 0,
-      qr_code: null,
-      building_entry: false,
-      event_entry: false,
-      tl_team: null,
-      profile_complete: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    console.log('Creating profile with ID:', authData.user.id);
-    console.log('Profile data:', profileData);
-    
-    const { data: profileDataResult, error: profileError } = await supabase
-      .from('users_profiles')
-      .insert([profileData])
-      .select()
-      .single();
-
-    if (profileError) {
-      console.error('❌ Profile creation error:', profileError);
-      
-      // Check if it's a foreign key constraint error
-      if (profileError.code === '23503') {
-        console.error('Foreign key constraint violation - auth user might not exist in database yet');
-      }
-      
-      // Even if profile creation fails, return success since auth user was created
-      console.warn('⚠️ Auth user created but profile creation failed. User can complete profile later.');
-      
-      return {
-        success: true,
-        data: {
-          user: authData.user,
-          profile: null,
-          session: authData.session
-        },
-        error: null
-      };
-    }
-
-    console.log('✅ Profile created successfully:', profileDataResult);
-
-    // Step 3: Try to auto-sign in (but don't block on errors)
-    try {
-      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password: password
-      });
-
-      if (signInError) {
-        console.warn('Auto-signin failed:', signInError);
-      } else {
-        console.log('✅ Auto-signin successful');
-        return {
-          success: true,
-          data: {
-            user: signInData.user,
-            profile: profileDataResult,
-            session: signInData.session
-          },
-          error: null
-        };
-      }
-    } catch (signInError) {
-      console.warn('Auto-signin exception:', signInError);
-    }
-
-    // Return success even if auto-signin fails
-    return {
-      success: true,
-      data: {
-        user: authData.user,
-        profile: profileDataResult,
-        session: authData.session
-      },
-      error: null
-    };
-
-  } catch (error: any) {
-    console.error('💥 Registration error:', error);
-    return {
-      success: false,
-      data: null,
-      error: {
-        message: error.message || 'Registration failed'
-      }
-    };
-  }
-};
-
-
-// In supabase.ts - Update signUpVolunteer to use Edge Function
-export const signUpVolunteer = async (email: string, password: string, userData: any) => {
-  try {
-    console.log('🚀 Starting volunteer registration via Edge Function...');
-    
-    const response = await fetch(`${supabaseUrl}/functions/v1/volunteer-registration`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        password,
-        firstName: userData.first_name,
-        lastName: userData.last_name,
-        personalId: userData.personal_id,
-        phone: userData.phone,
-        faculty: userData.faculty,
-        gender: userData.gender,
-        role: userData.role,
-        tlTeam: userData.tl_team
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Edge function volunteer registration failed:', response.status, errorText);
-      throw new Error('Volunteer registration service unavailable');
-    }
-
-    const result = await response.json();
-
-    if (result.error) {
-      return {
-        success: false,
-        data: null,
-        error: {
-          message: result.error,
-          details: result.details,
-          validationErrors: [result.error]
-        }
-      };
-    }
-
-    console.log('✅ Volunteer registration via Edge Function successful');
-    
-    return {
-      success: true,
-      data: {
-        user: result.user,
-        profile: result.profile,
-        session: result.session
-      },
-      error: null
-    };
-
-  } catch (error: any) {
-    console.error('Volunteer registration exception:', error);
-    return {
-      success: false,
-      data: null,
-      error: {
-        message: error.message || 'Volunteer registration failed'
-      }
-    };
-  }
-};
-
-// Keep existing functions for backward compatibility
-export const signInUser = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
-    password,
-  });
-  return { data, error };
-};
-export const resetPassword = async (email: string) => {
-  try {
-    const { data, error } = await supabase.auth.resetPasswordForEmail(
-      email.trim().toLowerCase(), 
-      {
-        redirectTo: `https://port.asucareercenter.com/reset-password#type=recovery`
-      }
-    );
-    
-    if (error) {
-      console.error('Password reset error:', error);
-      return { data: null, error };
-    }
-
-    console.log('✅ Password reset email sent to:', email);
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Password reset exception:', error);
-    return { data: null, error: { message: error.message || 'Password reset failed' } };
-  }
-};
-export const uploadFile = async (bucket: BucketType, userId: string, file: File) => {
-  try {
-    // ... existing validation code ...
-
-    // Validate file type based on bucket
-    const bucketFileTypes: Record<BucketType, string[]> = {
-      'Assets': ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'],
-      'cvs': ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-      'university-ids': ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']
-    };
-
-    // Use type assertion to tell TypeScript we know what we're doing
-    const allowedTypes = bucketFileTypes[bucket] || ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
-    if (!allowedTypes.includes(file.type)) {
-      return { 
-        data: null, 
-        error: { 
-          message: `File type ${file.type} not allowed for ${bucket} bucket. Allowed types: ${allowedTypes.join(', ')}` 
-        } 
-      };
-    }
-
-    // Generate secure filename
+    // Generate unique filename
     const fileExt = file.name.split('.').pop()?.toLowerCase();
     if (!fileExt) {
-      return { data: null, error: { message: 'File must have a valid extension' } };
+      return { data: null, error: { message: 'File must have an extension' } };
     }
 
     const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 15);
-    const fileName = `${timestamp}-${randomStr}.${fileExt}`;
-    const filePath = `${userId}/${fileName}`;
+    const random = Math.random().toString(36).substring(2, 8);
+    const sanitized = file.name.replace(/[^a-zA-Z0-9.-]/g, '_').replace(/\.[^/.]+$/, '');
+    const fileName = `${sanitized}_${timestamp}_${random}.${fileExt}`;
+    const filePath = `${userId}/${category}/${fileName}`;
 
-    console.log(`Uploading ${file.name} (${(file.size / 1024).toFixed(2)}KB) to ${bucket}/${filePath}`);
+    console.log(`📤 [UPLOAD] Uploading ${category}:`, fileName);
 
-    // Upload with retry logic
-    let uploadAttempt = 0;
-    const maxRetries = 3;
-    
-    while (uploadAttempt < maxRetries) {
-      try {
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from(bucket)
-          .upload(filePath, file, {
-            cacheControl: '3600',
-            upsert: false // Don't overwrite existing files
-          });
-
-        if (uploadError) {
-          console.error(`Upload attempt ${uploadAttempt + 1} failed:`, uploadError);
-          
-          if (uploadError.message?.includes('already exists') || uploadError.message?.includes('duplicate') || uploadError.message?.includes('409')) {
-            // File already exists, try with new filename
-            const newFileName = `${timestamp}-${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
-            const newFilePath = `${userId}/${newFileName}`;
-            
-            const { data: retryData, error: retryError } = await supabase.storage
-              .from(bucket)
-              .upload(newFilePath, file, {
-                cacheControl: '3600',
-                upsert: false
-              });
-
-            if (retryError) {
-              throw retryError;
-            }
-
-            // Get public URL for successful retry upload
-            const { data: urlData } = supabase.storage
-              .from(bucket)
-              .getPublicUrl(newFilePath);
-
-            return { 
-              data: { 
-                path: newFilePath, 
-                url: urlData.publicUrl,
-                fileName: newFileName
-              }, 
-              error: null 
-            };
-          }
-          
-          throw uploadError;
-        }
-
-        // Successful upload - get public URL
-        const { data: urlData } = supabase.storage
-          .from(bucket)
-          .getPublicUrl(filePath);
-
-        console.log('File uploaded successfully:', urlData.publicUrl);
-
-        return { 
-          data: { 
-            path: filePath, 
-            url: urlData.publicUrl,
-            fileName: fileName
-          }, 
-          error: null 
-        };
-
-      } catch (attemptError) {
-        uploadAttempt++;
-        console.error(`Upload attempt ${uploadAttempt} failed:`, attemptError);
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 1000 * uploadAttempt));
-      }
-    }
-
-  } catch (error: any) {
-    console.error('Upload function error:', error);
-    return { 
-      data: null, 
-      error: { 
-        message: `Upload failed: ${error.message}`,
-        originalError: error
-      } 
-    };
-  }
-};
-export const uploadCompanyLogo = async (userId: string, file: File, companyName: string) => {
-  try {
-    if (!file) {
-      return { data: null, error: { message: 'No logo file provided' } };
-    }
-
-    // Validate image file
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      return { 
-        data: null, 
-        error: { message: 'Logo must be an image file (JPEG, PNG, GIF, or WebP)' } 
-      };
-    }
-
-    // Check file size (5MB limit for logos)
-    const maxSize = 5 * 1024 * 1024; // 5MB
-    if (file.size > maxSize) {
-      return { data: null, error: { message: 'Logo file size must be less than 5MB' } };
-    }
-
-    const fileExt = file.name.split('.').pop()?.toLowerCase();
-    const sanitizedCompanyName = companyName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    const fileName = `${Date.now()}-${sanitizedCompanyName}.${fileExt}`;
-    const filePath = `company-logos/${fileName}`;
-
-    console.log(`Uploading company logo to Assets/${filePath}`);
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("Assets")
+    // Upload to storage
+    const { error: uploadError } = await supabase.storage
+      .from('Users')
       .upload(filePath, file, {
         cacheControl: '3600',
         upsert: false
       });
 
     if (uploadError) {
-      console.error('Company logo upload error:', uploadError);
-      return { data: null, error: uploadError };
+      console.error('❌ [UPLOAD] Error:', uploadError.message);
+      return { data: null, error: { message: uploadError.message } };
     }
 
-    // Get the public URL
-    const { data: urlData } = supabase.storage
-      .from("Assets")
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('Users')
       .getPublicUrl(filePath);
 
-    return { 
-      data: { 
-        path: filePath, 
-        url: urlData.publicUrl,
-        fileName: fileName
-      }, 
-      error: null 
+    console.log('✅ [UPLOAD] File uploaded:', publicUrl);
+
+    return {
+      data: { path: filePath, url: publicUrl },
+      error: null
     };
 
   } catch (error: any) {
-    console.error('Company logo upload exception:', error);
+    console.error('💥 [UPLOAD] Exception:', error.message);
     return { data: null, error: { message: error.message } };
   }
 };
 
-export const uploadMapImage = async (dayNumber: number, imageFile: File, userId: string) => {
-  try {
-    if (!imageFile) {
-      return { data: null, error: { message: 'No map image provided' } };
-    }
+// ============================================================================
+// ATTENDEE REGISTRATION
+// ============================================================================
 
-    // Validate image file
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    if (!allowedTypes.includes(imageFile.type)) {
-      return { 
-        data: null, 
-        error: { message: 'Map must be an image file (JPEG, PNG, GIF, or WebP)' } 
+export const registerAttendee = async (data: AttendeeRegistrationData): Promise<AuthResult> => {
+  let authUserId: string | null = null;
+  const warnings: string[] = [];
+
+  try {
+    console.log('🚀 [ATTENDEE] Starting registration for:', data.email);
+
+    // ========================================================================
+    // STEP 1: AUTH USER CREATION
+    // ========================================================================
+    console.log('🔐 [ATTENDEE] Step 1: Creating auth user...');
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: data.email.trim().toLowerCase(),
+      password: data.password,
+      options: {
+        data: {
+          full_name: data.fullName.trim(),
+          role: 'attendee'
+        }
+      }
+    });
+
+    if (authError) {
+      console.error('❌ [ATTENDEE] Auth error:', authError.message);
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: authError.message,
+          validationErrors: [{ field: 'email', message: authError.message }]
+        }
       };
     }
 
-    // Check file size (10MB limit for maps)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (imageFile.size > maxSize) {
-      return { data: null, error: { message: 'Map image must be less than 10MB' } };
+    if (!authData.user) {
+      console.error('❌ [ATTENDEE] No user returned from auth');
+      return {
+        success: false,
+        data: null,
+        error: { message: 'User creation failed - no user returned' }
+      };
     }
 
-    if (dayNumber < 1 || dayNumber > 5) {
-      return { data: null, error: { message: 'Day number must be between 1 and 5' } };
-    }
+    authUserId = authData.user.id;
+    console.log('✅ [ATTENDEE] Auth user created:', authUserId);
 
-    const fileName = `day${dayNumber}.png`; // Always use PNG for maps
-    const filePath = `Maps/${fileName}`;
+    // ========================================================================
+    // STEP 2: USER PROFILE
+    // ========================================================================
+    console.log('👤 [ATTENDEE] Step 2: Creating user profile...');
 
-    console.log(`Uploading map image to Assets/${filePath}`);
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from("Assets")
-      .upload(filePath, imageFile, {
-        cacheControl: '3600',
-        upsert: true // Replace existing map for this day
+    const { error: profileError } = await supabase
+      .from('user_profiles')
+      .insert({
+        id: authUserId,
+        full_name: data.fullName.trim(),
+        phone: data.phone.trim(),
+        personal_id: data.personalId.trim(),
+        preferred_language: 'en',
+        score: 0
       });
 
-    if (uploadError) {
-      console.error('Map upload error:', uploadError);
-      return { data: null, error: uploadError };
+    if (profileError) {
+      console.error('❌ [ATTENDEE] Profile creation failed:', profileError.message);
+      // Cleanup: Delete auth user since profile failed
+      await deleteAuthUser(authUserId);
+
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: 'Failed to create user profile: ' + profileError.message,
+          validationErrors: [{ field: 'general', message: profileError.message }]
+        }
+      };
     }
 
-    // Get the public URL
-    const { data: urlData } = supabase.storage
-      .from("Assets")
-      .getPublicUrl(filePath);
+    console.log('✅ [ATTENDEE] User profile created');
 
-    return { 
-      data: { 
-        path: filePath, 
-        url: urlData.publicUrl,
-        fileName: fileName
-      }, 
-      error: null 
+    // ========================================================================
+    // STEP 3: ATTENDEE RECORD
+    // ========================================================================
+    console.log('🎓 [ATTENDEE] Step 3: Creating attendee record...');
+
+    const isAsuStudent = data.university.toLowerCase() === 'ain shams university';
+    console.log(`📊 [ATTENDEE] ASU Student: ${isAsuStudent}`);
+
+    const { data: attendeeData, error: attendeeError } = await supabase
+      .from('attendees')
+      .insert({
+        user_id: authUserId,
+        is_asu_student: isAsuStudent,
+        student_id: data.personalId.trim(),
+        university: data.university.trim(),
+        faculty: data.faculty.trim(),
+        department: data.department.trim(),
+        cv_url: null, // Will be updated after file upload
+        enrollment_proof_url: null, // Will be updated after file upload
+        registration_status: 'pending',
+        payment_status: isAsuStudent ? null : 'pending'
+      })
+      .select()
+      .single();
+
+    if (attendeeError) {
+      console.error('❌ [ATTENDEE] Attendee record creation failed:', attendeeError.message);
+      // Cleanup: Delete auth user
+      await deleteAuthUser(authUserId);
+
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: 'Failed to create attendee record: ' + attendeeError.message,
+          validationErrors: [{ field: 'general', message: attendeeError.message }]
+        }
+      };
+    }
+
+    console.log('✅ [ATTENDEE] Attendee record created');
+
+    // ========================================================================
+    // STEP 4: ROLE ASSIGNMENT
+    // ========================================================================
+    console.log('🎭 [ATTENDEE] Step 4: Assigning role...');
+
+    const { error: roleError } = await supabase
+      .from('user_roles')
+      .insert({
+        user_id: authUserId,
+        event_id: DEFAULT_EVENT_ID,
+        role: 'attendee'
+      });
+
+    if (roleError) {
+      console.error('❌ [ATTENDEE] Role assignment failed:', roleError.message);
+      // Cleanup: Delete auth user
+      await deleteAuthUser(authUserId);
+
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: 'Failed to assign role: ' + roleError.message,
+          validationErrors: [{ field: 'general', message: roleError.message }]
+        }
+      };
+    }
+
+    console.log('✅ [ATTENDEE] Role assigned');
+
+    // ========================================================================
+    // STEP 5: EVENT LINK (SKIPPED)
+    // ========================================================================
+    // console.log('🔗 [ATTENDEE] Step 5: Linking to event (SKIPPED)...');
+    // User events table is deprecated
+
+    // ========================================================================
+    // STEP 6: FILE UPLOADS (Non-critical)
+    // ========================================================================
+    console.log('📁 [ATTENDEE] Step 6: Uploading files...');
+
+    let cvUrl: string | null = null;
+    let enrollmentProofUrl: string | null = null;
+
+    // Upload CV (optional)
+    if (data.cvFile) {
+      console.log('📄 [ATTENDEE] Uploading CV...');
+      const { data: cvData, error: cvError } = await uploadFile('CV', authUserId, data.cvFile);
+
+      if (cvData) {
+        cvUrl = cvData.url;
+        console.log('✅ [ATTENDEE] CV uploaded');
+      } else {
+        console.warn('⚠️ [ATTENDEE] CV upload failed:', cvError?.message);
+        warnings.push('CV upload failed: ' + (cvError?.message || 'Unknown error'));
+      }
+    }
+
+    // Upload University ID (required but non-critical for success)
+    if (data.enrollmentProofFile) {
+      console.log('🆔 [ATTENDEE] Uploading University ID...');
+      const { data: idData, error: idError } = await uploadFile('Uni_ID', authUserId, data.enrollmentProofFile);
+
+      if (idData) {
+        enrollmentProofUrl = idData.url;
+        console.log('✅ [ATTENDEE] University ID uploaded');
+      } else {
+        console.warn('⚠️ [ATTENDEE] University ID upload failed:', idError?.message);
+        warnings.push('University ID upload failed: ' + (idError?.message || 'Unknown error'));
+      }
+    }
+
+    // Update attendee record with file URLs
+    if (cvUrl || enrollmentProofUrl) {
+      console.log('💾 [ATTENDEE] Updating file URLs in database...');
+
+      const updateData: any = {};
+      if (cvUrl) updateData.cv_url = cvUrl;
+      if (enrollmentProofUrl) updateData.enrollment_proof_url = enrollmentProofUrl;
+
+      const { error: updateError } = await supabase
+        .from('attendees')
+        .update(updateData)
+        .eq('user_id', authUserId);
+
+      if (updateError) {
+        console.warn('⚠️ [ATTENDEE] File URL update failed:', updateError.message);
+        warnings.push('File URL update failed: ' + updateError.message);
+      } else {
+        console.log('✅ [ATTENDEE] File URLs updated');
+      }
+    }
+
+    // ========================================================================
+    // STEP 7: REFERRAL PROCESSING (Non-critical)
+    // ========================================================================
+    if (data.volunteerId) {
+      console.log('🤝 [ATTENDEE] Processing referral:', data.volunteerId);
+      try {
+        // 1. Find volunteer by custom ID (case-insensitive)
+        const { data: volunteerData, error: voltError } = await supabase
+          .from('volunteers')
+          .select('user_id, full_name')
+          .ilike('volunteer_id', data.volunteerId.trim())
+          .single();
+
+        if (volunteerData) {
+          console.log(`✅ [ATTENDEE] Volunteer found: ${volunteerData.full_name}`);
+
+          // 2. Award points
+          const { error: pointsError } = await supabase
+            .from('user_activities')
+            .insert({
+              user_id: volunteerData.user_id, // Volunteer's user_id
+              event_id: DEFAULT_EVENT_ID,
+              activity_type: 'recruit_attendee',
+              description: `Recruited attendee: ${data.email}`,
+              points_earned: 10
+            });
+
+          if (pointsError) {
+            console.warn('⚠️ [ATTENDEE] Failed to award points:', pointsError.message);
+          } else {
+            console.log('✅ [ATTENDEE] Points awarded to volunteer');
+          }
+        } else {
+          console.warn('⚠️ [ATTENDEE] Volunteer not found for referral:', data.volunteerId);
+          if (voltError) console.warn('Error details:', voltError.message);
+        }
+      } catch (err) {
+        console.error('⚠️ [ATTENDEE] Referral processing error:', err);
+      }
+    }
+
+    // ========================================================================
+    // SUCCESS
+    // ========================================================================
+    console.log('🎉 [ATTENDEE] Registration complete!');
+
+    if (warnings.length > 0) {
+      console.warn('⚠️ [ATTENDEE] Registration succeeded with warnings:', warnings);
+    }
+
+    return {
+      success: true,
+      data: {
+        user: authData.user,
+        session: authData.session,
+        profile: {
+          id: authUserId,
+          full_name: data.fullName,
+          phone: data.phone,
+          personal_id: data.personalId
+        },
+        attendee: {
+          ...attendeeData,
+          cv_url: cvUrl,
+          enrollment_proof_url: enrollmentProofUrl
+        }
+      },
+      error: warnings.length > 0 ? {
+        message: warnings.join('; '),
+        validationErrors: warnings.map(w => ({ field: 'files', message: w }))
+      } : null
     };
 
   } catch (error: any) {
-    console.error('Map upload exception:', error);
+    console.error('💥 [ATTENDEE] Registration failed:', error.message);
+
+    // Cleanup on failure
+    if (authUserId) {
+      await deleteAuthUser(authUserId);
+    }
+
+    return {
+      success: false,
+      data: null,
+      error: {
+        message: error.message || 'Registration failed',
+        validationErrors: [{ field: 'general', message: error.message }]
+      }
+    };
+  }
+};
+
+// ============================================================================
+// VOLUNTEER REGISTRATION
+// ============================================================================
+
+
+
+/**
+ * Register a new volunteer with 5-step flow:
+ * 1. Create Auth User
+ * 2. Create User Profile
+ * 3. Create Volunteer Record (with auto-generated volunteer_id)
+ * 4. Assign volunteer role
+ * 5. Link to default event
+ */
+export const registerVolunteer = async (data: VolunteerRegistrationData): Promise<AuthResult> => {
+  console.log('🚀 [VOLUNTEER] Starting registration for:', data.email);
+  let authUserId: string | null = null;
+
+  try {
+    // ========================================================================
+    // STEP 1: Create Auth User
+    // ========================================================================
+    console.log('🔐 [VOLUNTEER] Step 1: Creating auth user...');
+
+    // Determine role based on team ID
+    // Building: f9419a07... -> building
+    // Registration: fc15e3bb... -> registration
+    // Info Desk: 9269ac6a... -> info_desk
+    // Verification: a0abd4b7... -> verification
+    // Others -> volunteer
+    let volunteerRole = 'volunteer';
+    const teamId = data.teamId;
+
+    if (teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') volunteerRole = 'building';
+    else if (teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') volunteerRole = 'registration';
+    else if (teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') volunteerRole = 'info_desk';
+    else if (teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') volunteerRole = 'verification';
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: data.email.trim().toLowerCase(),
+      password: data.password,
+      options: {
+        data: {
+          full_name: data.fullName.trim(),
+          role: volunteerRole
+        }
+      }
+    });
+
+    if (authError) {
+      console.error('❌ [VOLUNTEER] Auth creation failed:', authError.message);
+
+      // Handle specific auth errors
+      if (authError.message.includes('already registered')) {
+        return {
+          success: false,
+          data: null,
+          error: {
+            message: 'This email is already registered',
+            validationErrors: [{ field: 'email', message: 'Email already in use' }]
+          }
+        };
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: { message: authError.message }
+      };
+    }
+
+    if (!authData.user) {
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to create user account' }
+      };
+    }
+
+    authUserId = authData.user.id;
+    console.log('✅ [VOLUNTEER] Step 1 complete. User ID:', authUserId);
+
+    // ========================================================================
+    // STEP 2: Create User Profile
+    // ========================================================================
+    console.log('👤 [VOLUNTEER] Step 2: Creating user profile...');
+
+    const { error: profileError } = await supabase
+      .from('user_profiles')
+      .insert({
+        id: authUserId,
+        full_name: data.fullName.trim(),
+        phone: data.phone.trim(),
+        personal_id: data.personalId.trim(),
+        preferred_language: 'en',
+        score: 0
+      });
+
+    if (profileError) {
+      console.error('❌ [VOLUNTEER] Profile creation failed:', profileError.message);
+      await deleteAuthUser(authUserId);
+
+      if (profileError.message.includes('duplicate') || profileError.message.includes('unique')) {
+        const field = profileError.message.includes('phone') ? 'phone' :
+          profileError.message.includes('personal_id') ? 'personalId' : 'email';
+        return {
+          success: false,
+          data: null,
+          error: {
+            message: `This ${field} is already registered`,
+            validationErrors: [{ field, message: `${field} already in use` }]
+          }
+        };
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to create user profile' }
+      };
+    }
+
+    console.log('✅ [VOLUNTEER] Step 2 complete. Profile created.');
+
+    // ========================================================================
+    // STEP 3: Create Volunteer Record
+    // ========================================================================
+    console.log('🎫 [VOLUNTEER] Step 3: Creating volunteer record...');
+
+    const { data: volunteerData, error: volunteerError } = await supabase
+      .from('volunteers')
+      .insert({
+        user_id: authUserId,
+        team_id: data.teamId,
+        full_name: data.fullName.trim(),
+        volunteer_id: null, // explicit null as requested
+        total_points: 0,
+        hours_volunteered: 0
+      })
+      .select()
+      .single();
+
+    if (volunteerError) {
+      console.error('❌ [VOLUNTEER] Volunteer record creation failed:', volunteerError.message);
+      // Cleanup: Delete auth user
+      await deleteAuthUser(authUserId);
+
+      if (volunteerError.message.includes('duplicate') || volunteerError.message.includes('unique')) {
+        return {
+          success: false,
+          data: null,
+          error: {
+            message: 'Volunteer ID conflict. Please try again.',
+            validationErrors: [{ field: 'personalId', message: 'Please try again' }]
+          }
+        };
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to create volunteer record' }
+      };
+    }
+
+    console.log('✅ [VOLUNTEER] Step 3 complete. Volunteer record created.');
+
+    // ========================================================================
+    // STEP 4: Assign Volunteer Role
+    // ========================================================================
+    console.log('🎭 [VOLUNTEER] Step 4: Assigning volunteer role...');
+
+    const { error: roleError } = await supabase
+      .from('user_roles')
+      .insert({
+        user_id: authUserId,
+        event_id: DEFAULT_EVENT_ID,
+        role: volunteerRole // Use the specific role determined in Step 1
+      });
+
+    if (roleError) {
+      console.error('❌ [VOLUNTEER] Role assignment failed:', roleError.message);
+      await deleteAuthUser(authUserId);
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to assign volunteer role' }
+      };
+    }
+
+    console.log('✅ [VOLUNTEER] Step 4 complete. Role assigned.');
+
+    // ========================================================================
+    // STEP 5: Link to Default Event (SKIPPED)
+    // ========================================================================
+    // console.log('🔗 [VOLUNTEER] Step 5: Linking to event (SKIPPED)...');
+    // User events table is deprecated
+
+    // ========================================================================
+    // SUCCESS
+    // ========================================================================
+    console.log('🎉 [VOLUNTEER] Registration complete!');
+
+    return {
+      success: true,
+      data: {
+        user: authData.user,
+        session: authData.session,
+        profile: {
+          id: authUserId,
+          full_name: data.fullName.trim(),
+          phone: data.phone.trim(),
+          personal_id: data.personalId.trim()
+        },
+        volunteer: {
+          ...volunteerData,
+          volunteer_id: null
+        }
+      },
+      error: null
+    };
+
+  } catch (error: any) {
+    console.error('❌ [VOLUNTEER] Unexpected error:', error);
+
+    // Cleanup on any unexpected error
+    if (authUserId) {
+      await deleteAuthUser(authUserId);
+    }
+
+    return {
+      success: false,
+      data: null,
+      error: { message: error.message || 'An unexpected error occurred' }
+    };
+  }
+};
+
+// ============================================================================
+// EMPLOYER REGISTRATION
+// ============================================================================
+
+export const registerEmployer = async (data: EmployerRegistrationData): Promise<AuthResult> => {
+  let authUserId: string | null = null;
+  console.log('🚀 [EMPLOYER] Starting registration process...');
+
+  try {
+    // ========================================================================
+    // STEP 0: VALIDATE COMPANY KEY
+    // ========================================================================
+    console.log('🏢 [EMPLOYER] Step 0: Validating Company ID...');
+
+    const { data: companyData, error: companyError } = await supabase
+      .from('companies')
+      .select('id, company_name')
+      .ilike('company_key', data.companyKey.trim()) // Case-insensitive match
+      .single();
+
+    if (companyError || !companyData) {
+      console.error('❌ [EMPLOYER] Invalid Company ID');
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: 'Invalid Company ID. Please check and try again.',
+          validationErrors: [{ field: 'companyKey', message: 'Invalid Company ID' }]
+        }
+      };
+    }
+
+    console.log(`✅ [EMPLOYER] Company found: ${companyData.company_name} (${companyData.id})`);
+
+    // ========================================================================
+    // STEP 1: AUTH USER CREATION
+    // ========================================================================
+    console.log('👤 [EMPLOYER] Step 1: Creating auth user...');
+
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+      options: {
+        data: {
+          full_name: data.fullName,
+          phone: data.phone,
+          personal_id: data.personalId,
+          role: 'employer'
+        }
+      }
+    });
+
+    if (authError) {
+      console.error('❌ [EMPLOYER] Auth failed:', authError.message);
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: authError.message,
+          validationErrors: [{ field: 'email', message: authError.message }]
+        }
+      };
+    }
+
+    if (!authData.user || !authData.session) {
+      console.error('❌ [EMPLOYER] No user/session returned');
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Registration failed - No session created' }
+      };
+    }
+
+    authUserId = authData.user.id;
+    console.log('✅ [EMPLOYER] Auth user created:', authUserId);
+
+    // ========================================================================
+    // STEP 2: PROFILE CREATION
+    // ========================================================================
+    console.log('📝 [EMPLOYER] Step 2: Creating user profile...');
+
+    const { error: profileError } = await supabase
+      .from('user_profiles')
+      .insert({
+        id: authUserId,
+        full_name: data.fullName.trim(),
+        phone: data.phone.trim(),
+        personal_id: data.personalId.trim(),
+        preferred_language: 'en',
+        score: 0
+      });
+
+    if (profileError) {
+      console.error('❌ [EMPLOYER] Profile creation failed:', profileError.message);
+      await deleteAuthUser(authUserId);
+
+      if (profileError.message.includes('duplicate') || profileError.message.includes('unique')) {
+        const field = profileError.message.includes('phone') ? 'phone' :
+          profileError.message.includes('personal_id') ? 'personalId' : 'email';
+        return {
+          success: false,
+          data: null,
+          error: {
+            message: `This ${field} is already registered`,
+            validationErrors: [{ field, message: `${field} already in use` }]
+          }
+        };
+      }
+
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to create user profile' }
+      };
+    }
+
+    console.log('✅ [EMPLOYER] Profile created');
+
+    // ========================================================================
+    // STEP 3: EMPLOYER RECORD
+    // ========================================================================
+    console.log('💼 [EMPLOYER] Step 3: Creating employer record...');
+
+    const { error: employerError } = await supabase
+      .from('employer')
+      .insert({
+        user_id: authUserId,
+        company_id: companyData.id,
+        job_title: data.jobTitle.trim()
+      });
+
+    if (employerError) {
+      console.error('❌ [EMPLOYER] Employer record creation failed:', employerError.message);
+      await deleteAuthUser(authUserId);
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to create employer record' }
+      };
+    }
+
+    console.log('✅ [EMPLOYER] Employer record created');
+
+    // ========================================================================
+    // STEP 4: ROLE ASSIGNMENT
+    // ========================================================================
+    console.log('🎭 [EMPLOYER] Step 4: Assigning role...');
+
+    const { error: roleError } = await supabase
+      .from('user_roles')
+      .insert({
+        user_id: authUserId,
+        event_id: DEFAULT_EVENT_ID,
+        role: 'employer'
+      });
+
+    if (roleError) {
+      console.error('❌ [EMPLOYER] Role assignment failed:', roleError.message);
+      await deleteAuthUser(authUserId);
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Failed to assign role' }
+      };
+    }
+
+    console.log('✅ [EMPLOYER] Role assigned');
+
+    // ========================================================================
+    // STEP 5: EVENT LINK (SKIPPED)
+    // ========================================================================
+    // console.log('🔗 [EMPLOYER] Step 5: Linking to event (SKIPPED)...');
+    // User events table is deprecated
+
+    // ========================================================================
+    // SUCCESS
+    // ========================================================================
+    console.log('🎉 [EMPLOYER] Registration complete!');
+
+    return {
+      success: true,
+      data: {
+        user: authData.user,
+        session: authData.session,
+        profile: {
+          id: authUserId,
+          full_name: data.fullName,
+          phone: data.phone,
+          personal_id: data.personalId
+        },
+        attendee: null,
+        volunteer: null
+      },
+      error: null
+    };
+
+  } catch (error: any) {
+    console.error('❌ [EMPLOYER] Unexpected error:', error);
+
+    if (authUserId) {
+      await deleteAuthUser(authUserId);
+    }
+
+    return {
+      success: false,
+      data: null,
+      error: { message: error.message || 'An unexpected error occurred' }
+    };
+  }
+};
+
+// ============================================================================
+// LOGIN
+// ============================================================================
+
+export const signInUser = async (email: string, password: string): Promise<AuthResult> => {
+  try {
+    console.log('🔐 [LOGIN] Signing in:', email);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password
+    });
+
+    if (error) {
+      console.error('❌ [LOGIN] Auth error:', error.message);
+      return {
+        success: false,
+        data: null,
+        error: { message: error.message }
+      };
+    }
+
+    if (!data.user) {
+      console.error('❌ [LOGIN] No user returned');
+      return {
+        success: false,
+        data: null,
+        error: { message: 'Login failed - no user returned' }
+      };
+    }
+
+    console.log('✅ [LOGIN] Auth successful, fetching user role...');
+
+    // Get user role
+    const { data: roleData, error: roleError } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', data.user.id)
+      .maybeSingle();
+
+    if (roleError) {
+      console.warn('⚠️ [LOGIN] Error fetching role:', roleError.message);
+    }
+
+    const userRole = roleData?.role || data.user.user_metadata?.role || 'attendee';
+    console.log('✅ [LOGIN] Login successful - Role:', userRole);
+
+    // Get user profile
+    const { data: profileData } = await supabase
+      .from('user_profiles')
+      .select('full_name')
+      .eq('id', data.user.id)
+      .maybeSingle();
+
+    return {
+      success: true,
+      data: {
+        user: { ...data.user, role: userRole },
+        session: data.session,
+        profile: profileData
+      },
+      error: null
+    };
+  } catch (error: any) {
+    console.error('💥 [LOGIN] Exception:', error.message);
+    return {
+      success: false,
+      data: null,
+      error: { message: error.message }
+    };
+  }
+};
+
+// ============================================================================
+// SESSION MANAGEMENT
+// ============================================================================
+
+export const signOutUser = async () => {
+  const { error } = await supabase.auth.signOut();
+  return { success: !error, error: error?.message || null };
+};
+
+export const getCurrentSession = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session;
+};
+
+export const getCurrentUser = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: role } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+
+  return { ...user, role: role?.role };
+};
+
+// ============================================================================
+// PASSWORD RESET
+// ============================================================================
+
+export const resetPassword = async (email: string): Promise<{ success: boolean; error: string | null }> => {
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      email.trim().toLowerCase(),
+      {
+        redirectTo: `${window.location.origin}/reset-password`
+      }
+    );
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, error: null };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+// ============================================================================
+// ATTENDANCE & SEARCH
+// ============================================================================
+
+export const getAttendeeByPersonalId = async (personalId: string) => {
+  try {
+    // Search in user_profiles first to get the user_id
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, email, phone, personal_id')
+      .eq('personal_id', personalId)
+      .single();
+
+    if (profileError || !profile) {
+      return { data: null, error: profileError || { message: 'Attendee not found' } };
+    }
+
+    // Then get attendee details
+    const { data: attendee, error: attendeeError } = await supabase
+      .from('attendees')
+      .select('*')
+      .eq('user_id', profile.id)
+      .single();
+
+    if (attendeeError) {
+      return { data: null, error: attendeeError };
+    }
+
+    // Merge data
+    return {
+      data: {
+        ...attendee,
+        ...profile,
+        // Ensure consistent ID usage
+        id: attendee.id || profile.id
+      },
+      error: null
+    };
+  } catch (error: any) {
     return { data: null, error: { message: error.message } };
   }
 };
 
-export const updateUserFiles = async (userId: string, filePaths: { university_id_path?: string, cv_path?: string }) => {
+export const getAttendeeByUUID = async (uuid: string) => {
   try {
-    console.log('Updating user files:', filePaths);
-    
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .update(filePaths)
-      .eq('id', userId)
-      .select();
+    // Try to find by attendee ID or user ID
+    const { data: attendee, error: attendeeError } = await supabase
+      .from('attendees')
+      .select('*')
+      .or(`id.eq.${uuid},user_id.eq.${uuid}`)
+      .single();
 
-    if (error) {
-      console.error('Profile update error:', error);
-    } else {
-      console.log('Profile updated successfully');
+    if (attendeeError || !attendee) {
+      return { data: null, error: attendeeError || { message: 'Attendee not found' } };
     }
 
-    return { data, error };
+    // Get profile details
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('full_name, email, phone, personal_id')
+      .eq('id', attendee.user_id)
+      .single();
+
+    if (profileError) {
+      return { data: null, error: profileError };
+    }
+
+    return {
+      data: {
+        ...attendee,
+        ...profile
+      },
+      error: null
+    };
   } catch (error: any) {
-    console.error('Update error:', error);
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+export const searchAttendeesByPersonalId = async (query: string) => {
+  try {
+    const { data: profiles, error } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, email, phone, personal_id')
+      .ilike('personal_id', `%${query}%`)
+      .limit(5);
+
+    if (error) {
+      return { data: null, error };
+    }
+
+    // Fetch attendee data for these profiles
+    const results = await Promise.all(
+      profiles.map(async (profile) => {
+        const { data: attendee } = await supabase
+          .from('attendees')
+          .select('*')
+          .eq('user_id', profile.id)
+          .single();
+
+        if (!attendee) return null;
+
+        return {
+          ...attendee,
+          ...profile
+        };
+      })
+    );
+
+    return { data: results.filter(Boolean), error: null };
+  } catch (error: any) {
     return { data: null, error: { message: error.message } };
   }
 };
 
 export const processAttendance = async (personalId: string, action: 'enter' | 'exit') => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session?.access_token) {
-      throw new Error('No authentication token found');
+    // First get the attendee
+    const { data: attendeeResult, error: fetchError } = await getAttendeeByPersonalId(personalId);
+
+    if (fetchError || !attendeeResult) {
+      throw new Error(fetchError?.message || 'Attendee not found');
     }
 
-    const response = await fetch(`${supabaseUrl}/functions/v1/process-attendance`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        personal_id: personalId,
-        action: action
-      })
-    });
+    const { data: { user } } = await supabase.auth.getUser();
 
-    const data = await response.json();
+    // Update attendee event_entry status
+    const eventEntry = action === 'enter';
+    const { error: updateError } = await supabase
+      .from('attendees')
+      .update({ event_entry: eventEntry })
+      .eq('user_id', attendeeResult.user_id);
 
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to process attendance');
+    if (updateError) {
+      console.warn('⚠️ Failed to update event_entry status:', updateError.message);
     }
 
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Process attendance error:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
+    // Log the attendance
+    const { error: logError } = await supabase
+      .from('attendance_logs')
+      .insert({
+        attendee_id: attendeeResult.id,
+        action: action,
+        scanned_by: user?.id || null
+      });
 
-// Get all attendance entries for a specific day with pagination
-export const getAttendanceByDay = async (day: number, page: number = 0, pageSize: number = 1000) => {
-  try {
-    // Calculate the date for the specific day (Day 1 = Oct 19, 2025)
-    const eventStartDate = new Date('2025-10-19');
-    const targetDate = new Date(eventStartDate);
-    targetDate.setDate(eventStartDate.getDate() + (day - 1));
-    
-    const startOfDay = new Date(targetDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date(targetDate);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const from = page * pageSize;
-    const to = from + pageSize - 1;
-
-    const { data, error, count } = await supabase
-      .from('attendances')
-      .select(`
-        *,
-        user:users_profiles!attendances_user_id_fkey(
-          id,
-          first_name,
-          last_name,
-          personal_id,
-          email,
-          faculty,
-          university,
-          gender,
-          degree_level,
-          program,
-          class,
-          nationality,
-          role
-        )
-      `, { count: 'exact' })
-      .gte('scanned_at', startOfDay.toISOString())
-      .lte('scanned_at', endOfDay.toISOString())
-      .order('scanned_at', { ascending: false })
-      .range(from, to);
-
-    if (error) {
-      console.error(`Error fetching day ${day} attendance:`, error);
-      return { data: [], error, count: 0 };
+    if (logError) {
+      console.warn('⚠️ Failed to log attendance:', logError.message);
     }
-
-    return { data: data || [], error: null, count: count || 0 };
-  } catch (error: any) {
-    console.error(`Exception fetching day ${day} attendance:`, error);
-    return { data: [], error: { message: error.message }, count: 0 };
-  }
-};
-
-// Get all unique users who attended on a specific day (for analytics)
-export const getUniqueAttendeesByDay = async (day: number) => {
-  try {
-    // Calculate the date for the specific day
-    const eventStartDate = new Date('2025-10-19');
-    const targetDate = new Date(eventStartDate);
-    targetDate.setDate(eventStartDate.getDate() + (day - 1));
-    
-    const startOfDay = new Date(targetDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date(targetDate);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    // Get all entry scans for the day
-    let allEntries: any[] = [];
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
-
-    console.log(`🔄 Fetching all entry scans for Day ${day}...`);
-
-    while (hasMore) {
-      const from = page * pageSize;
-      const to = from + pageSize - 1;
-      
-      const { data: entries, error } = await supabase
-        .from('attendances')
-        .select(`
-          user_id,
-          scan_type,
-          scanned_at,
-          user:users_profiles!attendances_user_id_fkey(
-            id,
-            first_name,
-            last_name,
-            personal_id,
-            email,
-            faculty,
-            university,
-            gender,
-            degree_level,
-            program,
-            class,
-            nationality,
-            role
-          )
-        `)
-        .eq('scan_type', 'entry')
-        .gte('scanned_at', startOfDay.toISOString())
-        .lte('scanned_at', endOfDay.toISOString())
-        .range(from, to);
-
-      if (error) {
-        console.error(`Error fetching entries page ${page}:`, error);
-        break;
-      }
-
-      if (entries && entries.length > 0) {
-        allEntries = [...allEntries, ...entries];
-        page++;
-        
-        console.log(`📊 Fetched page ${page}: ${entries.length} entries (Total: ${allEntries.length})`);
-
-        if (entries.length < pageSize) {
-          hasMore = false;
-        }
-      } else {
-        hasMore = false;
-      }
-    }
-
-    // Get unique users (remove duplicates by user_id)
-    const uniqueUsers = allEntries.reduce((acc, entry) => {
-      if (entry.user_id && !acc.some(user => user.id === entry.user_id)) {
-        acc.push({
-          ...entry.user,
-          entry_time: entry.scanned_at
-        });
-      }
-      return acc;
-    }, []);
-
-    console.log(`✅ Found ${uniqueUsers.length} unique attendees for Day ${day}`);
-
-    return { data: uniqueUsers, error: null };
-  } catch (error: any) {
-    console.error(`Exception fetching unique attendees for Day ${day}:`, error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get daily activity breakdown by hour
-export const getDailyActivityByDay = async (day: number) => {
-  try {
-    const eventStartDate = new Date('2025-10-19');
-    const targetDate = new Date(eventStartDate);
-    targetDate.setDate(eventStartDate.getDate() + (day - 1));
-    
-    const startOfDay = new Date(targetDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date(targetDate);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    // Get all entries for the day
-    let allEntries: any[] = [];
-    let page = 0;
-    const pageSize = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
-      const from = page * pageSize;
-      const to = from + pageSize - 1;
-      
-      const { data: entries, error } = await supabase
-        .from('attendances')
-        .select('scanned_at')
-        .eq('scan_type', 'entry')
-        .gte('scanned_at', startOfDay.toISOString())
-        .lte('scanned_at', endOfDay.toISOString())
-        .range(from, to);
-
-      if (error) {
-        console.error(`Error fetching activity page ${page}:`, error);
-        break;
-      }
-
-      if (entries && entries.length > 0) {
-        allEntries = [...allEntries, ...entries];
-        page++;
-
-        if (entries.length < pageSize) {
-          hasMore = false;
-        }
-      } else {
-        hasMore = false;
-      }
-    }
-
-    // Group by hour
-    const hourlyData: { [key: string]: number } = {};
-    
-    // Initialize all hours from 8:00 to 22:00
-    for (let hour = 8; hour <= 22; hour++) {
-      hourlyData[`${hour}:00`] = 0;
-    }
-
-    // Count entries per hour
-    allEntries.forEach(entry => {
-      const entryTime = new Date(entry.scanned_at);
-      const hour = entryTime.getHours();
-      const hourKey = `${hour}:00`;
-      
-      if (hourlyData[hourKey] !== undefined) {
-        hourlyData[hourKey]++;
-      }
-    });
-
-    // Convert to array format
-    const activityData = Object.entries(hourlyData).map(([hour, entries]) => ({
-      hour,
-      entries
-    }));
-
-    return { data: activityData, error: null };
-  } catch (error: any) {
-    console.error(`Exception fetching daily activity for Day ${day}:`, error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-// Get attendee by personal ID (only attendees)
-export const getAttendeeByPersonalId = async (personalId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .select(`
-        id,
-        first_name,
-        last_name,
-        email,
-        phone,
-        personal_id,
-        role,
-        university,
-        faculty,
-        building_entry,
-        event_entry,
-        profile_complete,
-        authorized,
-        created_at
-      `)
-      .eq('personal_id', personalId.trim())
-      .eq('role', 'attendee') // Only get attendees
-      .single();
-
-    if (error) {
-      console.error('Get attendee by Personal ID error:', error);
-      return { data: null, error };
-    }
-
-    return { 
-      data: {
-        ...data,
-        current_status: data.event_entry ? 'inside_event' : 'outside_event',
-        building_status: data.building_entry ? 'inside_building' : 'outside_building'
-      }, 
-      error: null 
-    };
-  } catch (error: any) {
-    console.error('Get attendee by Personal ID exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Get attendee by UUID (for QR code scans) - only attendees
-export const getAttendeeByUUID = async (uuid: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .select(`
-        id,
-        first_name,
-        last_name,
-        email,
-        phone,
-        personal_id,
-        role,
-        university,
-        faculty,
-        building_entry,
-        event_entry,
-        profile_complete,
-        authorized,
-        created_at
-      `)
-      .eq('id', uuid.trim())
-      .eq('role', 'attendee') // Only get attendees
-      .single();
-
-    if (error) {
-      console.error('Get attendee by UUID error:', error);
-      return { data: null, error };
-    }
-
-    return { 
-      data: {
-        ...data,
-        current_status: data.event_entry ? 'inside_event' : 'outside_event',
-        building_status: data.building_entry ? 'inside_building' : 'outside_building'
-      }, 
-      error: null 
-    };
-  } catch (error: any) {
-    console.error('Get attendee by UUID exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Dynamic search for attendees by partial Personal ID
-export const searchAttendeesByPersonalId = async (partialPersonalId: string) => {
-  try {
-    if (!partialPersonalId || partialPersonalId.trim().length < 2) {
-      return { data: [], error: null };
-    }
-
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .select(`
-        id,
-        first_name,
-        last_name,
-        email,
-        phone,
-        personal_id,
-        role,
-        university,
-        faculty,
-        building_entry,
-        event_entry,
-        profile_complete,
-        authorized,
-        created_at
-      `)
-      .eq('role', 'attendee') // Only search attendees
-      .ilike('personal_id', `%${partialPersonalId.trim()}%`) // Search by partial Personal ID
-      .order('personal_id')
-      .limit(10); // Limit results to prevent overwhelming UI
-
-    if (error) {
-      console.error('Search attendees error:', error);
-      return { data: [], error };
-    }
-
-    // Add status fields based on the boolean flags
-    const attendeesWithStatus = (data || []).map(attendee => ({
-      ...attendee,
-      current_status: attendee.event_entry ? 'inside_event' : 'outside_event',
-      building_status: attendee.building_entry ? 'inside_building' : 'outside_building'
-    }));
-
-    return { data: attendeesWithStatus, error: null };
-  } catch (error: any) {
-    console.error('Search attendees exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get registration statistics using new boolean fields
-export const getRegistrationStats = async () => {
-  try {
-    // Total registered users
-    const { count: totalRegistered } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true });
-
-    // Total attendees (only attendee role)
-    const { count: totalAttendees } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'attendee');
-
-    // Count users currently inside event (event_entry = true)
-    const { count: insideEvent } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_entry', true)
-      .eq('role', 'attendee');
-
-    // Count users currently inside building (building_entry = true)
-    const { count: insideBuilding } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('building_entry', true)
-      .eq('role', 'attendee');
 
     return {
-      data: {
-        total_registered: totalRegistered || 0,
-        total_attendees: totalAttendees || 0,
-        inside_event: insideEvent || 0,
-        inside_building: insideBuilding || 0
-      },
+      data: { message: `Successfully processed ${action} for ${attendeeResult.full_name}` },
       error: null
     };
+
   } catch (error: any) {
-    console.error('Get stats error:', error);
     return { data: null, error: { message: error.message } };
   }
 };
 
-export const processBuildingAttendance = async (personalId: string, action: 'building_entry' | 'building_exit' | 'session_entry', sessionId?: string) => {
+// ============================================================================
+// SESSION MANAGEMENT
+// ============================================================================
+
+/**
+ * Book a session for a user
+ */
+export const bookSession = async (userId: string, sessionId: string) => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session?.access_token) {
-      throw new Error('No authentication token found');
-    }
-
-    const requestBody: any = {
-      personal_id: personalId,
-      action: action
-    };
-
-    if (action === 'session_entry' && sessionId) {
-      requestBody.session_id = sessionId;
-    }
-
-    const response = await fetch(`${supabaseUrl}/functions/v1/process-building-attendance`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to process attendance');
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Process building attendance error:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Get all sessions from the database
-export const getAllSessions = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('sessions')
-      .select(`
-        id,
-        title,
-        description,
-        speaker,
-        start_time,
-        end_time,
-        location,
-        capacity,
-        current_attendees,
-        max_attendees,
-        current_bookings,
-        session_type,
-        created_at
-      `)
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      console.error('Get sessions error:', error);
-      return { data: [], error };
-    }
-
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    console.error('Get sessions exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get session by ID
-export const getSessionById = async (sessionId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('sessions')
-      .select(`
-        id,
-        title,
-        description,
-        speaker,
-        start_time,
-        end_time,
-        location,
-        capacity,
-        current_attendees,
-        max_attendees,
-        current_bookings,
-        session_type,
-        created_at
-      `)
-      .eq('id', sessionId)
-      .single();
-
-    if (error) {
-      console.error('Get session by ID error:', error);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Get session by ID exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-export const getScheduleByDay = async (day: number) => {
-  try {
-    // Calculate the date for the specific day
-    const eventStartDate = new Date('2024-03-18'); // Adjust this start date
-    const targetDate = new Date(eventStartDate);
-    targetDate.setDate(eventStartDate.getDate() + (day - 1));
-    
-    const startOfDay = new Date(targetDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date(targetDate);
-    endOfDay.setHours(23, 59, 59, 999);
-
-    const { data, error } = await supabase
-      .from('schedule_items')
-      .select(`
-        id,
-        title,
-        description,
-        start_time,
-        end_time,
-        location,
-        item_type,
-        created_at
-      `)
-      .gte('start_time', startOfDay.toISOString())
-      .lte('start_time', endOfDay.toISOString())
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      console.error('Get schedule by day error:', error);
-      return { data: [], error };
-    }
-
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    console.error('Get schedule by day exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get all schedule items
-export const getAllScheduleItems = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('schedule_items')
-      .select(`
-        id,
-        title,
-        description,
-        start_time,
-        end_time,
-        location,
-        item_type,
-        created_at
-      `)
-      .order('start_time', { ascending: true });
-
-    if (error) {
-      console.error('Get all schedule items error:', error);
-      return { data: [], error };
-    }
-
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    console.error('Get all schedule items exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get schedule item by ID
-export const getScheduleItemById = async (itemId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('schedule_items')
-      .select(`
-        id,
-        title,
-        description,
-        start_time,
-        end_time,
-        location,
-        item_type,
-        created_at
-      `)
-      .eq('id', itemId)
-      .single();
-
-    if (error) {
-      console.error('Get schedule item by ID error:', error);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Get schedule item by ID exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Get all companies from the database
-export const getAllCompanies = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('companies')
-      .select(`
-        id,
-        name,
-        logo_url,
-        description,
-        website,
-        booth_number,
-        created_at
-      `)
-      .order('name', { ascending: true });
-
-    if (error) {
-      console.error('Get companies error:', error);
-      return { data: [], error };
-    }
-
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    console.error('Get companies exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get company by ID
-export const getCompanyById = async (companyId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('companies')
-      .select(`
-        id,
-        name,
-        logo_url,
-        description,
-        website,
-        booth_number,
-        created_at
-      `)
-      .eq('id', companyId)
-      .single();
-
-    if (error) {
-      console.error('Get company by ID error:', error);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Get company by ID exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Get user's session bookings
-export const getUserBookings = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('attendances')
-      .select(`
-        session_id,
-        scanned_at,
-        sessions (
-          id,
-          title,
-          description,
-          speaker,
-          start_time,
-          end_time,
-          location
-        )
-      `)
-      .eq('user_id', userId)
-      .eq('scan_type', 'booking')
-      .order('scanned_at', { ascending: false });
-
-    if (error) {
-      console.error('Get user bookings error:', error);
-      return { data: [], error };
-    }
-
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    console.error('Get user bookings exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Book a session (alternative direct approach if RPC doesn't work)
-export const bookSessionDirect = async (userId: string, sessionId: string, scannedBy?: string) => {
-  try {
-    // First check if already booked
-    const { data: existingBooking, error: checkError } = await supabase
-      .from('attendances')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('session_id', sessionId)
-      .eq('scan_type', 'booking')
-      .single();
-
-    if (existingBooking) {
-      return { data: null, error: { message: 'Session already booked' } };
-    }
-
-    // Check session capacity
+    // Check if session exists and has capacity
     const { data: session, error: sessionError } = await supabase
       .from('sessions')
-      .select('max_attendees, current_bookings')
+      .select('id, max_attendees, current_bookings')
       .eq('id', sessionId)
       .single();
 
-    if (sessionError) {
+    if (sessionError || !session) {
       return { data: null, error: { message: 'Session not found' } };
     }
 
-    if (session.max_attendees && session.current_bookings >= session.max_attendees) {
+    if (session.current_bookings >= session.max_attendees) {
       return { data: null, error: { message: 'Session is full' } };
     }
 
     // Create booking
     const { data, error } = await supabase
-      .from('attendances')
+      .from('session_bookings')
       .insert({
         user_id: userId,
         session_id: sessionId,
-        scan_type: 'booking',
-        scanned_by: scannedBy || userId
+        booking_status: 'confirmed'
       })
       .select()
       .single();
 
     if (error) {
-      console.error('Book session error:', error);
-      return { data: null, error };
+      if (error.message.includes('duplicate')) {
+        return { data: null, error: { message: 'You have already booked this session' } };
+      }
+      return { data: null, error: { message: error.message } };
     }
 
     return { data, error: null };
   } catch (error: any) {
-    console.error('Book session exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
 
-// Cancel a session booking (alternative direct approach if RPC doesn't work)
-export const cancelSessionBookingDirect = async (userId: string, sessionId: string) => {
+/**
+ * Cancel a session booking
+ */
+export const cancelBooking = async (userId: string, sessionId: string) => {
   try {
-    const { data, error } = await supabase
-      .from('attendances')
-      .delete()
+    const { error } = await supabase
+      .from('session_bookings')
+      .update({ booking_status: 'cancelled' })
       .eq('user_id', userId)
-      .eq('session_id', sessionId)
-      .eq('scan_type', 'booking')
-      .select();
+      .eq('session_id', sessionId);
 
     if (error) {
-      console.error('Cancel booking error:', error);
-      return { data: null, error };
-    }
-
-    if (!data || data.length === 0) {
-      return { data: null, error: { message: 'Booking not found' } };
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Cancel booking exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-export const addSession = async (sessionData: any) => {
-  try {
-    const { data, error } = await supabase
-      .from('sessions')
-      .insert([{
-        title: sessionData.title,
-        description: sessionData.description || null,
-        speaker: sessionData.speaker,
-        start_time: sessionData.start_time,
-        end_time: sessionData.end_time,
-        location: sessionData.location,
-        max_attendees: sessionData.max_attendees || null,
-        session_type: sessionData.session_type || 'session',
-        current_attendees: 0,
-        current_bookings: 0
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding session:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add session exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Add Event/Schedule Item
-export const addScheduleItem = async (eventData: any) => {
-  try {
-    const { data, error } = await supabase
-      .from('schedule_items')
-      .insert([{
-        title: eventData.title,
-        description: eventData.description || null,
-        start_time: eventData.start_time,
-        end_time: eventData.end_time,
-        location: eventData.location || null,
-        item_type: eventData.item_type || 'general'
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding schedule item:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add schedule item exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Add Company
-export const addCompany = async (companyData: any) => {
-  try {
-    const { data, error } = await supabase
-      .from('companies')
-      .insert([{
-        name: companyData.name,
-        logo_url: companyData.logo_url || null,
-        description: companyData.description || null,
-        website: companyData.website,
-        booth_number: companyData.booth_number
-      }])
-      .select();
-
-    if (error) {
-      console.error('Error adding company:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Add company exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-export const sendAnnouncement = async (announcementData: any) => {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session?.user?.id) {
-      throw new Error('User not authenticated');
-    }
-
-    let insertData: any = {
-      title: announcementData.title,
-      message: announcementData.message,
-      target_type: announcementData.target_type,
-      created_by: session.user.id
-    };
-
-    if (announcementData.target_type === 'role') {
-      insertData.target_role = announcementData.target_role;
-    } else if (announcementData.target_type === 'custom') {
-      insertData.target_user_ids = announcementData.target_user_ids;
-    }
-
-    const { data, error } = await supabase
-      .from('notifications')
-      .insert([insertData])
-      .select();
-
-    if (error) {
-      console.error('Error sending announcement:', error);
-      return { data: null, error };
-    }
-
-    return { data: data[0], error: null };
-  } catch (error: any) {
-    console.error('Send announcement exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Simplified dynamic building stats using new boolean fields
-export async function getDynamicBuildingStats() {
-  try {
-    // Get counts directly from users_profiles using the boolean fields
-    const { count: totalAttendees } = await supabase
-      .from("users_profiles")
-      .select("*", { count: "exact", head: true })
-      .eq("role", "attendee");
-
-    const { count: insideBuilding } = await supabase
-      .from("users_profiles")
-      .select("*", { count: "exact", head: true })
-      .eq("building_entry", true)
-      .eq("role", "attendee");
-
-    const { count: insideEvent } = await supabase
-      .from("users_profiles")
-      .select("*", { count: "exact", head: true })
-      .eq("event_entry", true)
-      .eq("role", "attendee");
-
-    return {
-      data: {
-        inside_building: insideBuilding || 0,
-        inside_event: insideEvent || 0,
-        total_attendees: totalAttendees || 0
-      },
-      error: null
-    };
-
-  } catch (error: any) {
-    console.error("Error in getDynamicBuildingStats:", error);
-    return { data: null, error };
-  }
-}
-
-export const deleteFile = async (bucket: string, filePath: string) => {
-  try {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .remove([filePath]);
-
-    if (error) {
-      console.error('Delete file error:', error);
-      return { success: false, error };
+      return { success: false, error: error.message };
     }
 
     return { success: true, error: null };
   } catch (error: any) {
-    console.error('Delete file exception:', error);
-    return { success: false, error: { message: error.message } };
+    return { success: false, error: error.message };
   }
 };
 
-export const deleteCompany = async (companyId: string) => {
-  try {
-    // Get company data including logo URL
-    const { data: company, error: fetchError } = await supabase
-      .from('companies')
-      .select('logo_url')
-      .eq('id', companyId)
-      .single();
-
-    if (fetchError) {
-      console.error('Error fetching company for deletion:', fetchError);
-      return { data: null, error: fetchError };
-    }
-
-    // Delete company from database
-    const { data, error } = await supabase
-      .from('companies')
-      .delete()
-      .eq('id', companyId)
-      .select();
-
-    if (error) {
-      console.error('Error deleting company:', error);
-      return { data: null, error };
-    }
-
-    // Delete logo file if it exists and is in our storage
-    if (company?.logo_url) {
-      await deleteCompanyLogo(company.logo_url);
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Delete company exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Enhanced cleanup function for uploaded files
-export const cleanupUploadedFiles = async (files: { bucket: string; path: string }[]) => {
-  if (!files || files.length === 0) return;
-  
-  console.log(`🧹 Cleaning up ${files.length} uploaded files...`);
-  
-  for (const file of files) {
-    try {
-      const { error } = await supabase.storage
-        .from(file.bucket)
-        .remove([file.path]);
-      
-      if (error) {
-        console.warn(`Could not delete file ${file.path}:`, error);
-      } else {
-        console.log(`✅ Deleted file: ${file.path}`);
-      }
-    } catch (error) {
-      console.warn(`Error cleaning up file ${file.path}:`, error);
-    }
-  }
-};
-
-// Enhanced moveFile function with better error handling
-export const moveFile = async (bucket: string, oldPath: string, newPath: string) => {
-  try {
-    console.log(`Moving file from ${oldPath} to ${newPath}`);
-    
-    // Copy file to new location
-    const { data: copyData, error: copyError } = await supabase.storage
-      .from(bucket)
-      .copy(oldPath, newPath);
-
-    if (copyError) {
-      console.error('File copy error:', copyError);
-      return { success: false, error: copyError };
-    }
-
-    // Delete original file
-    const { error: deleteError } = await supabase.storage
-      .from(bucket)
-      .remove([oldPath]);
-
-    if (deleteError) {
-      console.warn('Could not delete original file:', deleteError);
-      // Don't fail the entire operation - the copy was successful
-    }
-
-    console.log(`✅ File moved successfully from ${oldPath} to ${newPath}`);
-    return { success: true, error: null };
-  } catch (error: any) {
-    console.error('Move file error:', error);
-    return { success: false, error: { message: error.message } };
-  }
-};
-
-// Call this in browser console to test
-// debugStorageAccess()
-const deleteCompanyLogo = async (logoUrl: string) => {
-  try {
-    // Check if it's a file stored in our Assets bucket
-    if (!logoUrl.includes('supabase.co/storage/v1/object/public/Assets/')) {
-      console.log('Logo is external URL, skipping file deletion');
-      return;
-    }
-
-    // Extract file path from different possible URL formats
-    let filePath = null;
-    
-    if (logoUrl.includes('/Assets/')) {
-      // Standard public URL format
-      const parts = logoUrl.split('/Assets/');
-      filePath = parts[parts.length - 1];
-    } else if (logoUrl.includes('company-logos/')) {
-      // Direct path format
-      const parts = logoUrl.split('/');
-      const assetsIndex = parts.findIndex(part => part === 'Assets');
-      if (assetsIndex !== -1) {
-        filePath = parts.slice(assetsIndex + 1).join('/');
-      }
-    }
-
-    if (filePath) {
-      console.log('Attempting to delete logo file:', filePath);
-      
-      const { error: deleteError } = await supabase.storage
-        .from('Assets')
-        .remove([filePath]);
-
-      if (deleteError) {
-        console.warn('Failed to delete logo file:', deleteError);
-      } else {
-        console.log('Logo file deleted successfully');
-      }
-    } else {
-      console.warn('Could not extract file path from logo URL:', logoUrl);
-    }
-  } catch (error: any) {
-    console.warn('Error deleting logo file:', error);
-  }
-};
-
-export const getFileInfo = async (bucket: string, filePath: string) => {
-  try {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .list(filePath.split('/').slice(0, -1).join('/'), {
-        search: filePath.split('/').pop()
-      });
-
-    if (error) {
-      return { data: null, error };
-    }
-
-    if (!data || data.length === 0) {
-      return { data: null, error: { message: 'File not found' } };
-    }
-
-    const fileInfo = data[0];
-    const { data: urlData } = supabase.storage
-      .from(bucket)
-      .getPublicUrl(filePath);
-
-    return { 
-      data: {
-        ...fileInfo,
-        publicUrl: urlData.publicUrl
-      }, 
-      error: null 
-    };
-  } catch (error: any) {
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-export const checkFileExists = async (bucket: string, filePath: string) => {
-  try {
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .list(filePath.split('/').slice(0, -1).join('/'), {
-        search: filePath.split('/').pop()
-      });
-
-    if (error) {
-      return { exists: false, error };
-    }
-
-    const exists = data && data.length > 0;
-    return { exists, error: null };
-  } catch (error: any) {
-    return { exists: false, error };
-  }
-};
-export const getUserTotalScore = async (userId: string) => {
-  try {
-    // Calculate total score by summing all points from user_scores
-    const { data, error, count } = await supabase
-      .from('user_scores')
-      .select('points', { count: 'exact' })
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('Error fetching user scores:', error);
-      return { totalScore: 0, activitiesCount: 0, error };
-    }
-
-    const totalScore = data?.reduce((sum, record) => sum + (record.points || 0), 0) || 0;
-    const activitiesCount = count || 0;
-
-    return { 
-      totalScore, 
-      activitiesCount, 
-      error: null 
-    };
-  } catch (error: any) {
-    console.error('Get user total score exception:', error);
-    return { totalScore: 0, activitiesCount: 0, error: { message: error.message } };
-  }
-};
-
-// Get user ranking and score from users_profiles table (matches DashboardLayout pattern)
-export const getUserRankingAndScore = async (userId: string) => {
-  try {
-    // Get user's score and role directly from users_profiles
-    const { data: userData, error: userError } = await supabase
-      .from('users_profiles')
-      .select('score, role')
-      .eq('id', userId)
-      .single();
-
-    if (userError) {
-      console.error('Error fetching user data:', userError);
-      return { data: null, error: userError };
-    }
-
-    // Determine which roles to rank against based on user's role
-    const isVolunteer = !['admin', 'attendee'].includes(userData.role);
-    const roleFilter = isVolunteer 
-      ? ['volunteer', 'registration', 'building', 'team_leader', 'info_desk', 'ushers', 'marketing', 'media', 'ER', 'BD team', 'catering', 'feedback', 'stage']
-      : [userData.role];
-
-    // Get all users in the same category ordered by score
-    const { data: allUsers, error: usersError } = await supabase
-      .from('users_profiles')
-      .select('id, score')
-      .in('role', roleFilter)
-      .order('score', { ascending: false });
-
-    if (usersError) {
-      console.error('Error fetching users for ranking:', usersError);
-      return { data: null, error: usersError };
-    }
-
-    // Find user's rank
-    const userRank = (allUsers || []).findIndex(user => user.id === userId) + 1;
-    const totalUsers = allUsers?.length || 0;
-
-    return { 
-      data: {
-        user_id: userId,
-        score: userData.score || 0, // Score from users_profiles
-        rank: userRank,
-        total_users: totalUsers
-      }, 
-      error: null 
-    };
-  } catch (error: any) {
-    console.error('Get user ranking exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-// Get recent activities for a user
-export const getRecentActivities = async (userId: string, limit: number = 5) => {
+/**
+ * Get user's session bookings
+ */
+export const getUserBookings = async (userId: string) => {
   try {
     const { data, error } = await supabase
-      .from('user_scores')
+      .from('session_bookings')
       .select(`
-        id,
-        points,
-        activity_type,
-        activity_description,
-        awarded_at
+        *,
+        sessions(
+          id,
+          title,
+          description,
+          speaker_name,
+          start_time,
+          end_time,
+          location,
+          session_type
+        )
       `)
       .eq('user_id', userId)
-      .order('awarded_at', { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      console.error('Error fetching recent activities:', error);
-      return { data: [], error };
-    }
-
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    console.error('Get recent activities exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-export const getUserScoreBreakdown = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('user_scores')
-      .select('*')
-      .eq('user_id', userId)
-      .order('awarded_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching score breakdown:', error);
-      return { data: [], error };
-    }
-
-    // Calculate total from the fetched data
-    const totalScore = data?.reduce((sum, record) => sum + (record.points || 0), 0) || 0;
-
-    return { 
-      data: {
-        activities: data || [],
-        totalScore,
-        activitiesCount: data?.length || 0
-      }, 
-      error: null 
-    };
-  } catch (error: any) {
-    console.error('Get score breakdown exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-// Get leaderboard data based on role
-// Get leaderboard data with correct scores
-export const getLeaderboardData = async (userRole: string, leaderboardType?: 'attendees' | 'volunteers') => {
-  try {
-    // Get all users first
-    let query = supabase
-      .from('users_profiles')
-      .select('id, first_name, last_name, role, score')
-      .order('score', { ascending: false });
-
-    if (userRole === 'admin') {
-      if (leaderboardType === 'attendees') {
-        query = query.eq('role', 'attendee');
-      } else if (leaderboardType === 'volunteers') {
-        query = query.in('role', ['volunteer', 'registration', 'building', 'team_leader', 'info_desk']);
-      }
-    } else if (userRole === 'attendee') {
-      query = query.eq('role', 'attendee');
-    } else {
-      query = query.not('role', 'in', '("attendee","admin")');
-    }
-
-    const { data: users, error } = await query;
-
-    if (error) {
-      console.error('Error fetching leaderboard:', error);
-      return { data: [], error };
-    }
-
-    // For each user, calculate their actual total from user_scores
-    const leaderboardWithActualScores = await Promise.all(
-      (users || []).map(async (user, index) => {
-        const { totalScore } = await getUserTotalScore(user.id);
-        
-        return {
-          ...user,
-          actual_score: totalScore, // Score from user_scores table
-          displayed_score: user.score, // Score from users_profiles table
-          rank: index + 1
-        };
-      })
-    );
-
-    // Sort by actual score
-    leaderboardWithActualScores.sort((a, b) => b.actual_score - a.actual_score);
-
-    // Update ranks based on actual scores
-    const rankedData = leaderboardWithActualScores.map((user, index) => ({
-      ...user,
-      rank: index + 1
-    }));
-
-    return { data: rankedData, error: null };
-  } catch (error: any) {
-    console.error('Get leaderboard exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Get building attendance statistics using new boolean fields
-export const getBuildingStats = async () => {
-  try {
-    // Total attendees
-    const { count: totalAttendees } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'attendee');
-
-    // Count users currently inside building (building_entry = true)
-    const { count: insideBuilding } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('building_entry', true)
-      .eq('role', 'attendee');
-
-    // Count users currently inside event (event_entry = true)
-    const { count: insideEvent } = await supabase
-      .from('users_profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_entry', true)
-      .eq('role', 'attendee');
-
-    // Today's building entries (count building_entry scans today)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const { count: todayBuildingEntries } = await supabase
-      .from('attendances')
-      .select('*', { count: 'exact', head: true })
-      .eq('scan_type', 'building_entry')
-      .gte('scanned_at', today.toISOString());
-
-    // Today's event entries (count entry scans today)
-    const { count: todayEventEntries } = await supabase
-      .from('attendances')
-      .select('*', { count: 'exact', head: true })
-      .eq('scan_type', 'entry')
-      .gte('scanned_at', today.toISOString());
-
-    return {
-      data: {
-        total_attendees: totalAttendees || 0,
-        inside_building: insideBuilding || 0,
-        inside_event: insideEvent || 0,
-        today_building_entries: todayBuildingEntries || 0,
-        today_event_entries: todayEventEntries || 0
-      },
-      error: null
-    };
-  } catch (error: any) {
-    console.error('Get building stats error:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Function to get user's current status by ID
-export const getUserCurrentStatus = async (userId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .select('building_entry, event_entry')
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      console.error('Get user status error:', error);
-      return { data: null, error };
-    }
-
-    return {
-      data: {
-        building_status: data.building_entry ? 'inside_building' : 'outside_building',
-        event_status: data.event_entry ? 'inside_event' : 'outside_event'
-      },
-      error: null
-    };
-  } catch (error: any) {
-    console.error('Get user status exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-// Function to get all users with their current status
-export const getAllUsersWithStatus = async (roleFilter?: string) => {
-  try {
-    let query = supabase
-      .from('users_profiles')
-      .select(`
-        id,
-        first_name,
-        last_name,
-        email,
-        personal_id,
-        role,
-        building_entry,
-        event_entry,
-        created_at
-      `)
+      .neq('booking_status', 'cancelled')
       .order('created_at', { ascending: false });
 
-    if (roleFilter && roleFilter !== 'all') {
-      query = query.eq('role', roleFilter);
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Record session attendance
+ */
+export const recordSessionAttendance = async (
+  userId: string,
+  sessionId: string,
+  scannedBy: string
+) => {
+  try {
+    const { data, error } = await supabase
+      .from('session_bookings')
+      .update({
+        booking_status: 'attended',
+        attended: true,
+        attended_at: new Date().toISOString(),
+        scanned_by: scannedBy
+      })
+      .eq('user_id', userId)
+      .eq('session_id', sessionId)
+      .select()
+      .single();
+
+    if (error) {
+      return { data: null, error: { message: error.message } };
+    }
+
+    // Award points for session attendance
+    await supabase
+      .from('user_activities')
+      .insert({
+        user_id: userId,
+        event_id: DEFAULT_EVENT_ID,
+        activity_type: 'session_attendance',
+        description: `Attended session`,
+        points_earned: 15
+      });
+
+    return { data, error: null };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+// ============================================================================
+// ANNOUNCEMENTS
+// ============================================================================
+
+/**
+ * Send announcement to users
+ */
+export const sendAnnouncement = async ({
+  title,
+  message,
+  targetType,
+  targetRole,
+  targetUsers
+}: {
+  title: string;
+  message: string;
+  targetType: 'all' | 'role' | 'custom';
+  targetRole?: string;
+  targetUsers?: string[];
+}) => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { success: false, error: 'Not authenticated' };
+    }
+
+    const { error } = await supabase
+      .from('announcements')
+      .insert({
+        title,
+        message,
+        sender_id: user.id,
+        target_type: targetType,
+        target_role: targetRole || null,
+        target_users: targetUsers || null
+      });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, error: null };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Get announcements for current user
+ */
+export const getUserAnnouncements = async () => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return { data: null, error: { message: 'Not authenticated' } };
+    }
+
+    // Get user role
+    const { data: roleData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single();
+
+    const userRole = roleData?.role;
+
+    // Get announcements targeting this user
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('*')
+      .or(`target_type.eq.all,and(target_type.eq.role,target_role.eq.${userRole}),and(target_type.eq.custom,target_users.cs.{${user.id}})`)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+// ============================================================================
+// STATISTICS & RANKINGS
+// ============================================================================
+
+/**
+ * Get user ranking and score
+ */
+export const getUserRankingAndScore = async (userId: string) => {
+  try {
+    // Get user score
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('score')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) {
+      return { data: null, error: profileError };
+    }
+
+    // Get ranking (count users with higher scores)
+    const { count, error: rankError } = await supabase
+      .from('user_profiles')
+      .select('*', { count: 'exact', head: true })
+      .gt('score', profile.score || 0);
+
+    if (rankError) {
+      return { data: null, error: rankError };
+    }
+
+    const rank = (count || 0) + 1;
+
+    return {
+      data: {
+        score: profile.score || 0,
+        rank
+      },
+      error: null
+    };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Get recent activities for a user
+ */
+export const getRecentActivities = async (userId: string, limit: number = 10) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_activities')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Award points to a user
+ */
+export const awardPoints = async ({
+  userId,
+  activityType,
+  points,
+  description
+}: {
+  userId: string;
+  activityType: string;
+  points: number;
+  description: string;
+}) => {
+  try {
+    const { error } = await supabase
+      .from('user_activities')
+      .insert({
+        user_id: userId,
+        event_id: DEFAULT_EVENT_ID,
+        activity_type: activityType,
+        description,
+        points_earned: points
+      });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, error: null };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+};
+
+// ============================================================================
+// TEAM MANAGEMENT
+// ============================================================================
+
+/**
+ * Get team members for a team leader
+ */
+export const getTeamMembers = async (teamId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('volunteers')
+      .select(`
+        *,
+        user_profiles(
+          id,
+          full_name,
+          phone,
+          score
+        )
+      `)
+      .eq('team_id', teamId)
+      .order('created_at', { ascending: false });
+
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Get all teams
+ */
+export const getAllTeams = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('teams')
+      .select('*')
+      .order('team_name', { ascending: true });
+
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+// ============================================================================
+// ADMIN FUNCTIONS
+// ============================================================================
+
+/**
+ * Get all sessions
+ */
+export const getAllSessions = async (eventId?: string) => {
+  try {
+    let query = supabase
+      .from('sessions')
+      .select('*')
+      .order('start_time', { ascending: true });
+
+    if (eventId) {
+      query = query.eq('event_id', eventId);
     }
 
     const { data, error } = await query;
-
-    if (error) {
-      console.error('Get all users with status error:', error);
-      return { data: [], error };
-    }
-
-    // Add status fields based on the boolean flags
-    const usersWithStatus = (data || []).map(user => ({
-      ...user,
-      building_status: user.building_entry ? 'inside_building' : 'outside_building',
-      event_status: user.event_entry ? 'inside_event' : 'outside_event'
-    }));
-
-    return { data: usersWithStatus, error: null };
+    return { data, error };
   } catch (error: any) {
-    console.error('Get all users with status exception:', error);
-    return { data: [], error: { message: error.message } };
-  }
-};
-
-// Function to get real-time status updates
-export const subscribeToStatusChanges = (callback: (payload: any) => void) => {
-  const subscription = supabase
-    .channel('users_profiles_changes')
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'users_profiles'
-      },
-      callback
-    )
-    .subscribe();
-
-  return subscription;
-};
-
-// Function to manually update user status (for testing/emergency)
-export const updateUserStatus = async (userId: string, updates: { building_entry?: boolean, event_entry?: boolean }) => {
-  try {
-    const { data, error } = await supabase
-      .from('users_profiles')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', userId)
-      .select();
-
-    if (error) {
-      console.error('Update user status error:', error);
-      return { data: null, error };
-    }
-
-    return { data, error: null };
-  } catch (error: any) {
-    console.error('Update user status exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
-// Export all the scoring functions
 
-export default supabase;
+/**
+ * Get all companies
+ */
+export const getAllCompanies = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('companies')
+      .select('*')
+      .order('company_name', { ascending: true });
+
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Get schedule items
+ */
+export const getScheduleItems = async (dayNumber?: number) => {
+  try {
+    let query = supabase
+      .from('schedule_items')
+      .select('*')
+      .order('start_time', { ascending: true });
+
+    if (dayNumber) {
+      query = query.eq('day_number', dayNumber);
+    }
+
+    const { data, error } = await query;
+    return { data, error };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Get building statistics (for dashboards)
+ */
+export const getDynamicBuildingStats = async () => {
+  try {
+    // Get current attendees in building
+    const { count: buildingCount, error: buildingError } = await supabase
+      .from('attendees')
+      .select('*', { count: 'exact', head: true })
+      .eq('building_entry', true);
+
+    if (buildingError) {
+      console.error('Error fetching building stats:', buildingError);
+    }
+
+    // Get total entries today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const { count: todayEntries, error: entriesError } = await supabase
+      .from('attendance_logs')
+      .select('*', { count: 'exact', head: true })
+      .gte('created_at', today.toISOString())
+      .eq('action', 'building_enter');
+
+    if (entriesError) {
+      console.error('Error fetching entry stats:', entriesError);
+    }
+
+    return {
+      data: {
+        currentInBuilding: buildingCount || 0,
+        todayEntries: todayEntries || 0
+      },
+      error: null
+    };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};

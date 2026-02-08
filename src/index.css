@@ -51,6 +51,7 @@
     opacity: 0;
     filter: blur(10px);
   }
+
   to {
     opacity: 1;
     filter: blur(0px);
@@ -63,6 +64,7 @@
     filter: blur(8px);
     transform: translateY(30px);
   }
+
   to {
     opacity: 1;
     filter: blur(0px);
@@ -74,6 +76,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -85,6 +88,7 @@
     filter: blur(5px);
     transform: translateY(20px) scale(0.95);
   }
+
   to {
     opacity: 1;
     filter: blur(0px);

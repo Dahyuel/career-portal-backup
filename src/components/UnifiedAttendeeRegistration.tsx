@@ -6,6 +6,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { RegistrationData, ValidationError, FileUpload as FileUploadType } from '../types';
 import { FACULTIES, CLASS_YEARS, HOW_DID_YOU_HEAR_OPTIONS } from '../utils/constants';
 import { validatePhone, validatePersonalId, validateVolunteerId, validateEmail, validatePassword, validateConfirmPassword, validateName } from '../utils/validation';
+import { registerAttendee } from '../lib/supabase';
 
 const ErrorPopup: React.FC<{
     message: string;
@@ -286,7 +287,7 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                 setCurrentStep(currentStep - 1);
             } else {
                 // If at step 0, go back using browser history
-                window.history.back();
+                navigate('/login');
             }
         }, 100);
     };
@@ -324,57 +325,78 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
         setErrors([]);
 
         try {
-            // Simulate API call
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Determine final university value (handle "Other" case)
+            const finalUniversity = formData.university === 'Other'
+                ? (formData.customUniversity || '').trim()
+                : formData.university;
 
-            // Prepare user data
-            const userData = {
-                firstName: formData.firstName.trim(),
-                lastName: formData.lastName.trim(),
+            // Prepare registration payload
+            const registrationPayload = {
                 email: formData.email.trim(),
-                gender: formData.gender,
-                nationality: formData.nationality,
+                password: formData.password,
+                fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
                 phone: formData.phone.trim(),
                 personalId: formData.personalId.trim(),
-                university: formData.university === 'Other' ? formData.customUniversity : formData.university,
+                gender: formData.gender,
+                nationality: formData.nationality,
+                university: finalUniversity,
                 faculty: formData.faculty,
                 degreeLevel: formData.degreeLevel,
-                program: formData.program,
-                classYear: formData.degreeLevel === 'student' ? formData.classYear : undefined,
-                howDidYouHear: formData.howDidYouHear,
-                volunteerId: formData.volunteerId?.trim() || undefined,
-                role: 'attendee',
-                profileComplete: true,
-                createdAt: new Date().toISOString()
+                department: formData.program,
+                classYear: formData.classYear || undefined,
+                cvFile: fileUploads.resume,
+                enrollmentProofFile: fileUploads.universityId,
+                volunteerId: formData.volunteerId // Pass volunteer ID
             };
 
-            // Store in localStorage
-            localStorage.setItem('currentUser', JSON.stringify(userData));
+            // Call registration function
+            const result = await registerAttendee(registrationPayload);
 
-            // Store file info (just names for demo)
-            if (fileUploads.universityId || fileUploads.resume) {
-                const fileInfo = {
-                    universityId: fileUploads.universityId?.name,
-                    resume: fileUploads.resume?.name
-                };
-                localStorage.setItem('userFiles', JSON.stringify(fileInfo));
+            if (!result.success) {
+                // Handle validation errors
+                if (result.error?.validationErrors && result.error.validationErrors.length > 0) {
+                    setErrors(result.error.validationErrors);
+                    showErrorPopup(result.error.validationErrors[0].message, 'error');
+                } else {
+                    showErrorPopup(result.error?.message || 'Registration failed', 'error');
+                }
+
+                setLoading(false);
+                return;
             }
+
+            // Check for warnings (file upload issues are non-critical)
+            if (result.error?.validationErrors) {
+                const hasFileWarnings = result.error.validationErrors.some(e => e.field === 'files');
+                if (hasFileWarnings) {
+                    console.warn('⚠️ Registration succeeded with file warnings:', result.error.message);
+                }
+            }
+
+            // Store user info in localStorage
+            const userData = {
+                ...result.data?.user,
+                profile: result.data?.profile,
+                role: 'attendee'
+            };
+            localStorage.setItem('currentUser', JSON.stringify(userData));
 
             // Clear form cache
             localStorage.removeItem('unifiedRegistrationFormData');
 
-            console.log('✅ Registration complete:', userData);
+            // Show success and redirect
+            showErrorPopup('Registration successful! Redirecting...', 'warning');
 
-            // Navigate to attendee dashboard
-            navigate('/attendee', { replace: true });
+            setTimeout(() => {
+                navigate('/attendee', { replace: true });
+            }, 1500);
 
         } catch (error: unknown) {
-            console.error("Registration error:", error);
+            console.error("💥 Registration exception:", error);
             const errorMessage = error instanceof Error
                 ? error.message
                 : "An unexpected error occurred. Please try again.";
             showErrorPopup(errorMessage, 'error');
-        } finally {
             setLoading(false);
         }
     };
@@ -713,19 +735,23 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
         <div className="space-y-6 stagger-children">
             <div className="fade-in-blur">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    How did you hear about this event? *
+                    How did you hear about us? *
                 </label>
-                <select
-                    value={formData.howDidYouHear}
-                    onChange={(e) => updateField('howDidYouHear', e.target.value)}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('howDidYouHear') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
-                        }`}
-                >
-                    <option value="">Select an option</option>
-                    {HOW_DID_YOU_HEAR_OPTIONS.map(option => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                </select>
+                <div className="relative">
+                    <UserPlus className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <select
+                        value={formData.howDidYouHear}
+                        onChange={(e) => updateField('howDidYouHear', e.target.value)}
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 appearance-none bg-white dark:bg-gray-700 dark:text-white ${getFieldError('howDidYouHear') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                    >
+                        <option value="">Select an option</option>
+                        {HOW_DID_YOU_HEAR_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                    </select>
+                    <ChevronRight className="absolute right-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400 rotate-90" />
+                </div>
                 {getFieldError('howDidYouHear') && (
                     <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('howDidYouHear')}</p>
                 )}
@@ -733,16 +759,19 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
 
             <div className="fade-in-blur">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Volunteer ID (Optional)
+                    Referral Code (Volunteer ID)
                 </label>
-                <input
-                    type="text"
-                    value={formData.volunteerId}
-                    onChange={(e) => updateField('volunteerId', e.target.value)}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 ${getFieldError('volunteerId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
-                        }`}
-                    placeholder="Enter volunteer ID (if applicable)"
-                />
+                <div className="relative">
+                    <UserPlus className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                        type="text"
+                        value={formData.volunteerId}
+                        onChange={(e) => updateField('volunteerId', e.target.value)}
+                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('volunteerId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                        placeholder="Enter Volunteer ID (Optional)"
+                    />
+                </div>
                 {getFieldError('volunteerId') && (
                     <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('volunteerId')}</p>
                 )}
@@ -863,6 +892,9 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
 
                         {/* Step Progress */}
                         <div className="mb-8 pt-10 md:pt-0">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <GraduationCap className="w-8 h-8 text-red-600 dark:text-red-400" />
+                            </div>
                             <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4 text-center">
                                 Attendee Registration
                             </h1>

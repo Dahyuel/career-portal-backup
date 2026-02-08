@@ -1,7 +1,7 @@
-// src/components/shared/ProtectedRoute.tsx - UPDATED FOR YOUR FLOW
+// src/components/ProtectedRoute.tsx - Supabase Auth Version
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -9,20 +9,20 @@ interface ProtectedRouteProps {
   requireCompleteProfile?: boolean;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
-  children, 
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+  children,
   requiredRole,
-  requireCompleteProfile = true
+  requireCompleteProfile = false // Changed default to false for simpler flow
 }) => {
-  const { 
-    user, 
-    profile, 
-    loading, 
+  const {
+    user,
+    profile,
+    loading,
     sessionLoaded,
-    isAuthenticated, 
-    hasRole, 
+    isAuthenticated,
+    hasRole,
     getRoleBasedRedirect,
-    isProfileComplete 
+    signOut
   } = useAuth();
   const location = useLocation();
 
@@ -37,59 +37,104 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     profileComplete: profile?.profile_complete
   });
 
-  // Show loading only during initial session load
+  // OPTIMIZATION: Check localStorage FIRST for instant role check
+  // This prevents the 5-second loading wait when accessing unauthorized endpoints
+  const localUserData = React.useMemo(() => {
+    try {
+      const stored = localStorage.getItem('currentUser');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Safety timeout: Only needed if we're truly stuck (much longer now since we're faster)
+  React.useEffect(() => {
+    let timeout: NodeJS.Timeout;
+
+    // Only set timeout if we're loading and don't have localStorage data
+    if ((loading || (isAuthenticated && !profile)) && !localUserData) {
+      timeout = setTimeout(async () => {
+        console.warn('⚠️ Loading timed out. Forcing logout...', {
+          loading,
+          hasProfile: !!profile,
+          isAuthenticated
+        });
+        await signOut();
+        window.location.href = '/login';
+      }, 5000); // Back to 5 seconds, but rarely hit due to localStorage
+    }
+
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [loading, isAuthenticated, profile, signOut, localUserData]);
+
+  // ⚡ ZERO-LAG INSTANT REDIRECT: Check localStorage FIRST before ANY other logic!
+  // This executes immediately on render for instant unauthorized redirects
+  if (requiredRole && localUserData?.role) {
+    const requiredRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+
+    // Use localStorage role for instant check (profile will verify later if needed)
+    if (!requiredRoles.includes(localUserData.role)) {
+      // INSTANT redirect - no console logs, no extra checks, pure speed
+      const correctPath = getRoleBasedRedirect(localUserData.role);
+      return <Navigate to={correctPath} replace />;
+    }
+  }
+
+  // Show loading only during initial session load (with a max timeout to prevent infinite loading)
   if (loading && !sessionLoaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto mb-2"></div>
-          <p className="text-gray-600 text-sm">Loading...</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mx-auto mb-2"></div>
+          <p className="text-gray-600 dark:text-gray-300 text-sm">Loading session...</p>
         </div>
       </div>
     );
   }
 
   // CRITICAL: Once session is loaded but no user, redirect to login
-  if (sessionLoaded && !isAuthenticated) {
+  // Also redirect if loading is done and no user
+  if ((sessionLoaded && !isAuthenticated) || (!loading && !user)) {
     console.log('🔐 Not authenticated, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   // If we have a user but profile is still loading, wait
-  if (isAuthenticated && !profile && loading) {
+  // ALSO wait if we need role validation but the role hasn't loaded yet
+  // BUT: Only show this if localStorage doesn't have the info
+  if (isAuthenticated && (!profile || (requiredRole && !profile.role)) && !localUserData?.role) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto mb-2"></div>
-          <p className="text-gray-600 text-sm">Loading profile...</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mx-auto mb-2"></div>
+          <p className="text-gray-600 dark:text-gray-300 text-sm">
+            {!profile ? 'Loading profile...' : 'Verifying permissions...'}
+          </p>
         </div>
       </div>
     );
   }
 
-  // Handle profile completion logic
-  const profileComplete = profile ? isProfileComplete(profile) : false;
-  
-  if (requireCompleteProfile && !profileComplete) {
-    console.log('📝 Profile incomplete, checking redirect...', {
-      role: profile?.role,
-      profileComplete,
-      currentPath: location.pathname
-    });
+  // Handle profile completion logic (if enabled)
+  if (requireCompleteProfile && profile && !profile.profile_complete) {
+    console.log('📝 Profile incomplete, checking redirect...');
 
     // Allow access to registration forms even with incomplete profiles
-    const isRegistrationPath = location.pathname === '/V0lunt33ringR3g' || 
-                              location.pathname === '/attendee-register';
-    
+    const isRegistrationPath = location.pathname === '/V0lunt33ringR3g' ||
+      location.pathname === '/attendee-register';
+
     if (isRegistrationPath) {
       console.log('✅ Allowing access to registration form');
       return <>{children}</>;
     }
-    
+
     // Redirect incomplete profiles to appropriate registration form
-    const redirectPath = getRoleBasedRedirect(profile?.role, profileComplete);
-    console.log('🔄 Redirecting incomplete profile to:', redirectPath);
-    
+    const redirectPath = getRoleBasedRedirect(profile.role);
+    console.log('🔄 Redirecting to:', redirectPath);
+
     // Prevent redirect loop
     if (location.pathname !== redirectPath) {
       return <Navigate to={redirectPath} replace />;
@@ -99,35 +144,23 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // Check role permissions if specified
   if (requiredRole && profile) {
     const hasRequiredRole = hasRole(requiredRole);
-    
+
     if (!hasRequiredRole) {
       console.log('❌ Access denied - insufficient permissions', {
         userRole: profile.role,
         requiredRole
       });
-      
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-red-50 to-white flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center border border-red-100">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Access Denied</h2>
-            <p className="text-gray-600 mb-6">
-              You don't have the required permissions to access this page.
-            </p>
-            <div className="space-y-2 text-sm text-gray-500 mb-6">
-              <p><span className="font-medium">Your role:</span> {profile?.role || 'Unknown'}</p>
-              <p><span className="font-medium">Required role:</span> {
-                Array.isArray(requiredRole) ? requiredRole.join(' or ') : requiredRole
-              }</p>
-            </div>
-            <button
-              onClick={() => window.history.back()}
-              className="w-full bg-gradient-to-r from-gray-500 to-gray-600 text-white py-3 px-4 rounded-lg font-medium hover:from-gray-600 hover:to-gray-700 transition-all duration-200"
-            >
-              Go Back
-            </button>
-          </div>
-        </div>
-      );
+
+      // Auto-redirect to their correct dashboard instead of showing Access Denied
+      const correctPath = getRoleBasedRedirect(profile.role);
+
+      // Prevent infinite redirect loop if for some reason the correct path is also forbidden (shouldn't happen with correct config)
+      if (location.pathname !== correctPath) {
+        return <Navigate to={correctPath} replace />;
+      }
+
+      // Fallback if they are already on the "correct" path but still denied (e.g. role mismatch in config)
+      return <Navigate to="/login" replace />;
     }
   }
 

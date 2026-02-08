@@ -1,10 +1,10 @@
 // components/UnifiedVolunteerRegistration.tsx
 // Unified volunteer registration merging auth check + full registration
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User, ChevronRight, CheckCircle, AlertCircle, Heart, Users, X, Mail, Lock, UserPlus, ArrowLeft } from 'lucide-react';
+import { User, ChevronRight, CheckCircle, AlertCircle, Users, X, Mail, Lock, UserPlus, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { ValidationError } from '../types';
-import { FACULTIES } from '../utils/constants';
+
 import {
     validateName,
     validatePhone,
@@ -13,7 +13,7 @@ import {
     validatePassword,
     validateConfirmPassword,
 } from '../utils/validation';
-
+import { registerVolunteer } from '../lib/supabase';
 // ErrorPopup component
 const ErrorPopup: React.FC<{
     message: string;
@@ -55,6 +55,21 @@ const ErrorPopup: React.FC<{
     );
 };
 
+// Team data provided by user
+const VOLUNTEER_TEAMS = [
+    { "idx": 0, "id": "394b8631-7948-49f1-87ba-bc7e3ead12b9", "team_name": "Feedback" },
+    { "idx": 1, "id": "481237b5-45ef-463f-8460-b6f848835756", "team_name": "Stage" },
+    { "idx": 2, "id": "587e30ea-20b2-4292-81fe-02945f6d2a3f", "team_name": "Marketing" },
+    { "idx": 3, "id": "8052492b-55bb-46d0-ab4c-52a6df81c4c9", "team_name": "Media" },
+    { "idx": 4, "id": "9269ac6a-7b2c-4be5-ab72-3f8278eb8e33", "team_name": "Info Desk" },
+    { "idx": 5, "id": "97ab5a37-557e-4a81-ae81-9dcc6bbae87a", "team_name": "Usher" },
+    { "idx": 6, "id": "a0abd4b7-7879-4a07-806d-fd0e2f4257f1", "team_name": "Verification" },
+    { "idx": 7, "id": "ae0e251c-81f5-4763-a9db-39ca511fd03c", "team_name": "Catering" },
+    { "idx": 8, "id": "be96f64f-6674-421d-84f3-791a27bd4121", "team_name": "ER" },
+    { "idx": 9, "id": "f9419a07-f974-4f59-bba2-b2f9a2b2fa7f", "team_name": "Building" },
+    { "idx": 10, "id": "fc15e3bb-ceed-4aa3-acf5-004a7af664ed", "team_name": "Registration" }
+];
+
 interface VolunteerFormData {
     firstName: string;
     lastName: string;
@@ -63,40 +78,10 @@ interface VolunteerFormData {
     confirmPassword: string;
     phone: string;
     personalId: string;
-    faculty: string;
-    role: string;
+
+    teamId: string;
     gender: string;
-    tlTeam: string;
 }
-
-const roleOptions = [
-    { value: 'registration', label: 'Registration Desk' },
-    { value: 'building', label: 'Building Assistance' },
-    { value: 'info_desk', label: 'Info Desk' },
-    { value: 'ushers', label: 'Ushers' },
-    { value: 'marketing', label: 'Marketing' },
-    { value: 'media', label: 'Media' },
-    { value: 'ER', label: 'ER Team' },
-    { value: 'BD team', label: 'BD Team' },
-    { value: 'catering', label: 'Catering' },
-    { value: 'feedback', label: 'Feedback Team' },
-    { value: 'stage', label: 'Stage Team' },
-    { value: 'team_leader', label: 'Team Leader' }
-];
-
-const teamOptions = [
-    { value: 'registration', label: 'Registration Team' },
-    { value: 'building', label: 'Building Team' },
-    { value: 'info_desk', label: 'Info Desk Team' },
-    { value: 'ushers', label: 'Ushers Team' },
-    { value: 'marketing', label: 'Marketing Team' },
-    { value: 'media', label: 'Media Team' },
-    { value: 'ER', label: 'ER Team' },
-    { value: 'BD team', label: 'BD Team' },
-    { value: 'catering', label: 'Catering Team' },
-    { value: 'feedback', label: 'Feedback Team' },
-    { value: 'stage', label: 'Stage Team' }
-];
 
 const genderOptions = [
     { value: 'male', label: 'Male' },
@@ -106,7 +91,7 @@ const genderOptions = [
 const sections = [
     { id: 1, title: 'Account Info', icon: UserPlus },
     { id: 2, title: 'Personal Info', icon: User },
-    { id: 3, title: 'Role Selection', icon: Heart }
+    { id: 3, title: 'Team Selection', icon: Users } // Changed icon to Users
 ];
 
 export const UnifiedVolunteerRegistration: React.FC = () => {
@@ -120,15 +105,17 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         confirmPassword: '',
         phone: '',
         personalId: '',
-        faculty: '',
-        role: '',
-        gender: '',
-        tlTeam: ''
+
+        teamId: '',
+        gender: ''
     });
 
     const [errors, setErrors] = useState<ValidationError[]>([]);
     const [loading, setLoading] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
+    // Success view state
+    const [successData, setSuccessData] = useState<{ firstName: string } | null>(null);
+
     const [errorPopup, setErrorPopup] = useState<{ message: string; type?: 'error' | 'warning' } | null>(null);
 
     const sectionChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -147,13 +134,6 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         setFormData(prev => ({ ...prev, [field]: value }));
         setErrors(prev => prev.filter(error => error.field !== field));
     }, []);
-
-    // Reset team selection when role changes
-    useEffect(() => {
-        if (formData.role !== 'team_leader') {
-            setFormData(prev => ({ ...prev, tlTeam: '' }));
-        }
-    }, [formData.role]);
 
     const validateGender = (gender: string): string | null => {
         if (!gender || !gender.trim()) {
@@ -197,20 +177,16 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             const personalIdError = validatePersonalId(formData.personalId);
             if (personalIdError) validationErrors.push({ field: 'personalId', message: personalIdError });
 
-            if (!formData.faculty) validationErrors.push({ field: 'faculty', message: 'Faculty is required' });
+
 
             const genderError = validateGender(formData.gender);
             if (genderError) validationErrors.push({ field: 'gender', message: genderError });
         }
 
         if (section === 3) {
-            // Role Selection validation
-            if (!formData.role) {
-                validationErrors.push({ field: 'role', message: 'Please select a volunteer role' });
-            }
-
-            if (formData.role === 'team_leader' && !formData.tlTeam) {
-                validationErrors.push({ field: 'tlTeam', message: 'Please select which team you will lead' });
+            // Team Selection validation
+            if (!formData.teamId) {
+                validationErrors.push({ field: 'teamId', message: 'Please select a team' });
             }
         }
 
@@ -254,8 +230,8 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             if (currentSection > 1) {
                 setCurrentSection(currentSection - 1);
             } else {
-                // At first step, go back using browser history
-                window.history.back();
+                // At first step, go back using browser history or navigate home
+                navigate('/login');
             }
         }, 100);
     };
@@ -280,7 +256,7 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             let targetSection = 1;
 
             if (['firstName', 'lastName', 'email', 'password', 'confirmPassword'].includes(firstErrorField)) targetSection = 1;
-            else if (['phone', 'personalId', 'faculty', 'gender'].includes(firstErrorField)) targetSection = 2;
+            else if (['phone', 'personalId', 'gender'].includes(firstErrorField)) targetSection = 2;
             else targetSection = 3;
 
             setCurrentSection(targetSection);
@@ -291,24 +267,70 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         setErrors([]);
 
         try {
-            // Simulate submission
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Call Supabase registration
+            const result = await registerVolunteer({
+                email: formData.email.trim(),
+                password: formData.password,
+                fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+                phone: formData.phone.trim(),
+                personalId: formData.personalId.trim(),
+
+                gender: formData.gender.trim(),
+                teamId: formData.teamId
+            });
+
+            if (!result.success) {
+                // Handle validation errors from Supabase
+                if (result.error?.validationErrors && result.error.validationErrors.length > 0) {
+                    setErrors(result.error.validationErrors);
+                    showErrorPopup(result.error.validationErrors[0].message, 'error');
+                } else {
+                    showErrorPopup(result.error?.message || 'Registration failed', 'error');
+                }
+                setLoading(false);
+                return;
+            }
+
+            // Success handling
+            setSuccessData({ firstName: formData.firstName });
+
+            // Log user in automatically logic handled by registerVolunteer usually returning session?
+            // Actually registerVolunteer returns AuthResult which might have user/session.
+            // If email confirmation is off, they might be logged in. 
+            // In the previous code, we cached user info in localStorage.
+
+            // Determine role based on team ID for local storage
+            let assignedRole = 'volunteer';
+            if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') assignedRole = 'building';
+            else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') assignedRole = 'registration';
+            else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') assignedRole = 'info_desk';
+            else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') assignedRole = 'verification';
 
             const volunteerData = {
-                ...formData,
-                role: 'volunteer',
-                createdAt: new Date().toISOString()
+                id: result.data?.user?.id,
+                firstName: formData.firstName.trim(),
+                lastName: formData.lastName.trim(),
+                email: formData.email.trim(),
+                role: assignedRole,
+                volunteerId: result.data?.volunteer?.volunteer_id,
+                teamId: formData.teamId
             };
-
             localStorage.setItem('currentUser', JSON.stringify(volunteerData));
-            console.log('✅ Volunteer registration complete:', volunteerData);
+
+            console.log('✅ Volunteer registration complete:', result.data);
 
             setLoading(false);
             setShowSuccess(true);
 
-            // Redirect to volunteer dashboard
+            // Redirect to appropriate dashboard based on team
+            let redirectPath = '/volunteer';
+            if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') redirectPath = '/buildteam';
+            else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') redirectPath = '/registration';
+            else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') redirectPath = '/info-desk';
+            else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') redirectPath = '/verification';
+
             setTimeout(() => {
-                navigate('/volunteer', { replace: true });
+                navigate(redirectPath, { replace: true });
             }, 2000);
 
         } catch (error) {
@@ -470,25 +492,7 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="fade-in-blur">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Faculty *
-                    </label>
-                    <select
-                        value={formData.faculty}
-                        onChange={(e) => updateField('faculty', e.target.value)}
-                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('faculty') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
-                            }`}
-                    >
-                        <option value="">Select faculty</option>
-                        {FACULTIES.map(faculty => (
-                            <option key={faculty} value={faculty}>{faculty}</option>
-                        ))}
-                    </select>
-                    {getFieldError('faculty') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('faculty')}</p>
-                    )}
-                </div>
+
 
                 <div className="fade-in-blur">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -517,41 +521,41 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         <div className="space-y-6 stagger-children">
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-6 fade-in-blur">
                 <div className="flex items-center mb-4">
-                    <Heart className="h-6 w-6 text-red-600 dark:text-red-400 mr-2" />
-                    <h3 className="text-lg font-semibold text-red-900 dark:text-red-200">Volunteer Role Selection</h3>
+                    <Users className="h-6 w-6 text-red-600 dark:text-red-400 mr-2" />
+                    <h3 className="text-lg font-semibold text-red-900 dark:text-red-200">Team Selection</h3>
                 </div>
                 <p className="text-red-800 dark:text-red-300">
-                    Please select the volunteer role you're interested in. This helps us assign you to the most suitable position.
+                    Please select the team you would like to join. This helps us assign you to the most suitable position.
                 </p>
             </div>
 
             <div className="fade-in-blur">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-                    Preferred Volunteer Role *
+                    Preferred Team *
                 </label>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {roleOptions.map((option) => (
+                    {VOLUNTEER_TEAMS.map((team) => (
                         <div
-                            key={option.value}
-                            className={`relative flex cursor-pointer rounded-lg border p-4 focus:outline-none transition-all duration-300 ${formData.role === option.value
+                            key={team.id}
+                            className={`relative flex cursor-pointer rounded-lg border p-4 focus:outline-none transition-all duration-300 ${formData.teamId === team.id
                                 ? 'border-red-500 bg-red-50 dark:bg-red-900/30 transform scale-[1.02] ring-2 ring-red-500'
                                 : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 smooth-hover'
                                 }`}
-                            onClick={() => updateField('role', option.value)}
+                            onClick={() => updateField('teamId', team.id)}
                         >
                             <input
                                 type="radio"
-                                name="role"
-                                value={option.value}
-                                checked={formData.role === option.value}
-                                onChange={(e) => updateField('role', e.target.value)}
+                                name="teamId"
+                                value={team.id}
+                                checked={formData.teamId === team.id}
+                                onChange={(e) => updateField('teamId', e.target.value)}
                                 className="sr-only"
                             />
                             <div className="flex w-full items-center justify-between">
                                 <div className="flex flex-col">
-                                    <span className="font-medium text-gray-900 dark:text-white">{option.label}</span>
+                                    <span className="font-medium text-gray-900 dark:text-white">{team.team_name} Team</span>
                                 </div>
-                                <div className={`flex-shrink-0 transition-colors duration-300 ${formData.role === option.value ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-500'
+                                <div className={`flex-shrink-0 transition-colors duration-300 ${formData.teamId === team.id ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-500'
                                     }`}>
                                     <CheckCircle className="h-6 w-6" />
                                 </div>
@@ -559,42 +563,10 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                         </div>
                     ))}
                 </div>
-                {getFieldError('role') && (
-                    <p className="mt-2 text-sm text-red-600 fade-in-blur">{getFieldError('role')}</p>
+                {getFieldError('teamId') && (
+                    <p className="mt-2 text-sm text-red-600 fade-in-blur">{getFieldError('teamId')}</p>
                 )}
             </div>
-
-            {formData.role === 'team_leader' && (
-                <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-6 fade-in-scale">
-                    <div className="flex items-center mb-4">
-                        <Users className="h-6 w-6 text-blue-600 dark:text-blue-400 mr-2" />
-                        <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-200">Team Leadership</h3>
-                    </div>
-                    <p className="text-blue-800 dark:text-blue-300 mb-4">
-                        As a Team Leader, please select which team you will be leading. This helps us organize the volunteer structure.
-                    </p>
-
-                    <div className="fade-in-blur">
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Select Team to Lead *
-                        </label>
-                        <select
-                            value={formData.tlTeam}
-                            onChange={(e) => updateField('tlTeam', e.target.value)}
-                            className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('tlTeam') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
-                                }`}
-                        >
-                            <option value="">Select team</option>
-                            {teamOptions.map(option => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                        </select>
-                        {getFieldError('tlTeam') && (
-                            <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('tlTeam')}</p>
-                        )}
-                    </div>
-                </div>
-            )}
         </div>
     );
 
@@ -611,15 +583,6 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         }
     };
 
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            if (sectionChangeTimeoutRef.current) {
-                clearTimeout(sectionChangeTimeoutRef.current);
-            }
-        };
-    }, []);
-
     if (showSuccess) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-red-50 to-white dark:from-gray-900 dark:to-gray-950 flex items-center justify-center p-4 transition-colors duration-300">
@@ -629,7 +592,7 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                     </div>
                     <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4 fade-in-blur">Registration Complete!</h2>
                     <p className="text-gray-600 dark:text-gray-300 mb-6 fade-in-blur">
-                        Your volunteer registration has been submitted successfully!
+                        Welcome, {successData?.firstName}! Your volunteer registration has been submitted successfully.
                     </p>
                     <div className="animate-pulse">
                         <p className="text-red-600 dark:text-red-400 font-medium">Redirecting to volunteer dashboard...</p>
@@ -673,28 +636,21 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                             <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 transition-all duration-300">Back</span>
                         </button>
 
-                        {/* Header */}
-                        <div className="text-center mb-8 fade-in-up-blur pt-10 md:pt-0">
-                            <div className="flex items-center justify-center mb-4">
-                                <Heart className="h-12 w-12 text-red-600 dark:text-red-400 mr-3" />
-                                <h1 className="text-4xl font-bold text-gray-900 dark:text-white">
-                                    Volunteer Registration
-                                </h1>
+                        {/* Step Progress */}
+                        <div className="mb-8 pt-10 md:pt-0">
+                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <Users className="w-8 h-8 text-red-600 dark:text-red-400" />
                             </div>
-                            <p className="text-gray-600 dark:text-gray-400">
-                                Join our team for the ASU Employment Fair
-                            </p>
-                        </div>
-
-                        {/* Progress Indicator */}
-                        <div className="mb-8 fade-in-up-blur">
-                            <div className="flex items-center max-w-2xl mx-auto">
+                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4 text-center">
+                                Volunteer Registration
+                            </h1>
+                            <div className="flex items-center justify-center mb-4">
                                 {sections.map((section, index) => (
                                     <React.Fragment key={section.id}>
                                         <div className="flex flex-col items-center">
                                             <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all duration-300 ${currentSection >= section.id
                                                 ? 'bg-red-500 border-red-500 text-white transform scale-110'
-                                                : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-400'
+                                                : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400'
                                                 }`}>
                                                 <section.icon className="w-5 h-5" />
                                             </div>
@@ -706,17 +662,10 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                                     </React.Fragment>
                                 ))}
                             </div>
-                            <div className="flex justify-between max-w-2xl mx-auto mt-2">
-                                {sections.map(section => (
-                                    <div key={section.id} className="text-xs text-center" style={{ width: '200px' }}>
-                                        <span className={`transition-all duration-300 ${currentSection >= section.id
-                                            ? 'text-gray-900 dark:text-white font-medium'
-                                            : 'text-gray-600 dark:text-gray-400'
-                                            }`}>
-                                            {section.title}
-                                        </span>
-                                    </div>
-                                ))}
+                            <div className="text-center">
+                                <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    Step {currentSection} of {sections.length}: {sections[currentSection - 1].title}
+                                </p>
                             </div>
                         </div>
 
@@ -738,31 +687,45 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                                 {renderSectionContent()}
                             </div>
 
-                            {/* Navigation Buttons */}
-                            <div className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-700 fade-in-blur">
+                            <div className="flex justify-between mt-8 pt-6 border-t border-gray-100 dark:border-gray-700 fade-in-up-blur">
+                                <button
+                                    type="button"
+                                    onClick={prevSection}
+                                    className={`px-6 py-2.5 rounded-lg border font-medium transition-all duration-300 ${currentSection === 1
+                                        ? 'border-gray-200 text-gray-400 cursor-not-allowed hidden'
+                                        : 'border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700'
+                                        }`}
+                                    disabled={currentSection === 1}
+                                >
+                                    Previous
+                                </button>
+
                                 {currentSection < totalSections ? (
                                     <button
                                         type="button"
                                         onClick={nextSection}
-                                        disabled={loading}
-                                        className="ml-auto px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 transform hover:scale-105 flex items-center smooth-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="flex items-center px-6 py-2.5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-lg shadow-lg hover:shadow-red-500/25 transition-all duration-300 transform hover:-translate-y-0.5"
                                     >
-                                        Next
-                                        <ChevronRight className="w-4 h-4 ml-2" />
+                                        Next Step
+                                        <ChevronRight className="ml-2 h-4 w-4" />
                                     </button>
                                 ) : (
                                     <button
                                         type="submit"
                                         disabled={loading}
-                                        className="ml-auto px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center smooth-hover"
+                                        className={`flex items-center px-8 py-2.5 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-lg shadow-lg hover:shadow-red-500/25 transition-all duration-300 transform hover:-translate-y-0.5 font-bold ${loading ? 'opacity-70 cursor-wait' : ''
+                                            }`}
                                     >
                                         {loading ? (
                                             <>
                                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                                Submitting...
+                                                Registering...
                                             </>
                                         ) : (
-                                            'Submit Registration'
+                                            <>
+                                                Complete Registration
+                                                <CheckCircle className="ml-2 h-4 w-4" />
+                                            </>
                                         )}
                                     </button>
                                 )}

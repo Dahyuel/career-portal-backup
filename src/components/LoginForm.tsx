@@ -1,12 +1,15 @@
-// components/LoginForm.tsx - Frontend-only version
+// components/LoginForm.tsx - Supabase Authentication
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { LoginData, ValidationError } from '../types';
 import { validateEmail, validatePassword } from '../utils/validation';
+import { signInUser } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
+  const { getRoleBasedRedirect, isAuthenticated, profile } = useAuth();
 
   const [formData, setFormData] = useState<LoginData>({
     email: '',
@@ -16,25 +19,13 @@ export const LoginForm: React.FC = () => {
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Check if user is already logged in
+  // Instant redirect if already logged in (using AuthContext state)
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
-    if (currentUser) {
-      try {
-        const user = JSON.parse(currentUser);
-        // Redirect based on role
-        if (user.role === 'attendee') {
-          navigate('/attendee', { replace: true });
-        } else if (user.role === 'admin') {
-          navigate('/admin', { replace: true });
-        } else {
-          navigate('/dashboard', { replace: true });
-        }
-      } catch (error) {
-        console.error('Failed to parse user data:', error);
-      }
+    if (isAuthenticated && profile?.role) {
+      const redirectPath = getRoleBasedRedirect(profile.role);
+      navigate(redirectPath, { replace: true });
     }
-  }, [navigate]);
+  }, [isAuthenticated, profile, navigate, getRoleBasedRedirect]);
 
   const updateField = (field: keyof LoginData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -68,36 +59,47 @@ export const LoginForm: React.FC = () => {
     setErrors([]);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Call Supabase sign in
+      const result = await signInUser(formData.email, formData.password);
 
-      // Check if user exists in localStorage (from registration)
-      const registeredUser = localStorage.getItem('currentUser');
-
-      if (registeredUser) {
-        const user = JSON.parse(registeredUser);
-
-        // Simple email check (in real app, you'd verify password too)
-        if (user.email.toLowerCase() === formData.email.toLowerCase()) {
-          console.log('✅ Login successful:', user);
-
-          // Redirect based on role
-          if (user.role === 'attendee') {
-            navigate('/attendee', { replace: true });
-          } else if (user.role === 'admin') {
-            navigate('/admin', { replace: true });
-          } else {
-            navigate('/dashboard', { replace: true });
-          }
-          return;
+      if (!result.success) {
+        // Handle authentication errors
+        if (result.error?.validationErrors && result.error.validationErrors.length > 0) {
+          setErrors(result.error.validationErrors);
+        } else {
+          setErrors([{
+            field: 'general',
+            message: result.error?.message || 'Invalid email or password. Please try again.'
+          }]);
         }
+        setLoading(false);
+        return;
       }
 
-      // If no match found, show error
-      setErrors([{
-        field: 'general',
-        message: 'Invalid email or password. Please try again or create a new account.'
-      }]);
+      // Store user info in localStorage for session management
+      const userData = {
+        id: result.data?.user?.id,
+        email: result.data?.user?.email,
+        role: result.data?.user?.role || 'attendee',
+        fullName: result.data?.profile?.full_name
+      };
+      localStorage.setItem('currentUser', JSON.stringify(userData));
+
+      console.log('✅ Login successful:', userData);
+
+      // DO NOT call refreshProfile() here!
+      // The AuthContext's authStateChange listener will automatically fetch the profile
+      // when it receives the SIGNED_IN event. Calling it here causes a race condition.
+
+      // Give the auth state change event time to fire and set the profile from localStorage
+      // Reduced to 50ms for faster redirects
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Use AuthContext's getRoleBasedRedirect for proper routing
+      // This handles team-based routing for volunteers (Building -> /building, etc.)
+      const redirectPath = getRoleBasedRedirect(userData.role);
+      console.log('🔄 Redirecting to:', redirectPath);
+      navigate(redirectPath, { replace: true });
 
     } catch (error: any) {
       console.error('Login error:', error);
@@ -130,7 +132,7 @@ export const LoginForm: React.FC = () => {
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-red-100 dark:border-gray-700 w-full max-w-md overflow-hidden fade-in-up-blur modal-content-blur">
           {/* Back Button */}
           <button
-            onClick={() => window.history.back()}
+            onClick={() => navigate('/')}
             className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 hover:scale-105 transition-all duration-300 shadow-sm group"
             aria-label="Go back"
           >

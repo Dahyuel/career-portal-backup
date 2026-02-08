@@ -1,24 +1,22 @@
-
-// at /employerreg
-
-// pages/employer/EmployerRegistration.tsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, Building2, CheckCircle, AlertCircle, ArrowLeft } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
-import { validateEmail, validatePassword, validateConfirmPassword, validateName } from '../../utils/validation';
+import { Mail, Lock, User, Building2, CheckCircle, AlertCircle, ArrowLeft, Briefcase, Phone, FileText } from 'lucide-react';
+import { registerEmployer } from '../../lib/supabase';
+import { validateEmail, validatePassword, validateConfirmPassword, validateName, validatePhone, validatePersonalId } from '../../utils/validation';
 
 export const EmployerRegistration: React.FC = () => {
     const navigate = useNavigate();
-    const { signUp } = useAuth();
 
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
         email: '',
+        phone: '',
+        personalId: '',
+        jobTitle: '',
         password: '',
         confirmPassword: '',
-        employerId: ''
+        companyKey: ''
     });
 
     const [errors, setErrors] = useState<{ field: string; message: string }[]>([]);
@@ -44,6 +42,19 @@ export const EmployerRegistration: React.FC = () => {
         const emailError = validateEmail(formData.email);
         if (emailError) validationErrors.push({ field: 'email', message: emailError });
 
+        // Validate phone
+        const phoneError = validatePhone(formData.phone);
+        if (phoneError) validationErrors.push({ field: 'phone', message: phoneError });
+
+        // Validate personal ID
+        const personalIdError = validatePersonalId(formData.personalId);
+        if (personalIdError) validationErrors.push({ field: 'personalId', message: personalIdError });
+
+        // Validate Job Title
+        if (!formData.jobTitle.trim()) {
+            validationErrors.push({ field: 'jobTitle', message: 'Job title is required' });
+        }
+
         // Validate passwords
         const passwordError = validatePassword(formData.password);
         if (passwordError) validationErrors.push({ field: 'password', message: passwordError });
@@ -51,16 +62,24 @@ export const EmployerRegistration: React.FC = () => {
         const confirmPasswordError = validateConfirmPassword(formData.password, formData.confirmPassword);
         if (confirmPasswordError) validationErrors.push({ field: 'confirmPassword', message: confirmPasswordError });
 
-        // Validate employer ID
-        if (!formData.employerId.trim()) {
-            validationErrors.push({ field: 'employerId', message: 'Employer ID is required' });
-        } else if (formData.employerId.trim().length < 3) {
-            validationErrors.push({ field: 'employerId', message: 'Employer ID must be at least 3 characters' });
+        // Validate Company Key
+        if (!formData.companyKey.trim()) {
+            validationErrors.push({ field: 'companyKey', message: 'Company ID is required' });
         }
 
         setErrors(validationErrors);
         return validationErrors.length === 0;
     };
+
+    // Use effect for redirection to ensure it handles component lifecycle correctly
+    React.useEffect(() => {
+        if (showSuccess) {
+            const timer = setTimeout(() => {
+                navigate('/login', { replace: true });
+            }, 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [showSuccess, navigate]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -73,47 +92,43 @@ export const EmployerRegistration: React.FC = () => {
         try {
             console.log('Starting employer registration...');
 
-            const result = await signUp(formData.email, formData.password, {
-                first_name: formData.firstName.trim(),
-                last_name: formData.lastName.trim(),
-                role: 'employer',
-                employer_id: formData.employerId.trim()
+            const result = await registerEmployer({
+                email: formData.email,
+                password: formData.password,
+                fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+                phone: formData.phone,
+                personalId: formData.personalId,
+                jobTitle: formData.jobTitle,
+                companyKey: formData.companyKey
             });
 
-            console.log('Registration completed:', result);
+            console.log('Registration result:', result);
 
-            if (result.success) {
-                console.log('Registration successful, showing success message...');
-                setShowSuccess(true);
-
-                // Navigate to employer dashboard or login
-                setTimeout(() => {
-                    navigate('/employer', { replace: true });
-                }, 2000);
-            } else {
-                console.error('Registration failed:', result.error);
-
-                let errorMessage = result.error?.message || 'Registration failed. Please try again.';
-
-                if (errorMessage.includes('User already registered')) {
-                    errorMessage = 'An account with this email already exists. Please sign in instead.';
-                } else if (errorMessage.includes('Email not confirmed')) {
-                    errorMessage = 'Please check your email to confirm your account before signing in.';
+            if (!result.success || result.error) {
+                if (result.error?.validationErrors) {
+                    setErrors(result.error.validationErrors);
+                } else {
+                    setErrors([{ field: 'root', message: result.error?.message || 'Registration failed' }]);
                 }
-
-                setErrors([{
-                    field: 'general',
-                    message: errorMessage
-                }]);
+                setLoading(false);
+                return;
             }
+
+            console.log('Registration successful, showing success message...');
+            setShowSuccess(true);
+            // Redirection is now handled by useEffect
+
         } catch (error: any) {
             console.error('Unexpected registration error:', error);
             setErrors([{
                 field: 'general',
                 message: 'An unexpected error occurred. Please try again.'
             }]);
+            setShowSuccess(false);
         } finally {
-            setLoading(false);
+            if (!showSuccess) {
+                setLoading(false);
+            }
         }
     };
 
@@ -139,7 +154,7 @@ export const EmployerRegistration: React.FC = () => {
                         </div>
                         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Registration Successful!</h2>
                         <p className="text-gray-600 dark:text-gray-300 mb-4">
-                            Your employer account has been created. Please check your email to verify your account.
+                            Your employer account has been created successfully.
                         </p>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
                             Redirecting to login...
@@ -163,10 +178,10 @@ export const EmployerRegistration: React.FC = () => {
 
 
             <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-md w-full border border-red-100 dark:border-gray-700 transition-colors duration-300 relative">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 max-w-2xl w-full border border-red-100 dark:border-gray-700 transition-colors duration-300 relative">
                     {/* Back Button */}
                     <button
-                        onClick={() => navigate('/')}
+                        onClick={() => navigate('/login')}
                         className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 hover:scale-105 transition-all duration-300 shadow-sm group"
                         aria-label="Go back"
                     >
@@ -183,18 +198,20 @@ export const EmployerRegistration: React.FC = () => {
                     </div>
 
                     {/* General Error */}
-                    {getFieldError('general') && (
+                    {(getFieldError('general') || getFieldError('root')) && (
                         <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg">
                             <div className="flex items-center">
                                 <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 mr-2" />
-                                <p className="text-red-800 dark:text-red-200 text-sm">{getFieldError('general')}</p>
+                                <p className="text-red-800 dark:text-red-200 text-sm">
+                                    {getFieldError('general') || getFieldError('root')}
+                                </p>
                             </div>
                         </div>
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-5">
                         {/* Name Fields */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                     First Name *
@@ -236,6 +253,49 @@ export const EmployerRegistration: React.FC = () => {
                             </div>
                         </div>
 
+                        {/* Phone & Personal ID */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Phone Number *
+                                </label>
+                                <div className="relative">
+                                    <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                    <input
+                                        type="tel"
+                                        value={formData.phone}
+                                        onChange={(e) => updateField('phone', e.target.value)}
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('phone') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                            }`}
+                                        placeholder="01XXXXXXXXX"
+                                    />
+                                </div>
+                                {getFieldError('phone') && (
+                                    <p className="mt-1 text-sm text-red-600">{getFieldError('phone')}</p>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Personal ID (National ID) *
+                                </label>
+                                <div className="relative">
+                                    <FileText className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        value={formData.personalId}
+                                        onChange={(e) => updateField('personalId', e.target.value)}
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('personalId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                            }`}
+                                        placeholder="14 digit ID"
+                                    />
+                                </div>
+                                {getFieldError('personalId') && (
+                                    <p className="mt-1 text-sm text-red-600">{getFieldError('personalId')}</p>
+                                )}
+                            </div>
+                        </div>
+
                         {/* Email Field */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -257,24 +317,46 @@ export const EmployerRegistration: React.FC = () => {
                             )}
                         </div>
 
-                        {/* Employer ID Field */}
+                        {/* Job Title */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Employer ID *
+                                Job Title *
+                            </label>
+                            <div className="relative">
+                                <Briefcase className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                <input
+                                    type="text"
+                                    value={formData.jobTitle}
+                                    onChange={(e) => updateField('jobTitle', e.target.value)}
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('jobTitle') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        }`}
+                                    placeholder="e.g. HR Manager"
+                                />
+                            </div>
+                            {getFieldError('jobTitle') && (
+                                <p className="mt-1 text-sm text-red-600">{getFieldError('jobTitle')}</p>
+                            )}
+                        </div>
+
+
+                        {/* Company Key Field */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Company ID *
                             </label>
                             <div className="relative">
                                 <Building2 className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                                 <input
                                     type="text"
-                                    value={formData.employerId}
-                                    onChange={(e) => updateField('employerId', e.target.value)}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('employerId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                    value={formData.companyKey}
+                                    onChange={(e) => updateField('companyKey', e.target.value)}
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('companyKey') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                         }`}
-                                    placeholder="Enter your employer ID"
+                                    placeholder="Enter your Company ID"
                                 />
                             </div>
-                            {getFieldError('employerId') && (
-                                <p className="mt-1 text-sm text-red-600">{getFieldError('employerId')}</p>
+                            {getFieldError('companyKey') && (
+                                <p className="mt-1 text-sm text-red-600">{getFieldError('companyKey')}</p>
                             )}
                             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                                 This ID will be provided by the event organizers
@@ -282,44 +364,46 @@ export const EmployerRegistration: React.FC = () => {
                         </div>
 
                         {/* Password Fields */}
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Password *
-                            </label>
-                            <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                                <input
-                                    type="password"
-                                    value={formData.password}
-                                    onChange={(e) => updateField('password', e.target.value)}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
-                                        }`}
-                                    placeholder="Create a password"
-                                />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Password *
+                                </label>
+                                <div className="relative">
+                                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                    <input
+                                        type="password"
+                                        value={formData.password}
+                                        onChange={(e) => updateField('password', e.target.value)}
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                            }`}
+                                        placeholder="Create a password"
+                                    />
+                                </div>
+                                {getFieldError('password') && (
+                                    <p className="mt-1 text-sm text-red-600">{getFieldError('password')}</p>
+                                )}
                             </div>
-                            {getFieldError('password') && (
-                                <p className="mt-1 text-sm text-red-600">{getFieldError('password')}</p>
-                            )}
-                        </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Confirm Password *
-                            </label>
-                            <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                                <input
-                                    type="password"
-                                    value={formData.confirmPassword}
-                                    onChange={(e) => updateField('confirmPassword', e.target.value)}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('confirmPassword') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
-                                        }`}
-                                    placeholder="Confirm your password"
-                                />
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                    Confirm Password *
+                                </label>
+                                <div className="relative">
+                                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                                    <input
+                                        type="password"
+                                        value={formData.confirmPassword}
+                                        onChange={(e) => updateField('confirmPassword', e.target.value)}
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('confirmPassword') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                            }`}
+                                        placeholder="Confirm your password"
+                                    />
+                                </div>
+                                {getFieldError('confirmPassword') && (
+                                    <p className="mt-1 text-sm text-red-600">{getFieldError('confirmPassword')}</p>
+                                )}
                             </div>
-                            {getFieldError('confirmPassword') && (
-                                <p className="mt-1 text-sm text-red-600">{getFieldError('confirmPassword')}</p>
-                            )}
                         </div>
 
                         {/* Submit Button */}

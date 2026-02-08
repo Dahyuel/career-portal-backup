@@ -5,9 +5,9 @@ interface LoadingScreenProps {
   size?: 'sm' | 'md' | 'lg';
 }
 
-export const LoadingScreen: React.FC<LoadingScreenProps> = ({ 
-  message = "Loading...", 
-  size = 'md' 
+export const LoadingScreen: React.FC<LoadingScreenProps> = ({
+  message = "Loading...",
+  size = 'md'
 }) => {
   const sizeClasses = {
     sm: 'h-8 w-8',
