@@ -47,8 +47,8 @@ export const QRScanner: React.FC<QRScannerProps> = ({
         await html5QrCode.start(
           cameraConfig,
           {
-            fps: 10,
-            qrbox: { width: 200, height: 200 },
+            fps: 15,
+            qrbox: { width: 250, height: 250 },
             aspectRatio: 1.0
           },
           (decodedText) => {

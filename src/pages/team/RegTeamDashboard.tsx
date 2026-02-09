@@ -8,17 +8,20 @@ import {
   Clock,
   User,
   X,
-  AlertCircle
+  AlertCircle,
+  LogOut
 } from "lucide-react";
 import { AttendeeCard } from "../../components/shared/AttendeeCard";
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { QRScanner } from "../../components/shared/QRScanner";
 import { useAuth } from "../../contexts/AuthContext";
 import {
-  processAttendance,
   getAttendeeByPersonalId,
-  getAttendeeByUUID,
-  searchAttendeesByPersonalId
+  recordAttendeeAttendance,
+  getTotalEntryCount,
+  getRecentScansByVolunteer,
+  getUserProfileByUUID,
+  supabase
 } from "../../lib/supabase";
 import { mockActivities } from "../../mocks";
 
@@ -37,15 +40,18 @@ interface Attendee {
   event_entry?: boolean;
   profile_complete?: boolean;
   authorized?: boolean;
+  attendee_table_id?: string; // Debugging
 }
 
 const castToAttendee = (data: any): Attendee => {
   return {
     ...data,
-    current_status: data.event_entry ? 'inside' : 'outside',
+    // Use passed current_status if available, otherwise derive from event_entry
+    current_status: data.current_status || (data.event_entry ? 'inside' : 'outside'),
     event_entry: data.event_entry || false,
     profile_complete: data.profile_complete !== undefined ? data.profile_complete : true,
-    authorized: data.authorized !== undefined ? data.authorized : true
+    authorized: data.authorized !== undefined ? data.authorized : true,
+    attendee_table_id: data.attendee_table_id
   } as Attendee;
 };
 
@@ -88,15 +94,17 @@ export const RegTeamDashboard: React.FC = () => {
     rank: 12
   };
 
-  // Mock Recent Scans for Check-In tab
-  const [recentScans, setRecentScans] = useState([
-    { name: 'Sarah Jenkins', id: '#88294-A', time: 'Just now', status: 'success' },
-    { name: 'Marcus Wright', id: '#92210-B', time: '2m ago', status: 'success' },
-    { name: 'Elena Rodriguez', id: '#77103-S', time: '5m ago', status: 'success' },
-    { name: 'Jordan Smith', id: '#66201-P', time: '12m ago', status: 'success' },
-    { name: 'Taylor Brooks', id: '#55198-T', time: '15m ago', status: 'success' },
-    { name: 'Xavier Chen', id: '#44012-L', time: '18m ago', status: 'success' }
-  ]);
+  // Total entry count state
+  const [totalEntryCount, setTotalEntryCount] = useState<number>(0);
+
+  // Recent Scans for Check-In tab (real data)
+  const [recentScans, setRecentScans] = useState<{
+    id: string;
+    name: string;
+    personalId: string;
+    time: string;
+    type: string;
+  }[]>([]);
 
   // Dynamic search effect
   useEffect(() => {
@@ -122,16 +130,72 @@ export const RegTeamDashboard: React.FC = () => {
     };
   }, [searchTerm]);
 
+  // Fetch attendance data on mount and when user changes
+  useEffect(() => {
+    const fetchAttendanceData = async () => {
+      if (!user?.id) return;
+
+      // Fetch total entry count
+      const { count } = await getTotalEntryCount();
+      setTotalEntryCount(count);
+
+      // Fetch recent scans by this volunteer
+      const { data: scans } = await getRecentScansByVolunteer(user.id, 6);
+      if (scans) {
+        setRecentScans(scans.map((scan: any) => ({
+          id: scan.id,
+          name: scan.attendee?.name || 'Unknown',
+          personalId: scan.attendee?.personalId || '',
+          time: formatRelativeTime(scan.time),
+          type: scan.type
+        })));
+      }
+    };
+
+    fetchAttendanceData();
+  }, [user?.id]);
+
+  // Helper function to format relative time
+  const formatRelativeTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return date.toLocaleDateString();
+  };
+
   const performDynamicSearch = async (query: string) => {
     try {
       setSearchLoading(true);
-      const { data, error } = await searchAttendeesByPersonalId(query);
+      // Search by personal ID directly in user_profiles like BuildTeamDashboard
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('id, full_name, phone, email, personal_id')
+        .ilike('personal_id', `%${query}%`)
+        .limit(5);
 
       if (error) {
         console.error("Search error:", error);
         setSearchResults([]);
+      } else if (!data || data.length === 0) {
+        setSearchResults([]);
+        setShowSearchResults(false);
       } else {
-        const attendees = (data || []).map(item => castToAttendee(item));
+        const attendees = data.map((d: { id: string; full_name: string | null; phone: string | null; email: string | null; personal_id: string | null }) => castToAttendee({
+          id: d.id,
+          full_name: d.full_name || 'Unknown',
+          first_name: d.full_name?.split(' ')[0] || '',
+          last_name: d.full_name?.split(' ').slice(1).join(' ') || '',
+          phone: d.phone || 'N/A',
+          email: d.email || 'N/A',
+          personal_id: d.personal_id,
+
+        }));
         setSearchResults(attendees);
         setShowSearchResults(true);
       }
@@ -161,11 +225,6 @@ export const RegTeamDashboard: React.FC = () => {
       return { isValid: false, error: 'This attendee is not authorized to enter the event' };
     }
     return { isValid: true };
-  };
-
-  const isUUID = (str: string): boolean => {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(str);
   };
 
   const handleSearchByPersonalId = async () => {
@@ -205,56 +264,118 @@ export const RegTeamDashboard: React.FC = () => {
     }
   };
 
-  const handleSelectSearchResult = (attendee: Attendee) => {
-    const validation = validateAttendee(attendee);
-    if (!validation.isValid) {
-      // setValidationError(validation.error || 'Validation failed');
-      showFeedback('error', validation.error || 'Validation failed');
-      return;
-    }
-
-    setSelectedAttendee(attendee);
-    setShowAttendeeCard(true);
-    setSearchTerm("");
-    setShowSearchResults(false);
-    setSearchResults([]);
-    // setValidationError(null);
-  };
-
-  const handleQRScan = async (qrData: string) => {
+  const handleSelectSearchResult = async (attendee: Attendee) => {
     try {
-      // setValidationError(null);
-      let attendeeData: Attendee | null = null;
-      let error;
+      setSearchLoading(true);
+      // Fetch full profile with status and extra details
+      const { data, error } = await getUserProfileByUUID(attendee.id);
 
-      if (isUUID(qrData)) {
-        const result = await getAttendeeByUUID(qrData);
-        attendeeData = result.data ? castToAttendee(result.data) : null;
-        error = result.error;
-      } else {
-        const result = await getAttendeeByPersonalId(qrData);
-        attendeeData = result.data ? castToAttendee(result.data) : null;
-        error = result.error;
-      }
-
-      if (error || !attendeeData) {
-        const errorMsg = isUUID(qrData)
-          ? 'Invalid QR code: UUID not found in system'
-          : 'Invalid QR code: Personal ID not found';
-        showFeedback('error', errorMsg);
+      if (error || !data) {
+        showFeedback('error', 'Failed to load attendee details');
         return;
       }
 
-      const validation = validateAttendee(attendeeData);
+      // @ts-ignore
+      const lastAttendance = data.last_attendance;
+      const currentStatus: 'inside' | 'outside' = lastAttendance && lastAttendance.type === 'entry' ? 'inside' : 'outside';
+
+      const fullAttendee = castToAttendee({
+        id: data.id,
+        full_name: data.full_name || 'Unknown',
+        first_name: data.full_name?.split(' ')[0] || '',
+        last_name: data.full_name?.split(' ').slice(1).join(' ') || '',
+        phone: data.phone || 'N/A',
+        email: data.email || 'N/A',
+        personal_id: data.personal_id,
+        university: (data as any).university,
+        faculty: (data as any).faculty,
+        current_status: currentStatus,
+        attendee_table_id: (data as any).attendee_table_id, // Map debug ID
+        role: 'attendee',
+        profile_complete: true,
+        authorized: true
+      });
+
+      const validation = validateAttendee(fullAttendee);
       if (!validation.isValid) {
-        // setValidationError(validation.error || 'Validation failed');
         showFeedback('error', validation.error || 'Validation failed');
         return;
       }
 
+      setSelectedAttendee(fullAttendee);
+      setShowAttendeeCard(true);
+      setSearchTerm("");
+      setShowSearchResults(false);
+      setSearchResults([]);
+    } catch (error) {
+      console.error("Error selecting attendee:", error);
+      showFeedback('error', 'Failed to select attendee');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleQRScan = async (qrData: string) => {
+    setShowScanner(false);
+
+    // Extract UUID from QR data (handles URLs, JSON, raw UUIDs - same as BuildTeamDashboard)
+    let uuid = qrData.trim();
+
+    // If QR data is a URL, extract last path segment as UUID
+    if (qrData.includes('/')) {
+      const parts = qrData.split('/');
+      uuid = parts[parts.length - 1];
+    } else if (qrData.startsWith('{')) {
+      // Try to parse as JSON
+      try {
+        const parsed = JSON.parse(qrData);
+        uuid = parsed.id || parsed.uuid || parsed.user_id || qrData;
+      } catch {
+        // Use raw data
+      }
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(uuid)) {
+      showFeedback('error', 'Invalid QR code format. Expected UUID.');
+      return;
+    }
+
+    try {
+      // Fetch attendee profile and last attendance record
+      const { data, error } = await getUserProfileByUUID(uuid);
+
+      if (error || !data) {
+        showFeedback('error', 'This user doesn\'t have an account');
+        return;
+      }
+
+      // Determine status from last_attendance
+      // @ts-ignore - data has last_attendance from our updated query
+      const lastAttendance = data.last_attendance;
+      const currentStatus: 'inside' | 'outside' = lastAttendance && lastAttendance.type === 'entry' ? 'inside' : 'outside';
+
+      // Cast to Attendee format - set defaults for validation fields
+      const attendeeData = castToAttendee({
+        id: data.id,
+        full_name: data.full_name || 'Unknown',
+        first_name: data.full_name?.split(' ')[0] || '',
+        last_name: data.full_name?.split(' ').slice(1).join(' ') || '',
+        phone: data.phone || 'N/A',
+        email: data.email || 'N/A',
+        personal_id: data.personal_id,
+        university: (data as any).university,
+        faculty: (data as any).faculty,
+        current_status: currentStatus,
+        // Set defaults so validation passes
+        role: 'attendee',
+        profile_complete: true,
+        authorized: true
+      });
+
       setSelectedAttendee(attendeeData);
       setShowAttendeeCard(true);
-      // setValidationError(null);
 
     } catch (error) {
       console.error("QR scan error:", error);
@@ -267,31 +388,28 @@ export const RegTeamDashboard: React.FC = () => {
   };
 
   const handleAttendanceAction = async (action: 'enter' | 'exit') => {
-    if (!selectedAttendee) return;
+    if (!selectedAttendee || !user?.id) {
+      showFeedback('error', 'Unable to process. Please try again.');
+      return;
+    }
 
     try {
       setActionLoading(true);
 
-      const validation = validateAttendee(selectedAttendee);
-      if (!validation.isValid) {
-        showFeedback('error', validation.error || 'Cannot process action: validation failed');
-        return;
-      }
-
-      const isAuthorized = selectedAttendee.authorized === true;
-      if (!isAuthorized) {
-        showFeedback('error', 'This attendee is not authorized to enter the event');
-        return;
-      }
-
-      const { data, error } = await processAttendance(selectedAttendee.personal_id, action);
+      // Record attendance using the new function (matching BuildTeamDashboard pattern)
+      const type = action === 'enter' ? 'entry' : 'exit';
+      const { data, error } = await recordAttendeeAttendance({
+        attendeeId: selectedAttendee.id,
+        checkedInBy: user.id,
+        type: type
+      });
 
       if (error) {
         showFeedback('error', error.message || `Failed to process ${action}`);
         return;
       }
 
-      showFeedback('success', data.message || `${action.toUpperCase()} scan successful!`);
+      showFeedback('success', `${action === 'enter' ? 'Check-in' : 'Check-out'} successful!`);
 
       const newStatus = action === 'enter' ? 'inside' : 'outside';
       const newEventEntry = action === 'enter';
@@ -303,21 +421,26 @@ export const RegTeamDashboard: React.FC = () => {
         last_scan: new Date().toISOString()
       } : null);
 
-      // Update recent scans
+      // Update recent scans with proper type structure
       setRecentScans(prev => [
         {
+          id: data?.id || crypto.randomUUID(),
           name: `${selectedAttendee.first_name} ${selectedAttendee.last_name}`,
-          id: `#${selectedAttendee.personal_id}`,
+          personalId: selectedAttendee.personal_id,
           time: 'Just now',
-          status: 'success'
+          type: type
         },
         ...prev.slice(0, 5)
       ]);
 
+      // Update total entry count if this was an entry
+      if (action === 'enter') {
+        setTotalEntryCount(prev => prev + 1);
+      }
+
       setTimeout(() => {
         setShowAttendeeCard(false);
         setSelectedAttendee(null);
-        // setValidationError(null);
       }, 2000);
 
     } catch (error) {
@@ -346,7 +469,7 @@ export const RegTeamDashboard: React.FC = () => {
             <div className="relative z-10">
               <p className="uppercase tracking-widest text-orange-100 font-semibold text-xs mb-2">Volunteer Dashboard</p>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                Welcome, {user?.first_name || 'Volunteer'}
+                Welcome, {user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Volunteer'}
               </h1>
               <p className="text-lg text-orange-50 opacity-90 max-w-md mb-8">
                 Your support makes this event possible. Thank you for your dedication!
@@ -551,7 +674,7 @@ export const RegTeamDashboard: React.FC = () => {
             </div>
             <p className="text-[11px] font-bold text-slate-400 tracking-widest uppercase mb-2">Total Scanned In</p>
             <div className="flex items-baseline gap-3">
-              <span className="text-6xl font-black text-slate-900 dark:text-white">1,482</span>
+              <span className="text-6xl font-black text-slate-900 dark:text-white">{totalEntryCount.toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -566,21 +689,34 @@ export const RegTeamDashboard: React.FC = () => {
           <button className="text-primary font-bold text-sm hover:underline">View All History</button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {recentScans.map((scan, idx) => (
-            <div key={idx} className="flex items-center gap-5 p-5 bg-slate-50 dark:bg-zinc-900/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center shrink-0">
-                <CheckCircle className="text-emerald-500 w-8 h-8" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="font-bold text-slate-900 dark:text-white truncate">{scan.name}</h4>
-                <p className="text-sm text-slate-500 dark:text-gray-400">ID: {scan.id}</p>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span className="text-[12px] text-slate-400 font-medium">{scan.time}</span>
+          {recentScans.length === 0 ? (
+            <div className="col-span-full text-center py-8 text-slate-400">
+              No recent scans. Start scanning to see activity here.
+            </div>
+          ) : (
+            recentScans.map((scan) => (
+              <div key={scan.id} className="flex items-center gap-5 p-5 bg-slate-50 dark:bg-zinc-900/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${scan.type === 'entry' ? 'bg-emerald-100 dark:bg-emerald-500/10' : 'bg-orange-100 dark:bg-orange-500/10'}`}>
+                  {scan.type === 'entry' ? (
+                    <CheckCircle className="text-emerald-500 w-8 h-8" />
+                  ) : (
+                    <X className="text-orange-500 w-8 h-8" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-slate-900 dark:text-white truncate">{scan.name}</h4>
+                  <p className="text-sm text-slate-500 dark:text-gray-400">ID: #{scan.personalId}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="text-[12px] text-slate-400 font-medium">{scan.time}</span>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${scan.type === 'entry' ? 'bg-emerald-100 text-emerald-600' : 'bg-orange-100 text-orange-600'}`}>
+                      {scan.type === 'entry' ? 'IN' : 'OUT'}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div >
@@ -636,17 +772,18 @@ export const RegTeamDashboard: React.FC = () => {
           }}
         >
           {/* Action Buttons */}
-          <div className="grid grid-cols-2 gap-3 mt-4">
+
+          <div className="grid grid-cols-2 gap-3 w-full">
             <button
               onClick={() => handleAttendanceAction('enter')}
               disabled={actionLoading || selectedAttendee.current_status === 'inside'}
-              className={`flex items-center justify-center py-3 px-4 rounded-xl font-bold transition-all ${selectedAttendee.current_status === 'inside'
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-green-500 text-white hover:bg-green-600 shadow-lg shadow-green-500/20 active:scale-95'
+              className={`flex items-center justify-center py-3 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${selectedAttendee.current_status === 'inside'
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                : 'bg-green-500 text-white hover:bg-green-600 shadow-green-500/20'
                 }`}
             >
               {actionLoading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
                   <CheckCircle className="w-5 h-5 mr-2" />
@@ -654,19 +791,20 @@ export const RegTeamDashboard: React.FC = () => {
                 </>
               )}
             </button>
+
             <button
               onClick={() => handleAttendanceAction('exit')}
-              disabled={actionLoading || selectedAttendee.current_status === 'outside'}
-              className={`flex items-center justify-center py-3 px-4 rounded-xl font-bold transition-all ${selectedAttendee.current_status === 'outside'
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-orange-500 text-white hover:bg-orange-600 shadow-lg shadow-orange-500/20 active:scale-95'
+              disabled={actionLoading || selectedAttendee.current_status !== 'inside'}
+              className={`flex items-center justify-center py-3 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${selectedAttendee.current_status !== 'inside'
+                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                : 'bg-orange-500 text-white hover:bg-orange-600 shadow-orange-500/20'
                 }`}
             >
               {actionLoading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  <X className="w-5 h-5 mr-2" />
+                  <LogOut className="w-5 h-5 mr-2" />
                   Check Out
                 </>
               )}

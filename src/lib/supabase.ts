@@ -1719,3 +1719,186 @@ export const getDynamicBuildingStats = async () => {
     return { data: null, error: { message: error.message } };
   }
 };
+
+// ============================================================================
+// ATTENDEE ATTENDANCE TRACKING (Registration Team)
+// ============================================================================
+
+/**
+ * Get user profile by UUID
+ * Used when scanning QR codes containing user UUIDs
+ */
+export const getUserProfileByUUID = async (uuid: string) => {
+  try {
+    // 1. Get profile basic info
+    const { data: profile, error: profileError } = await supabase
+      .from('user_profiles')
+      .select('id, full_name, email, phone, personal_id')
+      .eq('id', uuid)
+      .single();
+
+    if (profileError || !profile) {
+      return { data: null, error: { message: 'This user doesn\'t have an account' } };
+    }
+
+    // 2. Get additional attendee details (university, faculty)
+    const { data: attendeeDetails } = await supabase
+      .from('attendees')
+      .select('user_id, university, faculty')
+      .eq('user_id', uuid)
+      .single();
+
+    // 3. Check for attendance records to determine current status
+    const { data: attendanceData } = await supabase
+      .from('attendee_attendance')
+      .select('type, created_at')
+      .eq('attendee_id', uuid)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const lastAttendance = attendanceData && attendanceData.length > 0 ? attendanceData[0] : null;
+
+    return {
+      data: {
+        ...profile,
+        university: attendeeDetails?.university,
+        faculty: attendeeDetails?.faculty,
+        last_attendance: lastAttendance
+      },
+      error: null
+    };
+
+  } catch (error: any) {
+    console.error('getUserProfileByUUID Exception:', error);
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Record attendee attendance (entry or exit)
+ */
+export const recordAttendeeAttendance = async ({
+  attendeeId,
+  checkedInBy,
+  type
+}: {
+  attendeeId: string;
+  checkedInBy: string;
+  type: 'entry' | 'exit';
+}) => {
+  try {
+    const now = new Date().toISOString();
+
+    const insertData: {
+      attendee_id: string;
+      event_id: string;
+      checked_in_by: string;
+      type: string;
+      check_in_time?: string;
+      check_out_time?: string;
+    } = {
+      attendee_id: attendeeId,
+      event_id: DEFAULT_EVENT_ID,
+      checked_in_by: checkedInBy,
+      type: type
+    };
+
+    console.log('--- recordAttendeeAttendance DEBUG ---');
+    console.log('Inserting Attendance for Attendee ID:', attendeeId);
+    console.log('Type:', type);
+
+    // Set the appropriate time field based on type
+    if (type === 'entry') {
+      insertData.check_in_time = now;
+    } else {
+      insertData.check_out_time = now;
+    }
+
+    const { data, error } = await supabase
+      .from('attendee_attendance')
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error recording attendance:', error);
+      return { data: null, error: { message: error.message } };
+    }
+
+    console.log('Attendance Recorded Successfully:', data);
+    console.log('--------------------------------------');
+
+    return { data, error: null };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
+/**
+ * Get total count of attendees who have entered (type = 'entry')
+ */
+export const getTotalEntryCount = async () => {
+  try {
+    const { count, error } = await supabase
+      .from('attendee_attendance')
+      .select('*', { count: 'exact', head: true })
+      .eq('event_id', DEFAULT_EVENT_ID)
+      .eq('type', 'entry');
+
+    if (error) {
+      console.error('Error getting entry count:', error);
+      return { count: 0, error: { message: error.message } };
+    }
+
+    return { count: count || 0, error: null };
+  } catch (error: any) {
+    return { count: 0, error: { message: error.message } };
+  }
+};
+
+/**
+ * Get recent scans by a specific volunteer
+ */
+export const getRecentScansByVolunteer = async (volunteerId: string, limit: number = 10) => {
+  try {
+    const { data, error } = await supabase
+      .from('attendee_attendance')
+      .select(`
+        id,
+        type,
+        check_in_time,
+        check_out_time,
+        created_at,
+        user_profiles!attendee_attendance_attendee_id_fkey (
+          id,
+          full_name,
+          personal_id
+        )
+      `)
+      .eq('checked_in_by', volunteerId)
+      .eq('event_id', DEFAULT_EVENT_ID)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('Error getting recent scans:', error);
+      return { data: null, error: { message: error.message } };
+    }
+
+    // Transform the data for easier consumption
+    const transformedData = (data || []).map((scan: any) => ({
+      id: scan.id,
+      type: scan.type,
+      time: scan.check_in_time || scan.check_out_time || scan.created_at,
+      attendee: scan.user_profiles ? {
+        id: scan.user_profiles.id,
+        name: scan.user_profiles.full_name,
+        personalId: scan.user_profiles.personal_id
+      } : null
+    }));
+
+    return { data: transformedData, error: null };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};

@@ -9,6 +9,7 @@ interface AttendeeCardProps {
     first_name: string;
     last_name: string;
     email: string;
+    phone?: string;
     personal_id: string;
     university?: string;
     faculty?: string;
@@ -67,6 +68,13 @@ export const AttendeeCard: React.FC<AttendeeCardProps> = ({ attendee, onClose, c
             <p className="text-sm text-gray-500">Email</p>
             <p className="text-gray-900">{attendee.email}</p>
           </div>
+
+          {attendee.phone && (
+            <div>
+              <p className="text-sm text-gray-500">Phone</p>
+              <p className="text-gray-900">{attendee.phone}</p>
+            </div>
+          )}
 
           <div>
             <p className="text-sm text-gray-500">Personal ID</p>
