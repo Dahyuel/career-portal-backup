@@ -275,14 +275,14 @@ export const LandingPage: React.FC = () => {
                                     <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
                                         <Award className="h-5 w-5 text-red-600 dark:text-red-400" />
                                     </div>
-                                    <h5 className="font-medium text-gray-800 dark:text-gray-200">Connection with your peers</h5>
+                                    <h5 className="font-medium text-gray-800 dark:text-gray-200">Internship Opportunities</h5>
                                 </div>
 
                                 <div className="flex items-center gap-4">
                                     <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
                                         <Users className="h-5 w-5 text-red-600 dark:text-red-400" />
                                     </div>
-                                    <h5 className="font-medium text-gray-800 dark:text-gray-200">Internship Opportunities</h5>
+                                    <h5 className="font-medium text-gray-800 dark:text-gray-200">Connection with your peers</h5>
                                 </div>
                             </div>
                         </div>
@@ -420,23 +420,18 @@ export const LandingPage: React.FC = () => {
 
                     {/* Video Container */}
                     <div className="max-w-4xl mx-auto">
-                        <div className="relative rounded-3xl overflow-hidden shadow-2xl bg-gray-900 aspect-video group">
-                            {/* Placeholder for video - Replace src with actual video */}
-                            <video
-                                className="w-full h-full object-cover"
-                                controls
-                                poster="/images/video-poster.jpg"
-                            >
-                                <source src="/videos/expo-2025-highlights.mp4" type="video/mp4" />
-                                Your browser does not support the video tag.
-                            </video>
-
-                            {/* Decorative gradient overlay when video not playing */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-gray-900/60 via-transparent to-transparent pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                        <div className="relative rounded-3xl overflow-hidden shadow-2xl bg-gray-900 aspect-video">
+                            <iframe
+                                className="w-full h-full"
+                                src="https://www.youtube.com/embed/l6LLgP62te0"
+                                title="ASU Employment Fair 2025"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowFullScreen
+                            ></iframe>
                         </div>
 
                         <p className="text-center text-gray-500 dark:text-gray-400 mt-6 text-sm">
-                            ASU Career Expo 2025 - Official Highlights Reel
+                            ASU Employment Fair 2025 - Official Highlights
                         </p>
                     </div>
                 </div>

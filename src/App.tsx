@@ -28,6 +28,8 @@ const SuperAdminPanel = React.lazy(() => import('./pages/admin/SuperAdminPanel')
 const EmployerRegistration = React.lazy(() => import('./pages/Employer/EmployerRegistration').then(module => ({ default: module.EmployerRegistration })));
 const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
 const AboutCareerCenter = React.lazy(() => import('./pages/LandingPageContent/AboutCareerCenter').then(module => ({ default: module.AboutCareerCenter })));
+const Speakers = React.lazy(() => import('./pages/LandingPageContent/Speakers').then(module => ({ default: module.Speakers })));
+const Agenda = React.lazy(() => import('./pages/LandingPageContent/Agenda').then(module => ({ default: module.Agenda })));
 
 // Loading Screen
 const LoadingScreen: React.FC<{ message?: string }> = ({ message = "Loading..." }) => (
@@ -48,6 +50,16 @@ const AppRouter: React.FC = () => {
       <Route path="/about" element={
         <Suspense fallback={<LoadingScreen message="Loading page..." />}>
           <AboutCareerCenter />
+        </Suspense>
+      } />
+      <Route path="/speakers" element={
+        <Suspense fallback={<LoadingScreen message="Loading page..." />}>
+          <Speakers />
+        </Suspense>
+      } />
+      <Route path="/agenda" element={
+        <Suspense fallback={<LoadingScreen message="Loading page..." />}>
+          <Agenda />
         </Suspense>
       } />
 
