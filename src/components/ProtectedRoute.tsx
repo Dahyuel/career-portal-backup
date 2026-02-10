@@ -26,7 +26,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   } = useAuth();
   const location = useLocation();
 
-  console.log('🛡️ ProtectedRoute check:', {
+  /* console.log('🛡️ ProtectedRoute check:', {
     path: location.pathname,
     loading,
     sessionLoaded,
@@ -35,7 +35,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     hasProfile: !!profile,
     profileRole: profile?.role,
     profileComplete: profile?.profile_complete
-  });
+  }); */
 
   // OPTIMIZATION: Check localStorage FIRST for instant role check
   // This prevents the 5-second loading wait when accessing unauthorized endpoints
@@ -55,11 +55,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     // Only set timeout if we're loading and don't have localStorage data
     if ((loading || (isAuthenticated && !profile)) && !localUserData) {
       timeout = setTimeout(async () => {
-        console.warn('⚠️ Loading timed out. Forcing logout...', {
+        /* console.warn('⚠️ Loading timed out. Forcing logout...', {
           loading,
           hasProfile: !!profile,
           isAuthenticated
-        });
+        }); */
         await signOut();
         window.location.href = '/login';
       }, 5000); // Back to 5 seconds, but rarely hit due to localStorage
@@ -164,7 +164,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     }
   }
 
-  console.log('✅ Access granted to protected route');
+  // console.log('✅ Access granted to protected route');
   return <>{children}</>;
 };
 

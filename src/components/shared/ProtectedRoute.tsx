@@ -2,6 +2,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import DashboardLoading from '../DashboardLoading';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -9,20 +10,19 @@ interface ProtectedRouteProps {
   requireCompleteProfile?: boolean;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
-  children, 
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+  children,
   requiredRole,
   requireCompleteProfile = true
 }) => {
-  const { 
-    user, 
-    profile, 
-    loading, 
+  const {
+    user,
+    profile,
+    loading,
     sessionLoaded,
-    isAuthenticated, 
-    hasRole, 
-    getRoleBasedRedirect,
-    isProfileComplete 
+    isAuthenticated,
+    hasRole,
+    getRoleBasedRedirect
   } = useAuth();
   const location = useLocation();
 
@@ -37,16 +37,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     profileComplete: profile?.profile_complete
   });
 
-  // Show loading only during initial session load
-  if (loading && !sessionLoaded) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto mb-2"></div>
-          <p className="text-gray-600 text-sm">Loading...</p>
-        </div>
-      </div>
-    );
+  // Show loading during initial session load or profile load
+  if ((loading && !sessionLoaded) || (isAuthenticated && !profile && loading)) {
+    return <DashboardLoading />;
   }
 
   // CRITICAL: Once session is loaded but no user, redirect to login
@@ -55,21 +48,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // If we have a user but profile is still loading, wait
-  if (isAuthenticated && !profile && loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-50 to-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-500 mx-auto mb-2"></div>
-          <p className="text-gray-600 text-sm">Loading profile...</p>
-        </div>
-      </div>
-    );
-  }
-
   // Handle profile completion logic
-  const profileComplete = profile ? isProfileComplete(profile) : false;
-  
+  const profileComplete = profile?.profile_complete || false;
+
   if (requireCompleteProfile && !profileComplete) {
     console.log('📝 Profile incomplete, checking redirect...', {
       role: profile?.role,
@@ -78,18 +59,18 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     });
 
     // Allow access to registration forms even with incomplete profiles
-    const isRegistrationPath = location.pathname === '/V0lunt33ringR3g' || 
-                              location.pathname === '/attendee-register';
-    
+    const isRegistrationPath = location.pathname === '/V0lunt33ringR3g' ||
+      location.pathname === '/attendee-register';
+
     if (isRegistrationPath) {
       console.log('✅ Allowing access to registration form');
       return <>{children}</>;
     }
-    
+
     // Redirect incomplete profiles to appropriate registration form
-    const redirectPath = getRoleBasedRedirect(profile?.role, profileComplete);
+    const redirectPath = getRoleBasedRedirect(profile?.role);
     console.log('🔄 Redirecting incomplete profile to:', redirectPath);
-    
+
     // Prevent redirect loop
     if (location.pathname !== redirectPath) {
       return <Navigate to={redirectPath} replace />;
@@ -99,13 +80,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // Check role permissions if specified
   if (requiredRole && profile) {
     const hasRequiredRole = hasRole(requiredRole);
-    
+
     if (!hasRequiredRole) {
       console.log('❌ Access denied - insufficient permissions', {
         userRole: profile.role,
         requiredRole
       });
-      
+
       return (
         <div className="min-h-screen bg-gradient-to-br from-red-50 to-white flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full text-center border border-red-100">

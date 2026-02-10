@@ -1,11 +1,10 @@
 import React from 'react';
-import { Building2, Target, Users, BookOpen, Briefcase, Award, ArrowRight, Mail, ExternalLink, Sparkles, Handshake, Facebook, Instagram, Linkedin } from 'lucide-react';
+import { Building2, Target, Users, BookOpen, Briefcase, Award, ArrowRight, Mail, ExternalLink, Sparkles, Handshake } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Navbar } from '../../components/shared/Navbar';
 
 export const AboutCareerCenter: React.FC = () => {
     const navigate = useNavigate();
-
 
     return (
         <div className="min-h-screen bg-white dark:bg-gray-950 transition-colors duration-300">
@@ -196,45 +195,8 @@ export const AboutCareerCenter: React.FC = () => {
                     </div>
                 </div>
             </section>
-
-            {/* Social Media Section */}
-            <section className="py-12 bg-white dark:bg-gray-950">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="text-center">
-                        <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Follow Us</h3>
-                        <div className="flex justify-center gap-6">
-                            <a
-                                href="https://facebook.com/asucareer"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="group p-4 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-blue-600 transition-all duration-300 hover:shadow-lg hover:shadow-blue-500/50 hover:scale-110"
-                            >
-                                <Facebook className="w-7 h-7 text-gray-600 dark:text-gray-400 group-hover:text-white transition-colors" />
-                            </a>
-                            <a
-                                href="https://instagram.com/asucareer"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="group p-4 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gradient-to-br hover:from-purple-600 hover:via-pink-500 hover:to-orange-400 transition-all duration-300 hover:shadow-lg hover:shadow-pink-500/50 hover:scale-110"
-                            >
-                                <Instagram className="w-7 h-7 text-gray-600 dark:text-gray-400 group-hover:text-white transition-colors" />
-                            </a>
-                            <a
-                                href="https://linkedin.com/company/asucareer"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="group p-4 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-sky-700 transition-all duration-300 hover:shadow-lg hover:shadow-sky-500/50 hover:scale-110"
-                            >
-                                <Linkedin className="w-7 h-7 text-gray-600 dark:text-gray-400 group-hover:text-white transition-colors" />
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </section>
         </div>
     );
 };
-
-//test
 
 export default AboutCareerCenter;

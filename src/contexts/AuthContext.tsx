@@ -119,12 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const role = roleData?.role || localRole || 'attendee';
 
-        console.log('👤 [AuthContext] Resolved Role:', {
-          userId,
-          dbRole: roleData?.role,
-          localRole,
-          finalRole: role
-        });
+        // const role = roleData?.role || localRole || 'attendee';
 
         let teamName = undefined;
 
@@ -252,7 +247,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event);
 
       // Skip profile fetching during active registration (profile doesn't exist yet)
       // Check for both attendee registration (/attendee-register) and volunteer registration (/V0lunt33ringR3g)
@@ -289,7 +283,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Then fetch the full profile from database (will override the temp profile)
           await fetchUserProfile(session.user.id, session.user.email || '');
         } else {
-          console.log('⏭️ Skipping profile fetch during registration');
+          // console.log('⏭️ Skipping profile fetch during registration');
         }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
@@ -359,7 +353,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Cleanup session without clearing form data (for registration errors)
   const cleanupSession = useCallback(async () => {
-    console.log('🧹 Cleaning up session (keeping form data)');
     try {
       // Only clear auth state, not form data
       await signOutUser();

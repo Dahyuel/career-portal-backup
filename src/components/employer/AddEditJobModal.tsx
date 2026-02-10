@@ -64,6 +64,12 @@ const AddEditJobModal: React.FC<AddEditJobModalProps> = ({ job, companyId, emplo
             return;
         }
 
+        if (!companyId || !employerId) {
+            setError('Missing company or employer information. Please try reloading the page.');
+            setLoading(false);
+            return;
+        }
+
         try {
             const jobData = {
                 ...formData,

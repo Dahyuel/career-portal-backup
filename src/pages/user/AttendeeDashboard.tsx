@@ -10,13 +10,39 @@ import CompanyDetailModal from '../../components/CompanyDetailModal';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import JobDetailModal from '../../components/attendee/JobDetailModal';
 import ApplyJobModal from '../../components/attendee/ApplyJobModal';
+import WithdrawJobModal from '../../components/attendee/WithdrawJobModal';
+import CancelBookingModal from '../../components/attendee/CancelBookingModal';
+import DashboardLoading from '../../components/DashboardLoading';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// Animation Variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1
+    }
+  },
+  exit: { opacity: 0 }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.3 }
+  }
+};
+
+
 
 import Toast from '../../components/shared/Toast';
 import { supabase } from '../../lib/supabase';
 
 const AttendeeDashboard = () => {
   const { user, profile } = useAuth();
-  const { attendeeProfile } = useAttendeeProfile(user?.id);
   const [activeTab, setActiveTab] = useState('home');
   const [showProfile, setShowProfile] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -26,8 +52,7 @@ const AttendeeDashboard = () => {
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
 
   // Schedule and Sessions state
-  const attendeeId = user?.id; // ID is now the user_id (shared PK)
-  // const [attendeeId, setAttendeeId] = useState<string | null>(null); // Removed
+  const attendeeId = user?.id;
   const [scheduleEvents, setScheduleEvents] = useState<any[]>([]);
   const [uniqueDates, setUniqueDates] = useState<string[]>([]);
   const [bookedSessions, setBookedSessions] = useState<any[]>([]);
@@ -38,8 +63,7 @@ const AttendeeDashboard = () => {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState<string>('');
-  const [timeFilter, setTimeFilter] = useState<string>('');
-  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [bookingToCancel, setBookingToCancel] = useState<{ id: string, title: string } | null>(null);
 
   // Companies state
   const [companies, setCompanies] = useState<any[]>([]);
@@ -56,29 +80,55 @@ const AttendeeDashboard = () => {
   const [jobTypeFilter, setJobTypeFilter] = useState('All');
   const [selectedJob, setSelectedJob] = useState<any>(null);
   const [jobToApply, setJobToApply] = useState<any>(null);
+  const [jobToWithdraw, setJobToWithdraw] = useState<any>(null);
   const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set());
+
+  // Lazy Loading States
+  const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['home']));
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [loadingCompanies, setLoadingCompanies] = useState(false);
 
   const [isApplying, setIsApplying] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
+  // Full dashboard loading state
+  const [dashboardReady, setDashboardReady] = useState(false);
+
+  // Fetch attendee profile once for the entire dashboard
+  const { attendeeProfile, loading: profileLoading } = useAttendeeProfile(user?.id, true);
+
   const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
   // Get first name from full_name
-  const firstName = attendeeProfile?.full_name?.split(' ')[0] || 'Attendee';
+  const firstName = attendeeProfile?.full_name?.split(' ')[0];
 
-  // Fetch notifications filtered by user role
+  // Scroll to top on tab change
   useEffect(() => {
-    const fetchNotifications = async () => {
-      if (!profile?.role) return;
+    window.scrollTo(0, 0);
+  }, [activeTab]);
 
+  // Initial dashboard load - wait for profile
+  useEffect(() => {
+    if (!profileLoading && attendeeProfile) {
+      setDashboardReady(true);
+    }
+  }, [profileLoading, attendeeProfile]);
+
+  // Fetch notifications filtered by user role - optimized with single query
+  useEffect(() => {
+    if (!profile?.role || !dashboardReady) return;
+
+    const fetchNotifications = async () => {
       const { data, error } = await supabase
         .from('notifications')
-        .select('*')
+        .select('id, title, content, publish_at, target_roles')
+        .eq('event_id', EVENT_ID)
         .contains('target_roles', [profile.role])
         .order('publish_at', { ascending: false });
 
       if (!error && data) {
-        console.log('Notifications loaded:', data); // Add this for debugging
         setNotifications(data);
       } else if (error) {
         console.error('Error fetching notifications:', error);
@@ -86,16 +136,16 @@ const AttendeeDashboard = () => {
     };
 
     fetchNotifications();
-  }, [profile?.role]);
+  }, [profile?.role, dashboardReady]);
 
-  // Fetch user activities
+  // Fetch user activities - optimized
   useEffect(() => {
-    const fetchActivities = async () => {
-      if (!user?.id) return;
+    if (!user?.id || !dashboardReady) return;
 
+    const fetchActivities = async () => {
       const { data, error } = await supabase
         .from('user_activities')
-        .select('*')
+        .select('id, activity_type, description, activity_timestamp, points_earned')
         .eq('user_id', user.id)
         .order('activity_timestamp', { ascending: false })
         .limit(10);
@@ -106,43 +156,30 @@ const AttendeeDashboard = () => {
     };
 
     fetchActivities();
-  }, [user?.id]);
+  }, [user?.id, dashboardReady]);
 
-  // Fetch upcoming events from schedule
+  // Derive upcoming events from scheduleEvents - optimized to use shared data
   useEffect(() => {
-    const fetchUpcomingEvents = async () => {
-      const { data, error } = await supabase
-        .from('schedule')
-        .select('*')
-        .eq('event_id', EVENT_ID)
-        .gt('start_time', new Date().toISOString())
-        .order('start_time', { ascending: true })
-        .limit(10);
+    if (scheduleEvents.length > 0) {
+      const now = new Date();
+      const upcoming = scheduleEvents
+        .filter((event: any) => new Date(event.start_time) > now)
+        .sort((a: any, b: any) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+        .slice(0, 4);
 
-      if (!error && data) {
-        setUpcomingEvents(data);
-      }
-    };
+      setUpcomingEvents(upcoming);
+    }
+  }, [scheduleEvents]);
 
-    fetchUpcomingEvents();
-  }, []);
-
-  // Fetch attendee ID (Removed - id column is gone, using user.id)
-  /*
-  useEffect(() => {
-    const fetchAttendeeId = async () => {
-       // ... removed
-    };
-    // fetchAttendeeId();
-  }, [user?.id]);
-  */
-
-  // Fetch schedule events and extract unique dates
+  // Fetch schedule events and extract unique dates - optimized
   useEffect(() => {
     const fetchScheduleEvents = async () => {
+      if ((activeTab !== 'schedule' && activeTab !== 'home') || loadedTabs.has('schedule')) return;
+
+      setLoadingSchedule(true);
       const { data, error } = await supabase
         .from('schedule')
-        .select('*')
+        .select('id, title, start_time, end_time, location, schedule_type, description')
         .eq('event_id', EVENT_ID)
         .order('start_time', { ascending: true });
 
@@ -161,23 +198,38 @@ const AttendeeDashboard = () => {
         if (dates.length > 0 && !selectedDay) {
           setSelectedDay(dates[0] as any);
         }
+        setLoadedTabs(prev => new Set(prev).add('schedule'));
       }
+      setLoadingSchedule(false);
     };
 
     fetchScheduleEvents();
-  }, []);
+  }, [activeTab, loadedTabs, selectedDay]);
 
-  // Fetch booked sessions
+  // Fetch booked sessions - optimized with minimal fields
   useEffect(() => {
     const fetchBookedSessions = async () => {
       if (!attendeeId) return;
+      if (activeTab !== 'sessions' && !loadedTabs.has('sessions')) return;
 
       const { data, error } = await supabase
         .from('session_bookings')
         .select(`
-          *,
+          id,
+          booking_status,
+          booked_at,
+          checked_in,
           sessions!inner (
-            *,
+            id,
+            title,
+            description,
+            start_time,
+            end_time,
+            room_name,
+            session_type,
+            max_attendees,
+            current_bookings,
+            is_full,
             speaker (
               first_name,
               last_name,
@@ -197,6 +249,7 @@ const AttendeeDashboard = () => {
           booking_id: booking.id,
           booking_status: booking.booking_status,
           booked_at: booking.booked_at,
+          checked_in: booking.checked_in,
           speaker: booking.sessions.speaker
         }));
         setBookedSessions(sessions);
@@ -204,55 +257,69 @@ const AttendeeDashboard = () => {
     };
 
     fetchBookedSessions();
-  }, [attendeeId]);
+  }, [attendeeId, activeTab, loadedTabs]);
 
-  // Fetch available sessions (excluding booked ones)
+  // Fetch available sessions (excluding booked ones) - optimized
   useEffect(() => {
     const fetchAvailableSessions = async () => {
       if (!attendeeId) return;
+      if (activeTab !== 'sessions' || loadedTabs.has('sessions')) return;
 
-      // First get all sessions
-      const { data: allSessions, error: sessionsError } = await supabase
-        .from('sessions')
-        .select(`
-          *,
-          speaker (
-            first_name,
-            last_name,
+      setLoadingSessions(true);
+
+      // Parallel fetch for better performance
+      const [sessionsResult, bookingsResult] = await Promise.all([
+        supabase
+          .from('sessions')
+          .select(`
+            id,
             title,
-            photo_url
-          )
-        `)
-        .eq('event_id', EVENT_ID)
-        .order('start_time', { ascending: true });
+            description,
+            start_time,
+            end_time,
+            room_name,
+            session_type,
+            max_attendees,
+            current_bookings,
+            is_full,
+            speaker (
+              first_name,
+              last_name,
+              title,
+              photo_url
+            )
+          `)
+          .eq('event_id', EVENT_ID)
+          .order('start_time', { ascending: true }),
+        supabase
+          .from('session_bookings')
+          .select('session_id')
+          .eq('attendee_id', attendeeId)
+          .neq('booking_status', 'cancelled')
+      ]);
 
-      if (sessionsError || !allSessions) return;
+      if (!sessionsResult.error && sessionsResult.data) {
+        const bookedIds = new Set(bookingsResult.data?.map((b: any) => b.session_id) || []);
+        const available = sessionsResult.data.filter((s: any) => !bookedIds.has(s.id));
+        setAvailableSessions(available);
+        setLoadedTabs(prev => new Set(prev).add('sessions'));
+      }
 
-      // Get booked session IDs
-      const { data: bookings } = await supabase
-        .from('session_bookings')
-        .select('session_id')
-        .eq('attendee_id', attendeeId)
-        .neq('booking_status', 'cancelled');
-
-      const bookedIds = new Set(bookings?.map((b: any) => b.session_id) || []);
-
-      // Filter out booked sessions
-      const available = allSessions.filter((s: any) => !bookedIds.has(s.id));
-      setAvailableSessions(available);
       setLoadingSessions(false);
     };
 
-    setLoadingSessions(true);
     fetchAvailableSessions();
-  }, [attendeeId, bookedSessions]); // Re-fetch when bookings change
+  }, [attendeeId, bookedSessions, activeTab, loadedTabs]);
 
-  // Fetch companies
+  // Fetch companies - optimized
   useEffect(() => {
     const fetchCompanies = async () => {
+      if (activeTab !== 'companies' || loadedTabs.has('companies')) return;
+
+      setLoadingCompanies(true);
       const { data, error } = await supabase
         .from('companies')
-        .select('*')
+        .select('id, company_name, industry, description, logo_url, partner_type, booth_number, website')
         .eq('event_id', EVENT_ID)
         .order('company_name');
 
@@ -262,52 +329,62 @@ const AttendeeDashboard = () => {
         // Extract unique partner types
         const types = Array.from(new Set(data.map((c: any) => c.partner_type).filter(Boolean)));
         setPartnerTypes(['All', ...types]);
+        setLoadedTabs(prev => new Set(prev).add('companies'));
       }
+      setLoadingCompanies(false);
     };
 
     fetchCompanies();
-    fetchCompanies();
-  }, []);
+  }, [activeTab, loadedTabs]);
 
-  // Fetch Jobs and Applications
+  // Fetch Jobs and Applications - optimized with parallel queries
   useEffect(() => {
     const fetchJobsData = async () => {
-      // 1. Fetch all jobs
-      const { data: jobsData, error: jobsError } = await supabase
-        .from('job_positions')
-        .select(`
-          *,
-          companies (
-            company_name,
-            logo_url,
-            industry
-          )
-        `)
-        .eq('is_active', true)
-        .order('posted_at', { ascending: false });
+      if (activeTab !== 'jobs' || loadedTabs.has('jobs')) return;
 
-      if (jobsError) {
-        console.error('Error fetching jobs:', jobsError);
-      } else {
-        setJobs(jobsData || []);
-        setFilteredJobs(jobsData || []);
-      }
+      setLoadingJobs(true);
 
-      // 2. Fetch user's applications
-      if (attendeeId) {
-        const { data: applications, error: appError } = await supabase
+      // Parallel fetch
+      const [jobsResult, applicationsResult] = await Promise.all([
+        supabase
+          .from('job_positions')
+          .select(`
+            id,
+            title,
+            description,
+            job_type,
+            location,
+            posted_at,
+            companies (
+              company_name,
+              logo_url,
+              industry
+            )
+          `)
+          .eq('is_active', true)
+          .order('posted_at', { ascending: false }),
+        attendeeId ? supabase
           .from('job_applications')
-          .select('job_id')
-          .eq('attendee_id', attendeeId);
+          .select('job_position_id')
+          .eq('attendee_id', attendeeId) : Promise.resolve({ data: null, error: null })
+      ]);
 
-        if (!appError && applications) {
-          setAppliedJobIds(new Set(applications.map(app => app.job_id)));
-        }
+      if (!jobsResult.error && jobsResult.data) {
+        setJobs(jobsResult.data);
+        setFilteredJobs(jobsResult.data);
       }
+
+      if (!applicationsResult.error && applicationsResult.data) {
+        const appliedIds = new Set(applicationsResult.data.map((app: any) => app.job_position_id));
+        setAppliedJobIds(appliedIds);
+      }
+
+      setLoadedTabs(prev => new Set(prev).add('jobs'));
+      setLoadingJobs(false);
     };
 
     fetchJobsData();
-  }, [attendeeId]);
+  }, [activeTab, loadedTabs, attendeeId]);
 
   // Filter Jobs
   useEffect(() => {
@@ -428,12 +505,20 @@ const AttendeeDashboard = () => {
             .eq('id', existingBooking.id);
 
           if (updateError) throw updateError;
+
+          // Trigger Refresh via loadedTabs invalidation
+          setLoadedTabs(prev => {
+            const next = new Set(prev);
+            next.delete('sessions');
+            return next;
+          });
         } else {
           setToast({ message: 'You already have a booking for this session.', type: 'warning' });
           setShowBookingConfirm(false);
           setSessionToBook(null);
           return;
         }
+        setToast({ message: 'Session booked successfully!', type: 'success' });
         setShowBookingConfirm(false);
         setSessionToBook(null);
         return;
@@ -450,6 +535,7 @@ const AttendeeDashboard = () => {
           });
 
         if (bookingError) throw bookingError;
+        setToast({ message: 'Session booked successfully!', type: 'success' });
       }
 
       // 3. Update session stats
@@ -461,42 +547,24 @@ const AttendeeDashboard = () => {
         })
         .eq('id', sessionToBook.id);
 
-      // 4. Refresh booked sessions
-      const { data: newBookings } = await supabase
-        .from('session_bookings')
-        .select(`
-          *,
-          sessions!inner (
-            *,
-            speaker (
-              first_name,
-              last_name,
-              title,
-              photo_url
-            )
-          )
-        `)
-        .eq('attendee_id', attendeeId)
-        .neq('booking_status', 'cancelled')
-        .order('booked_at', { ascending: false });
-
-      if (newBookings) {
-        const formattedSessions = newBookings.map((booking: any) => ({
-          ...booking.sessions,
-          booking_id: booking.id,
-          booking_status: booking.booking_status,
-          booked_at: booking.booked_at,
-          speaker: booking.sessions.speaker
-        }));
-        setBookedSessions(formattedSessions);
-      }
+      // 4. Trigger Refresh via loadedTabs invalidation
+      setLoadedTabs(prev => {
+        const next = new Set(prev);
+        next.delete('sessions');
+        return next;
+      });
 
       setShowBookingConfirm(false);
       setSessionToBook(null);
+      setSelectedSession(null); // Close session detail if it was open
 
     } catch (err: any) {
       console.error('Error booking session:', err);
       setToast({ message: 'Failed to book session. Please try again.', type: 'error' });
+      // Close anyway as requested
+      setShowBookingConfirm(false);
+      setSessionToBook(null);
+      setSelectedSession(null);
     }
   }
 
@@ -509,10 +577,18 @@ const AttendeeDashboard = () => {
       .eq('id', bookingId);
 
     if (!error) {
-      // Refresh sessions
-      setBookedSessions(prev => prev.filter(s => s.booking_id !== bookingId));
-      setSelectedSession(null);
+      // Refresh sessions via loadedTabs invalidation
+      setLoadedTabs(prev => {
+        const next = new Set(prev);
+        next.delete('sessions');
+        return next;
+      });
+      setToast({ message: 'Booking cancelled successfully.', type: 'info' });
+    } else {
+      setToast({ message: 'Failed to cancel booking.', type: 'error' });
     }
+    setBookingToCancel(null);
+    setSelectedSession(null);
   }
 
 
@@ -520,11 +596,11 @@ const AttendeeDashboard = () => {
   const handleApplyClick = (job: any, e?: React.MouseEvent) => {
     e?.stopPropagation();
 
-    // Check if CV is uploaded
-    if (!attendeeProfile?.cv_url) {
+    // Check if CV is uploaded using attendeeProfile
+    const hasCv = attendeeProfile?.cv_url;
+
+    if (!hasCv) {
       setToast({ message: 'Please upload your CV in your profile before applying for jobs.', type: 'warning' });
-      // Suggest opening profile?
-      // setShowProfile(true); // Keeping this if user wants immediate action
       return;
     }
 
@@ -540,31 +616,69 @@ const AttendeeDashboard = () => {
       const { error } = await supabase
         .from('job_applications')
         .insert({
-          job_id: jobToApply.id,
+          job_position_id: jobToApply.id,
           attendee_id: attendeeId,
-          status: 'pending'
+          cv_url: attendeeProfile?.cv_url
         });
 
       if (error) throw error;
 
-      // Update local state
-      setAppliedJobIds(prev => new Set(prev).add(jobToApply.id));
+      // Update local state by invalidating loadedTabs
+      setLoadedTabs(prev => {
+        const next = new Set(prev);
+        next.delete('jobs');
+        return next;
+      });
 
-      // Close all modals
       setJobToApply(null);
-      if (selectedJob?.id === jobToApply.id) {
-        // If detail modal is open, keep it open but update state? 
-        // Actually no need to update selectedJob as hasApplied is derived from appliedJobIds
-      }
+      setSelectedJob(null); // Close detail modal too
       setToast({ message: 'Application submitted successfully!', type: 'success' });
 
-    } catch (error: any) {
-      console.error('Error applying for job:', error);
-      setToast({ message: 'Failed to apply: ' + error.message, type: 'error' });
+    } catch (err: any) {
+      console.error('Error applying for job:', err);
+      setToast({ message: 'Failed to submit application.', type: 'error' });
+      setJobToApply(null);
+      setSelectedJob(null);
     } finally {
       setIsApplying(false);
     }
   };
+
+  // Handler: Confirm Withdraw
+  const handleConfirmWithdraw = async () => {
+    if (!jobToWithdraw || !attendeeId) return;
+
+    try {
+      setIsApplying(true);
+
+      const { error } = await supabase
+        .from('job_applications')
+        .delete()
+        .eq('job_position_id', jobToWithdraw.id)
+        .eq('attendee_id', attendeeId);
+
+      if (error) throw error;
+
+      // Update local state by invalidating loadedTabs
+      setLoadedTabs(prev => {
+        const next = new Set(prev);
+        next.delete('jobs');
+        return next;
+      });
+
+      setToast({ message: 'Application withdrawn successfully.', type: 'success' });
+      setJobToWithdraw(null);
+      setSelectedJob(null); // Close detail modal too
+    } catch (err: any) {
+      console.error('Error withdrawing application:', err);
+      setToast({ message: 'Failed to withdraw application.', type: 'error' });
+      setJobToWithdraw(null);
+      setSelectedJob(null);
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
 
   // Filter available sessions by search and filters
   const filterSessions = (sessions: any[]) => {
@@ -578,48 +692,57 @@ const AttendeeDashboard = () => {
       const matchesDate = dateFilter === '' ||
         new Date(session.start_time).toISOString().split('T')[0] === dateFilter;
 
-      // Time filter (morning: before 12pm, afternoon: 12pm-6pm, evening: after 6pm)
-      let matchesTime = true;
-      if (timeFilter) {
-        const hour = new Date(session.start_time).getHours();
-        if (timeFilter === 'morning') matchesTime = hour < 12;
-        else if (timeFilter === 'afternoon') matchesTime = hour >= 12 && hour < 18;
-        else if (timeFilter === 'evening') matchesTime = hour >= 18;
-      }
-
-      return matchesSearch && matchesDate && matchesTime;
+      return matchesSearch && matchesDate;
     });
   };
 
+  // Full Loading Screen
+  if (!dashboardReady) {
+    return <DashboardLoading />;
+  }
+
   const renderHomeTab = () => (
-    <div className="space-y-6">
+    <motion.div
+      className="space-y-6"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+    >
       {/* Welcome Banner with Gradient Fade */}
-      <div className="relative rounded-2xl overflow-hidden shadow-xl p-8 md:p-12 min-h-[300px] flex flex-col justify-center text-white" style={{
-        background: 'linear-gradient(135deg, #DC2626 0%, #B91C1C 60%, #ffffff 130%)'
-      }}>
+      <motion.div
+        variants={itemVariants}
+        className="bg-gradient-to-br from-red-600 to-red-700 rounded-3xl p-8 shadow-lg shadow-red-500/20 relative overflow-hidden group"
+      >
+        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+          <span className="material-symbols-outlined text-9xl text-white transform rotate-12">
+            school
+          </span>
+        </div>
         <div className="relative z-10">
-          <p className="uppercase tracking-widest text-red-100 font-semibold text-xs mb-2">Attendee</p>
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">
-            Welcome, {firstName}
-          </h1>
-          <p className="text-lg text-red-50 opacity-90 max-w-md mb-8">
-            Let's make some meaningful connections today and level up your career profile.
+          <h2 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+            Welcome, {firstName || 'Attendee'}!
+          </h2>
+          <p className="text-red-100 text-lg mb-6 max-w-xl">
+            Ready to explore new opportunities? Check out the schedule and find your next career move.
           </p>
           <button
             onClick={() => setShowProfile(true)}
-            className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit"
+            className="bg-white text-red-600 hover:bg-red-50 px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg active:scale-95 flex items-center gap-2"
           >
-            <span className="material-symbols-outlined text-xl">account_circle</span>
-            Show Profile
+            <span className="material-symbols-outlined">person</span>
+            My Profile
           </button>
         </div>
-        <div className="absolute bottom-0 right-0 w-64 h-64 bg-white/20 rounded-full -mb-32 -mr-32 blur-3xl"></div>
-      </div>
+      </motion.div>
 
 
 
       {/* Recent Activity */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+      <motion.div
+        variants={itemVariants}
+        className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"
+      >
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
           <span className="material-symbols-outlined text-red-600">history</span>
           Recent Activity
@@ -659,10 +782,13 @@ const AttendeeDashboard = () => {
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Upcoming Events */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+      <motion.div
+        variants={itemVariants}
+        className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"
+      >
         <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
           <span className="material-symbols-outlined text-red-600">event</span>
           Upcoming Events
@@ -709,19 +835,20 @@ const AttendeeDashboard = () => {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Profile Card */}
-      {showProfile && attendeeProfile && (
-        <AttendeeProfileCard
-          profile={attendeeProfile}
-          onClose={() => setShowProfile(false)}
-        />
-      )}
-    </div>
+      </motion.div>
+    </motion.div>
   );
 
   const renderScheduleTab = () => {
+    if (loadingSchedule) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-500 font-medium">Loading schedule...</p>
+        </div>
+      );
+    }
+
     const getScheduleForDate = (date: string) => {
       return scheduleEvents.filter((event: any) =>
         new Date(event.start_time).toISOString().split('T')[0] === date
@@ -731,11 +858,25 @@ const AttendeeDashboard = () => {
     const selectedDateEvents = selectedDay ? getScheduleForDate(selectedDay as string) : [];
 
     return (
-      <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">Event Schedule</h2>
+      <motion.div
+        className="space-y-6"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <div className="flex items-center gap-3 mb-2">
+          <div className="p-2 bg-red-100 rounded-lg">
+            <span className="material-symbols-outlined text-red-600">calendar_month</span>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900">Event Schedule</h2>
+        </div>
 
         {/* Date Cards */}
-        <div className="overflow-x-auto pb-2">
+        <motion.div
+          variants={itemVariants}
+          className="overflow-x-auto pb-2"
+        >
           <div className="flex gap-3 md:grid md:grid-cols-3 lg:grid-cols-5 min-w-min">
             {uniqueDates.map((date, idx) => {
               const dateObj = new Date(date);
@@ -764,10 +905,13 @@ const AttendeeDashboard = () => {
               );
             })}
           </div>
-        </div>
+        </motion.div>
 
         {/* Events for Selected Date */}
-        <div className="space-y-4">
+        <motion.div
+          variants={itemVariants}
+          className="space-y-4"
+        >
           {selectedDateEvents.length > 0 ? (
             selectedDateEvents.map((event: any) => (
               <button
@@ -810,8 +954,8 @@ const AttendeeDashboard = () => {
               <p className="text-sm">Select a different date to view events</p>
             </div>
           )}
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     );
   };
 
@@ -828,11 +972,25 @@ const AttendeeDashboard = () => {
     }
 
     return (
-      <div className="space-y-8">
-        <h2 className="text-2xl font-bold text-gray-900">Sessions</h2>
+      <motion.div
+        className="space-y-8"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <div className="flex items-center gap-3 mb-2">
+          <div className="p-2 bg-red-100 rounded-lg">
+            <span className="material-symbols-outlined text-red-600">event</span>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900">Sessions</h2>
+        </div>
 
         {/* My Booked Sessions */}
-        <div className="space-y-4">
+        <motion.div
+          variants={itemVariants}
+          className="space-y-4"
+        >
           <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <span className="material-symbols-outlined text-red-600">event_available</span>
             My Current Bookings
@@ -841,41 +999,91 @@ const AttendeeDashboard = () => {
           {bookedSessions.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {bookedSessions.map((session: any) => (
-                <button
+                <motion.div
                   key={session.id}
+                  whileHover={{ y: -5 }}
                   onClick={() => setSelectedSession(session)}
-                  className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all text-left"
+                  className="group bg-white dark:bg-slate-800 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden cursor-pointer border border-slate-100 dark:border-slate-700 flex flex-col h-full"
                 >
-                  <div className="mb-3">
-                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getTypeBadgeColor(session.session_type)}`}>
-                      {session.session_type}
-                    </span>
-                  </div>
-                  <h4 className="font-bold text-gray-900 mb-2">{session.title}</h4>
-                  <div className="space-y-2 text-sm text-gray-600">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base">schedule</span>
-                      {new Date(session.start_time).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
+                  {/* Image Header with Glassmorphism Badge */}
+                  <div className="relative h-64 overflow-hidden">
+                    <img
+                      src={session.speaker?.photo_url || 'https://images.unsplash.com/photo-1544531320-98514ea28924?auto=format&fit=crop&w=800&q=80'}
+                      alt={session.speaker?.first_name || 'Speaker'}
+                      className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-110"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-90" />
+
+                    {/* Date/Time Badge */}
+                    <div className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/20 backdrop-blur-md border border-white/20 text-white text-xs font-bold tracking-wide shadow-sm">
+                      {new Date(session.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                     </div>
-                    {session.room_name && (
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-base">meeting_room</span>
-                        {session.room_name}
-                      </div>
-                    )}
-                    {session.speaker && (
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-base">person</span>
-                        {session.speaker.first_name} {session.speaker.last_name}
-                      </div>
-                    )}
+
+                    {/* Attended / Status Badge */}
+                    <div className="absolute bottom-3 left-3 flex gap-2">
+                      <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getTypeBadgeColor(session.session_type)} shadow-sm`}>
+                        {session.session_type}
+                      </span>
+                      {session.checked_in && (
+                        <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-500 text-white shadow-sm flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[10px]">check_circle</span>
+                          Attended
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </button>
+
+                  {/* Content Body */}
+                  <div className="p-5 flex flex-col flex-1">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-2 line-clamp-2 leading-tight">
+                        {session.title}
+                      </h4>
+
+                      {session.speaker && (
+                        <div className="flex items-center gap-2 mb-4">
+                          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            with <span className="text-slate-700 dark:text-slate-300">{session.speaker.first_name} {session.speaker.last_name}</span>
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="space-y-2.5">
+                        <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                          <span className="material-symbols-outlined text-sm text-red-500">calendar_today</span>
+                          {new Date(session.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+
+                        {session.room_name && (
+                          <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                            <span className="material-symbols-outlined text-sm text-red-500">location_on</span>
+                            {session.room_name}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400">
+                        <span className="material-symbols-outlined text-sm">confirmation_number</span>
+                        Confirmed
+                      </div>
+
+                      {!session.checked_in && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setBookingToCancel({ id: session.booking_id, title: session.title });
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-red-600 hover:bg-red-50 transition-colors border border-red-200 hover:border-red-300"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
               ))}
             </div>
           ) : (
@@ -885,10 +1093,13 @@ const AttendeeDashboard = () => {
               <p className="text-sm text-gray-500 mt-1">Browse available sessions below</p>
             </div>
           )}
-        </div>
+        </motion.div>
 
         {/* All Available Sessions */}
-        <div className="space-y-4">
+        <motion.div
+          variants={itemVariants}
+          className="space-y-4"
+        >
           <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
             <span className="material-symbols-outlined text-red-600">explore</span>
             All Available Sessions
@@ -911,22 +1122,15 @@ const AttendeeDashboard = () => {
               onChange={(e) => setDateFilter(e.target.value)}
               className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600"
             >
-              <option value="">All Dates</option>
-              {uniqueDates.map((date) => (
+              <option value="">All Days</option>
+              {/* Generate dates dynamically from available sessions */}
+              {Array.from(new Set(availableSessions.map((s: any) =>
+                new Date(s.start_time).toISOString().split('T')[0]
+              ))).sort().map((date: string) => (
                 <option key={date} value={date}>
-                  {new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  {new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                 </option>
               ))}
-            </select>
-            <select
-              value={timeFilter}
-              onChange={(e) => setTimeFilter(e.target.value)}
-              className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600"
-            >
-              <option value="">All Times</option>
-              <option value="morning">Morning (before 12 PM)</option>
-              <option value="afternoon">Afternoon (12-6 PM)</option>
-              <option value="evening">Evening (after 6 PM)</option>
             </select>
           </div>
 
@@ -934,68 +1138,94 @@ const AttendeeDashboard = () => {
           {filteredAvailable.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredAvailable.map((session: any) => (
-                <div
+                <motion.div
                   key={session.id}
-                  className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all"
+                  whileHover={{ y: -5 }}
+                  onClick={() => setSelectedSession(session)}
+                  className="group bg-white dark:bg-slate-800 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden cursor-pointer border border-slate-100 dark:border-slate-700 flex flex-col h-full"
                 >
-                  <div className="mb-3 flex items-start justify-between">
-                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getTypeBadgeColor(session.session_type)}`}>
-                      {session.session_type}
-                    </span>
-                    {session.is_full && (
-                      <span className="text-xs font-semibold text-red-600 bg-red-50 px-2 py-1 rounded">Full</span>
-                    )}
-                  </div>
-                  <h4 className="font-bold text-gray-900 mb-2">{session.title}</h4>
-                  <div className="space-y-2 text-sm text-gray-600 mb-4">
-                    <div className="flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base">schedule</span>
-                      {new Date(session.start_time).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
+                  {/* Image Header with Glassmorphism Badge */}
+                  <div className="relative h-64 overflow-hidden">
+                    <img
+                      src={session.speaker?.photo_url || 'https://images.unsplash.com/photo-1544531320-98514ea28924?auto=format&fit=crop&w=800&q=80'}
+                      alt={session.speaker?.first_name || 'Speaker'}
+                      className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-110"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-90" />
+
+                    {/* Date/Time Badge */}
+                    <div className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/20 backdrop-blur-md border border-white/20 text-white text-xs font-bold tracking-wide shadow-sm">
+                      {new Date(session.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                     </div>
-                    {session.room_name && (
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-base">meeting_room</span>
-                        {session.room_name}
-                      </div>
-                    )}
-                    {session.speaker && (
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-base">person</span>
-                        {session.speaker.first_name} {session.speaker.last_name}
-                      </div>
-                    )}
-                    {session.max_attendees && (
-                      <div className="flex items-center gap-2">
-                        <span className="material-symbols-outlined text-base">groups</span>
-                        {session.current_bookings}/{session.max_attendees} booked
-                      </div>
-                    )}
+
+                    {/* Category Badge */}
+                    <div className="absolute bottom-3 left-3">
+                      <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getTypeBadgeColor(session.session_type)} shadow-sm`}>
+                        {session.session_type}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setSelectedSession(session)}
-                      className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-semibold transition-colors"
-                    >
-                      View Details
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSessionToBook(session);
-                        setShowBookingConfirm(true);
-                      }}
-                      disabled={session.is_full}
-                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-semibold transition-colors"
-                    >
-                      Book
-                    </button>
+
+                  {/* Content Body */}
+                  <div className="p-5 flex flex-col flex-1">
+                    <div className="flex-1">
+                      <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-2 line-clamp-2 leading-tight">
+                        {session.title}
+                      </h4>
+
+                      {session.speaker && (
+                        <div className="flex items-center gap-2 mb-4">
+                          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                            with <span className="text-slate-700 dark:text-slate-300">{session.speaker.first_name} {session.speaker.last_name}</span>
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="space-y-2.5">
+                        <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                          <span className="material-symbols-outlined text-sm text-red-500">calendar_today</span>
+                          {new Date(session.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </div>
+
+                        {session.room_name && (
+                          <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                            <span className="material-symbols-outlined text-sm text-red-500">location_on</span>
+                            {session.room_name}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer Actions */}
+                    <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                      {session.max_attendees && (
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                          <span className="material-symbols-outlined text-sm">group</span>
+                          {session.current_bookings}/{session.max_attendees}
+                        </div>
+                      )}
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!session.is_full) {
+                            setSessionToBook(session);
+                            setShowBookingConfirm(true);
+                          }
+                        }}
+                        disabled={session.is_full}
+                        className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${session.is_full
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          : 'bg-red-600 hover:bg-red-700 text-white hover:shadow-md active:scale-95'
+                          }`}
+                      >
+                        {session.is_full ? 'Full' : 'Book Now'}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </motion.div>
               ))}
+
             </div>
           ) : (
             <div className="text-center py-12 bg-gray-50 rounded-xl">
@@ -1003,237 +1233,307 @@ const AttendeeDashboard = () => {
               <p className="text-lg font-semibold text-gray-600">No sessions found</p>
               <p className="text-sm text-gray-500 mt-1">Try adjusting your search or filters</p>
             </div>
-          )}
-        </div>
-      </div>
+          )
+          }
+        </motion.div >
+      </motion.div >
     );
   };
 
-  const renderJobsTab = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900">Job Opportunities</h2>
-        <span className="text-sm text-gray-500">{filteredJobs.length} Jobs Found</span>
-      </div>
+  const renderJobsTab = () => {
+    if (loadingJobs) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-500 font-medium">Loading jobs...</p>
+        </div>
+      );
+    }
 
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="flex-1 relative">
-          <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
-          <input
-            type="text"
-            placeholder="Search jobs, companies, skills..."
-            value={jobSearch}
-            onChange={(e) => setJobSearch(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600 transition-all"
-          />
+    return (
+      <motion.div
+        className="space-y-6"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-100 rounded-lg">
+              <span className="material-symbols-outlined text-red-600">work</span>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900">Job Opportunities</h2>
+          </div>
+          <span className="text-sm text-gray-500">{filteredJobs.length} Jobs Found</span>
         </div>
 
-        <div className="relative min-w-[200px]">
+        {/* Filters */}
+        {/* Search and Filters */}
+        <div className="flex flex-col md:flex-row gap-3">
+          <div className="flex-1 relative">
+            <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
+            <input
+              type="text"
+              placeholder="Search jobs..."
+              value={jobSearch}
+              onChange={(e) => setJobSearch(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+            />
+          </div>
           <select
             value={jobTypeFilter}
             onChange={(e) => setJobTypeFilter(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600 appearance-none cursor-pointer"
+            className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
           >
-            <option value="All">All Job Types</option>
-            <option value="Full-Time">Full-Time</option>
-            <option value="Internship">Internship</option>
-            <option value="Part-Time">Part-Time</option>
-            <option value="Co-op">Co-op</option>
+            <option value="All">All Types</option>
+            <option value="full-time">Full Time</option>
+            <option value="part-time">Part Time</option>
+            <option value="internship">Internship</option>
+            <option value="contract">Contract</option>
           </select>
-          <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">expand_more</span>
         </div>
-      </div>
 
-      {/* Job Listings */}
-      <div className="space-y-4">
-        {filteredJobs.length > 0 ? (
-          filteredJobs.map((job) => {
-            const hasApplied = appliedJobIds.has(job.id);
-            return (
-              <div
-                key={job.id}
-                onClick={() => setSelectedJob(job)}
-                className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group"
-              >
-                <div className="flex items-start gap-4">
-                  {/* Company Logo/Icon */}
-                  <div className="w-14 h-14 rounded-xl bg-gray-50 flex items-center justify-center flex-shrink-0 border border-gray-100">
-                    {job.companies?.logo_url ? (
-                      <img src={job.companies.logo_url} alt={job.companies.company_name} className="w-full h-full object-contain rounded-xl" />
-                    ) : (
-                      <span className="material-symbols-outlined text-gray-400 text-2xl">business</span>
+        {/* Job Listings */}
+        <motion.div
+          variants={itemVariants}
+          className="space-y-4"
+        >
+          {filteredJobs.length > 0 ? (
+            filteredJobs.map((job) => {
+              const hasApplied = appliedJobIds.has(job.id);
+              return (
+                <motion.div
+                  key={job.id}
+                  variants={itemVariants}
+                  whileHover={{ y: -5 }}
+                  onClick={() => setSelectedJob(job)}
+                  className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-xl transition-all duration-300 cursor-pointer flex flex-col h-full group relative overflow-hidden"
+                >
+
+
+                  <div className="flex items-start gap-4 mb-4">
+                    {/* Company Logo - Left Aligned */}
+                    <div className="w-16 h-16 rounded-xl bg-white p-2 shadow-sm border border-slate-100 flex items-center justify-center flex-shrink-0 group-hover:border-red-100 transition-colors">
+                      {job.companies?.logo_url ? (
+                        <img
+                          src={job.companies.logo_url}
+                          alt={job.companies.company_name}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <span className="material-symbols-outlined text-slate-300 text-3xl">business</span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-lg text-slate-900 dark:text-white truncate group-hover:text-red-600 transition-colors">
+                        {job.title}
+                      </h3>
+                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400 truncate">
+                        {job.companies?.company_name}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 flex-1">
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${getTypeBadgeColor(job.job_type)}`}>
+                        {job.job_type}
+                      </span>
+                      {job.location && (
+                        <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[10px]">location_on</span>
+                          {job.location}
+                        </span>
+                      )}
+                    </div>
+
+                    {job.description && (
+                      <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                        {job.description}
+                      </p>
                     )}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900 mb-1 group-hover:text-red-600 transition-colors">
-                          {job.title}
-                        </h3>
-                        <p className="text-gray-600 font-medium">{job.companies?.company_name || 'Unknown Company'}</p>
-                      </div>
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${getTypeBadgeColor(job.job_type)}`}>
-                        {job.job_type}
-                      </span>
-                    </div>
+                  <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-400">
+                      Posted {new Date(job.posted_at).toLocaleDateString()}
+                    </span>
 
-                    <p className="text-gray-600 text-sm mb-3 line-clamp-2">{job.description}</p>
-
-                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-4">
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-base">location_on</span>
-                        {job.location}
+                    {hasApplied ? (
+                      <span className="flex items-center gap-1 text-green-600 text-xs font-bold bg-green-50 px-2 py-1 rounded-md">
+                        <span className="material-symbols-outlined text-sm">check_circle</span>
+                        Applied
                       </span>
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-base">schedule</span>
-                        {new Date(job.posted_at).toLocaleDateString()}
+                    ) : (
+                      <span className="text-red-600 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
+                        View Details
+                        <span className="material-symbols-outlined text-sm">arrow_forward</span>
                       </span>
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-base">work_history</span>
-                        {job.employment_mode}
-                      </span>
-                    </div>
-
-                    <button
-                      onClick={(e) => handleApplyClick(job, e)}
-                      disabled={hasApplied}
-                      className={`px-6 py-2 rounded-lg font-semibold transition-all shadow-sm ${hasApplied
-                        ? 'bg-green-50 text-green-700 cursor-not-allowed border border-green-100'
-                        : 'bg-gradient-to-r from-red-600 to-red-700 text-white hover:shadow-md active:scale-95'
-                        }`}
-                    >
-                      {hasApplied ? 'Applied' : 'Apply Now'}
-                    </button>
+                    )}
                   </div>
-                </div>
-              </div>
-            );
-          })
-        ) : (
-          <div className="text-center py-12 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
-            <span className="material-symbols-outlined text-5xl text-gray-300 mb-2 block">work_off</span>
-            <p className="text-gray-600 font-medium">No matching jobs found</p>
-            <button
-              onClick={() => { setJobSearch(''); setJobTypeFilter('All'); }}
-              className="mt-2 text-red-600 text-sm font-bold hover:underline"
-            >
-              Clear Filters
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+                </motion.div>
+              );
+            })
+          ) : (
+            <div className="text-center py-12 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
+              <span className="material-symbols-outlined text-5xl text-gray-300 mb-2 block">work_off</span>
+              <p className="text-gray-600 font-medium">No matching jobs found</p>
+              <button
+                onClick={() => { setJobSearch(''); setJobTypeFilter('All'); }}
+                className="mt-2 text-red-600 text-sm font-bold hover:underline"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
+        </motion.div>
+      </motion.div>
+    );
+  };
 
-  const renderCompaniesTab = () => (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-gray-900">Participating Companies</h2>
-        <span className="text-sm text-gray-500">{filteredCompanies.length} Companies</span>
-      </div>
-
-      {/* Search & Filters */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="flex-1 relative">
-          <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
-          <input
-            type="text"
-            placeholder="Search companies, industry..."
-            value={companySearch}
-            onChange={(e) => setCompanySearch(e.target.value)}
-            className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-all"
-          />
+  const renderCompaniesTab = () => {
+    if (loadingCompanies) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-500 font-medium">Loading companies...</p>
         </div>
+      );
+    }
 
-        <div className="relative min-w-[200px]">
-          <select
-            value={companyTypeFilter}
-            onChange={(e) => setCompanyTypeFilter(e.target.value)}
-            className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-all appearance-none cursor-pointer"
-          >
-            {partnerTypes.map((type) => (
-              <option key={type} value={type}>
-                {type === 'All' ? 'All Partner Types' : type}
-              </option>
-            ))}
-          </select>
-          <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-            expand_more
+    return (
+      <motion.div
+        className="space-y-6"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
+      >
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-100 rounded-lg">
+              <span className="material-symbols-outlined text-red-600">business</span>
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Participating Companies</h2>
+          </div>
+          <span className="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-3 py-1 rounded-full text-sm font-bold">
+            {filteredCompanies.length} Partners
           </span>
         </div>
-      </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredCompanies.map((company) => (
-          <div
-            key={company.id}
-            onClick={() => setSelectedCompany(company)}
-            className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group"
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="w-16 h-16 rounded-lg bg-gray-50 flex items-center justify-center p-2 border border-gray-100 group-hover:border-red-100 transition-colors">
-                {company.logo_url ? (
-                  <img src={company.logo_url} alt={company.company_name} className="w-full h-full object-contain" />
-                ) : (
-                  <span className="material-symbols-outlined text-gray-300 text-3xl">business</span>
-                )}
-              </div>
-              {company.partner_type && (
-                <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700' :
-                  company.partner_type === 'gold' ? 'bg-yellow-50 text-yellow-700' :
-                    company.partner_type === 'silver' ? 'bg-gray-50 text-gray-600' :
-                      'bg-blue-50 text-blue-700'
-                  }`}>
-                  {company.partner_type}
-                </span>
-              )}
-            </div>
-
-            <h3 className="text-xl font-bold text-gray-900 mb-1 group-hover:text-red-600 transition-colors">
-              {company.company_name}
-            </h3>
-            <p className="text-sm text-gray-500 font-medium mb-3">{company.industry || 'Multi-industry'}</p>
-
-            <p className="text-gray-600 text-sm line-clamp-2 mb-4 h-10">
-              {company.description || 'No description available'}
-            </p>
-
-            <div className="flex items-center gap-4 text-xs font-semibold text-gray-500">
-              {company.booth_number && (
-                <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded">
-                  <span className="material-symbols-outlined text-sm">storefront</span>
-                  Booth {company.booth_number}
-                </span>
-              )}
-              <span className="flex items-center gap-1 text-red-600 ml-auto group-hover:translate-x-1 transition-transform">
-                View Details
-                <span className="material-symbols-outlined text-sm">arrow_forward</span>
-              </span>
-            </div>
+        {/* Search & Filters */}
+        <motion.div
+          variants={itemVariants}
+          className="flex flex-col md:flex-row gap-4 mb-8"
+        >
+          <div className="flex-1 relative">
+            <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
+            <input
+              type="text"
+              placeholder="Search companies, industry..."
+              value={companySearch}
+              onChange={(e) => setCompanySearch(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-all shadow-sm"
+            />
           </div>
-        ))}
 
-        {filteredCompanies.length === 0 && (
-          <div className="col-span-full text-center py-12 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
-            <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <span className="material-symbols-outlined text-gray-400 text-3xl">search_off</span>
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900">No companies found</h3>
-            <p className="text-gray-500">Try adjusting your search or filters</p>
-            <button
-              onClick={() => { setCompanySearch(''); setCompanyTypeFilter('All'); }}
-              className="mt-4 text-red-600 font-semibold hover:underline"
+          <div className="relative min-w-[200px]">
+            <select
+              value={companyTypeFilter}
+              onChange={(e) => setCompanyTypeFilter(e.target.value)}
+              className="w-full pl-4 pr-10 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-transparent transition-all appearance-none cursor-pointer shadow-sm"
             >
-              Clear filters
-            </button>
+              {partnerTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type === 'All' ? 'All Partner Types' : type}
+                </option>
+              ))}
+            </select>
+            <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+              expand_more
+            </span>
           </div>
-        )}
-      </div>
-    </div>
-  );
+        </motion.div>
+
+        {/* Grid */}
+        <motion.div
+          variants={itemVariants}
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+        >
+          {filteredCompanies.length > 0 ? (
+            filteredCompanies.map((company) => (
+              <motion.div
+                key={company.id}
+                variants={itemVariants}
+                whileHover={{ y: -5 }}
+                onClick={() => setSelectedCompany(company)}
+                className="group bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm hover:shadow-xl border border-gray-100 dark:border-slate-700/50 cursor-pointer transition-all duration-300 relative overflow-hidden"
+              >
+                {/* Partner Badge */}
+                <div className="absolute top-4 right-4 z-10">
+                  <span className={`inline-block px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700' :
+                    company.partner_type === 'gold' ? 'bg-amber-50 text-amber-700' :
+                      'bg-gray-50 text-gray-500'
+                    }`}>
+                    {company.partner_type}
+                  </span>
+                </div>
+
+                {/* Logo Area */}
+                <div className="h-32 mb-6 flex items-center justify-center p-4 bg-gray-50 dark:bg-slate-900/50 rounded-2xl group-hover:bg-gray-100 dark:group-hover:bg-slate-900 transition-colors">
+                  {company.logo_url ? (
+                    <img
+                      src={company.logo_url}
+                      alt={company.company_name}
+                      className="max-w-full max-h-full object-contain filter grayscale group-hover:grayscale-0 transition-all duration-300 transform group-hover:scale-110"
+                    />
+                  ) : (
+                    <span className="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600">business</span>
+                  )}
+                </div>
+
+                {/* Content */}
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 group-hover:text-red-600 transition-colors truncate">
+                    {company.company_name}
+                  </h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-3 truncate">
+                    {company.industry}
+                  </p>
+
+                  <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-slate-700 pt-3">
+                    <span className="flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">storefront</span>
+                      Booth {company.booth_number || 'TBA'}
+                    </span>
+                    <span className="group-hover:translate-x-1 transition-transform text-red-500 font-bold flex items-center">
+                      View Details
+                      <span className="material-symbols-outlined text-sm">chevron_right</span>
+                    </span>
+                  </div>
+                </div>
+              </motion.div>
+            ))
+          ) : (
+            <div className="col-span-full text-center py-12 bg-gray-50 dark:bg-slate-800/50 rounded-3xl border-2 border-dashed border-gray-200 dark:border-slate-700">
+              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-600 mb-2 block">business_center</span>
+              <p className="text-gray-500 dark:text-gray-400 font-medium">No matching companies found</p>
+              <button
+                onClick={() => { setCompanySearch(''); setCompanyTypeFilter('All'); }}
+                className="mt-2 text-red-600 font-bold hover:underline text-sm"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
+        </motion.div>
+      </motion.div>
+    );
+  };
+
+
 
   // Render current tab content
   const renderContent = () => {
@@ -1253,105 +1553,158 @@ const AttendeeDashboard = () => {
       activeItem={activeTab}
       onItemChange={setActiveTab}
       onProfileClick={() => setShowProfile(true)}
-      notifications={notifications}  // Make sure this line exists
+      notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}
       hideDock={showProfile || !!selectedNotification || !!selectedEvent}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {renderContent()}
+        <AnimatePresence mode="wait">
+          <motion.div key={activeTab} className="h-full">
+            {renderContent()}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
-      {/* Profile Card */}
-      {showProfile && attendeeProfile && (
-        <AttendeeProfileCard
-          profile={attendeeProfile}
-          onClose={() => setShowProfile(false)}
-        />
-      )}
+      <AnimatePresence>
+        {showProfile && (
+          <AttendeeProfileCard
+            key="profile-card"
+            profile={attendeeProfile}
+            loading={false}
+            hasActiveApplications={appliedJobIds.size > 0}
+            onClose={() => setShowProfile(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Notification Modal */}
-      {selectedNotification && (
-        <NotificationModal
-          notification={selectedNotification}
-          onClose={() => setSelectedNotification(null)}
-        />
-      )}
+      <AnimatePresence>
+        {selectedNotification && (
+          <NotificationModal
+            key="notification-modal"
+            notification={selectedNotification}
+            onClose={() => setSelectedNotification(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Schedule Event Modal */}
-      {selectedEvent && (
-        <ScheduleEventModal
-          event={selectedEvent}
-          onClose={() => setSelectedEvent(null)}
-        />
-      )}
+      <AnimatePresence>
+        {selectedEvent && (
+          <ScheduleEventModal
+            key="schedule-modal"
+            event={selectedEvent}
+            onClose={() => setSelectedEvent(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Session Detail Modal */}
-      {selectedSession && (
-        <SessionDetailModal
-          session={selectedSession}
-          isBooked={bookedSessions.some((s: any) => s.id === selectedSession.id)}
-          onClose={() => setSelectedSession(null)}
-          onBook={() => {
-            setSessionToBook(selectedSession);
-            setShowBookingConfirm(true);
-            setSelectedSession(null);
-          }}
-          onCancel={async () => {
-            const booking = bookedSessions.find((s: any) => s.id === selectedSession.id);
-            if (booking?.booking_id) {
-              await handleCancelBooking(booking.booking_id);
-            }
-            setSelectedSession(null);
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {selectedSession && (
+          <SessionDetailModal
+            key="session-modal"
+            session={selectedSession}
+            isBooked={bookedSessions.some((s: any) => s.id === selectedSession.id)}
+            onClose={() => setSelectedSession(null)}
+            onBook={() => {
+              setSessionToBook(selectedSession);
+              setShowBookingConfirm(true);
+              setSelectedSession(null);
+            }}
+            onCancel={async () => {
+              const booking = bookedSessions.find((s: any) => s.id === selectedSession.id);
+              if (booking?.booking_id) {
+                setBookingToCancel({ id: booking.booking_id, title: selectedSession.title });
+              }
+              setSelectedSession(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Booking Confirmation Modal */}
-      {showBookingConfirm && sessionToBook && (
-        <BookingConfirmationModal
-          session={sessionToBook}
-          onConfirm={async () => {
-            await handleBookSession();
-            setShowBookingConfirm(false);
-            setSessionToBook(null);
-          }}
-          onCancel={() => {
-            setShowBookingConfirm(false);
-            setSessionToBook(null);
-          }}
-        />
-      )}
+      {/* Booking Confirmation Modal */}
+      <AnimatePresence>
+        {showBookingConfirm && sessionToBook && (
+          <BookingConfirmationModal
+            key="booking-modal"
+            session={sessionToBook}
+            onConfirm={async () => {
+              await handleBookSession();
+              setShowBookingConfirm(false);
+              setSessionToBook(null);
+            }}
+            onCancel={() => {
+              setShowBookingConfirm(false);
+              setSessionToBook(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
 
 
 
       {/* Company Detail Modal */}
-      {selectedCompany && (
-        <CompanyDetailModal
-          company={selectedCompany}
-          onClose={() => setSelectedCompany(null)}
-        />
-      )}
+      {/* Company Detail Modal */}
+      {/* Company Detail Modal */}
+      <AnimatePresence>
+        {selectedCompany && (
+          <CompanyDetailModal
+            key="company-modal"
+            company={selectedCompany}
+            isOpen={!!selectedCompany}
+            onClose={() => setSelectedCompany(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Job Detail Modal */}
-      {selectedJob && (
-        <JobDetailModal
-          job={selectedJob}
-          onClose={() => setSelectedJob(null)}
-          onApply={() => handleApplyClick(selectedJob)}
-          hasApplied={appliedJobIds.has(selectedJob.id)}
-        />
-      )}
-
+      <AnimatePresence>
+        {selectedJob && (
+          <JobDetailModal
+            key="job-modal"
+            job={selectedJob}
+            onClose={() => setSelectedJob(null)}
+            onApply={() => handleApplyClick(selectedJob)}
+            hasApplied={appliedJobIds.has(selectedJob.id)}
+            onWithdraw={() => setJobToWithdraw(selectedJob)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Apply Job Modal */}
-      {jobToApply && (
-        <ApplyJobModal
-          jobTitle={jobToApply.title}
-          onClose={() => setJobToApply(null)}
-          onConfirm={handleConfirmApply}
-          loading={isApplying}
-        />
-      )}
+      <AnimatePresence>
+        {jobToApply && (
+          <ApplyJobModal
+            key="apply-modal"
+            jobTitle={jobToApply.title}
+            onClose={() => setJobToApply(null)}
+            onConfirm={handleConfirmApply}
+            loading={isApplying}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Withdraw Job Modal */}
+      <AnimatePresence>
+        {jobToWithdraw && (
+          <WithdrawJobModal
+            jobTitle={jobToWithdraw?.title || ''}
+            onClose={() => setJobToWithdraw(null)}
+            onConfirm={handleConfirmWithdraw}
+            loading={isApplying}
+          />
+        )}
+
+        {bookingToCancel && (
+          <CancelBookingModal
+            sessionTitle={bookingToCancel.title}
+            onClose={() => setBookingToCancel(null)}
+            onConfirm={() => handleCancelBooking(bookingToCancel.id)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Toast Notification */}
       {toast && (

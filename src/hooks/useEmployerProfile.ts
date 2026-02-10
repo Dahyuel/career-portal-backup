@@ -58,7 +58,7 @@ export const useEmployerProfile = (userId: string | undefined) => {
                 // Construct combined profile
                 const profile: EmployerProfile = {
                     ...userProfile,
-                    employer_id: employerData?.id,
+                    employer_id: employerData?.user_id,
                     company_id: employerData?.company_id,
                     job_title: employerData?.job_title,
                     company_name: employerData?.companies?.company_name,

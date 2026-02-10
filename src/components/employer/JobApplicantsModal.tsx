@@ -8,8 +8,7 @@ interface Applicant {
     applied_at: string;
     cv_url: string;
     attendee: {
-        id: string; // attendee id
-        user_id: string;
+        user_id: string; // attendee id is user_id
         user_profile: {
             full_name: string;
             personal_id: string;
@@ -52,7 +51,6 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                         applied_at,
                         cv_url,
                         attendee:attendees (
-                            id,
                             user_id,
                             university,
                             faculty,

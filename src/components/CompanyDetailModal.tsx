@@ -1,152 +1,230 @@
 import React from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Company {
     id: string;
     company_name: string;
-    industry: string | null;
-    email: string | null;
-    website: string | null;
-    description: string | null;
-    booth_number: string | null;
-    logo_url: string | null;
-    partner_type: 'platinum' | 'gold' | 'silver' | 'bronze' | 'startup' | null;
+    industry: string;
+    description: string;
+    website: string;
+    logo_url: string;
+    booth_number: string;
+    partner_type: string;
+    email: string;
 }
 
 interface CompanyDetailModalProps {
-    company: Company;
+    company: Company | null;
+    isOpen: boolean;
     onClose: () => void;
 }
 
-const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, onClose }) => {
-    const getPartnerTypeColor = (type: string | null) => {
-        switch (type) {
-            case 'platinum':
-                return 'bg-slate-100 text-slate-800 border-slate-200'; // Platinum/Silver generic
-            case 'gold':
-                return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-            case 'silver':
-                return 'bg-gray-100 text-gray-800 border-gray-200';
-            case 'bronze':
-                return 'bg-orange-100 text-orange-800 border-orange-200';
-            case 'startup':
-                return 'bg-blue-100 text-blue-800 border-blue-200';
-            default:
-                return 'bg-gray-100 text-gray-800 border-gray-200';
-        }
-    };
+const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen, onClose }) => {
+    if (!isOpen || !company) return null;
 
     return (
-        <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]"
-            onClick={onClose}
-        >
-            <div
-                className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-2xl w-full shadow-2xl max-h-[90vh] overflow-y-auto"
-                onClick={(e) => e.stopPropagation()}
-            >
-                {/* Close Button */}
-                <button
-                    onClick={onClose}
-                    className="float-right text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                >
-                    <span className="material-symbols-outlined">close</span>
-                </button>
+        <AnimatePresence>
+            {isOpen && (
+                <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000]">
+                    {/* Backdrop */}
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={onClose}
+                        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                    />
 
-                {/* Header Section */}
-                <div className="flex flex-col md:flex-row items-center gap-6 mb-8">
-                    <div className="w-24 h-24 rounded-xl bg-gray-50 dark:bg-slate-800 flex items-center justify-center p-2 shadow-sm border border-gray-100">
-                        {company.logo_url ? (
-                            <img
-                                src={company.logo_url}
-                                alt={company.company_name}
-                                className="w-full h-full object-contain"
-                            />
-                        ) : (
-                            <span className="material-symbols-outlined text-gray-300 text-5xl">inventory_2</span>
-                        )}
-                    </div>
-                    <div className="text-center md:text-left">
-                        <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 mb-2">
-                            <h2 className="text-3xl font-bold text-gray-900 dark:text-white">
-                                {company.company_name}
-                            </h2>
-                            {company.partner_type && (
-                                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase border ${getPartnerTypeColor(company.partner_type)}`}>
-                                    {company.partner_type} Partner
-                                </span>
-                            )}
-                        </div>
-                        {company.industry && (
-                            <p className="text-lg text-gray-600 dark:text-gray-400 font-medium">
-                                {company.industry}
-                            </p>
-                        )}
-                    </div>
-                </div>
-
-                {/* Details Section */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                    {company.website && (
-                        <a
-                            href={company.website.startsWith('http') ? company.website : `https://${company.website}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl hover:bg-gray-100 transition-colors"
+                    {/* Modal Container */}
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                        transition={{ type: "spring", duration: 0.5 }}
+                        className="relative bg-white dark:bg-slate-900 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl shadow-2xl z-10"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Close Button */}
+                        <motion.button
+                            initial={{ opacity: 0, scale: 0 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: 0.2 }}
+                            whileHover={{ scale: 1.1, rotate: 90 }}
+                            whileTap={{ scale: 0.9 }}
+                            onClick={onClose}
+                            className="absolute top-4 right-4 bg-white/90 hover:bg-white dark:bg-slate-800/90 dark:hover:bg-slate-800 text-gray-500 dark:text-gray-400 hover:text-red-500 p-2.5 rounded-full transition-all shadow-sm z-20 backdrop-blur-sm border border-gray-100 dark:border-slate-700"
                         >
-                            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-                                <span className="material-symbols-outlined">language</span>
-                            </div>
-                            <div className="overflow-hidden">
-                                <p className="text-sm text-gray-500 font-medium">Website</p>
-                                <p className="text-gray-900 font-semibold truncate">Visit Website</p>
-                            </div>
-                            <span className="material-symbols-outlined text-gray-400 ml-auto">open_in_new</span>
-                        </a>
-                    )}
+                            <span className="material-symbols-outlined text-xl">close</span>
+                        </motion.button>
 
-                    {company.email && (
-                        <a
-                            href={`mailto:${company.email}`}
-                            className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl hover:bg-gray-100 transition-colors"
-                        >
-                            <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
-                                <span className="material-symbols-outlined">mail</span>
-                            </div>
-                            <div className="overflow-hidden">
-                                <p className="text-sm text-gray-500 font-medium">Email</p>
-                                <p className="text-gray-900 font-semibold truncate">{company.email}</p>
-                            </div>
-                        </a>
-                    )}
+                        {/* Hero Header with Logo */}
+                        <div className="relative h-64 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-900 flex flex-col items-center justify-center overflow-hidden border-b border-gray-100 dark:border-slate-800">
+                            {/* Background Pattern */}
+                            <div className="absolute inset-0 opacity-[0.03]" style={{
+                                backgroundImage: 'radial-gradient(circle at 2px 2px, black 1px, transparent 0)',
+                                backgroundSize: '24px 24px'
+                            }}></div>
 
-                    {company.booth_number && (
-                        <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-slate-800 rounded-xl">
-                            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600">
-                                <span className="material-symbols-outlined">storefront</span>
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-500 font-medium">Booth Location</p>
-                                <p className="text-gray-900 font-semibold">{company.booth_number}</p>
+                            <div className="relative z-10 p-6 text-center w-full max-w-lg">
+                                <motion.div
+                                    initial={{ scale: 0.5, opacity: 0, rotate: -180 }}
+                                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                                    transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
+                                    className="w-32 h-32 mx-auto bg-white dark:bg-slate-800 rounded-3xl shadow-xl flex items-center justify-center p-4 mb-6 ring-4 ring-white/50 dark:ring-slate-700/50"
+                                >
+                                    {company.logo_url ? (
+                                        <img
+                                            src={company.logo_url}
+                                            alt={company.company_name}
+                                            className="w-full h-full object-contain"
+                                        />
+                                    ) : (
+                                        <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-gray-600">business</span>
+                                    )}
+                                </motion.div>
+
+                                <motion.div
+                                    initial={{ y: 20, opacity: 0 }}
+                                    animate={{ y: 0, opacity: 1 }}
+                                    transition={{ delay: 0.2 }}
+                                >
+                                    <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">{company.company_name}</h2>
+                                    <motion.div
+                                        initial={{ scale: 0 }}
+                                        animate={{ scale: 1 }}
+                                        transition={{ delay: 0.3, type: "spring" }}
+                                        className="flex items-center justify-center gap-2"
+                                    >
+                                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700' :
+                                            company.partner_type === 'gold' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' :
+                                                'bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
+                                            }`}>
+                                            {company.partner_type} Partner
+                                        </span>
+                                    </motion.div>
+                                </motion.div>
                             </div>
                         </div>
-                    )}
+
+                        {/* Content */}
+                        <div className="p-8 space-y-8">
+                            {/* Info Grid */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.4 }}
+                                className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                            >
+                                <motion.div
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.5 }}
+                                    whileHover={{ y: -4 }}
+                                    className="bg-gray-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-start gap-4 transition-all"
+                                >
+                                    <motion.div
+                                        animate={{ rotate: [0, -10, 10, -10, 0] }}
+                                        transition={{ delay: 0.6, duration: 0.5 }}
+                                        className="bg-white dark:bg-slate-700 p-2.5 rounded-xl shadow-sm text-red-500 shrink-0"
+                                    >
+                                        <span className="material-symbols-outlined text-2xl">storefront</span>
+                                    </motion.div>
+                                    <div>
+                                        <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Booth Number</p>
+                                        <p className="text-lg font-bold text-gray-900 dark:text-white">{company.booth_number || 'TBA'}</p>
+                                    </div>
+                                </motion.div>
+
+                                <motion.div
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: 0.6 }}
+                                    whileHover={{ y: -4 }}
+                                    className="bg-gray-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-start gap-4 transition-all"
+                                >
+                                    <div className="bg-white dark:bg-slate-700 p-2.5 rounded-xl shadow-sm text-red-500 shrink-0">
+                                        <span className="material-symbols-outlined text-2xl">category</span>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Industry</p>
+                                        <p className="text-lg font-bold text-gray-900 dark:text-white">{company.industry || 'General'}</p>
+                                    </div>
+                                </motion.div>
+                            </motion.div>
+
+                            {/* Description */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.7 }}
+                            >
+                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                                    <motion.span
+                                        animate={{ rotate: [0, -10, 10, -10, 0] }}
+                                        transition={{ delay: 0.8, duration: 0.5 }}
+                                        className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-1.5 rounded-lg"
+                                    >
+                                        <span className="material-symbols-outlined text-sm">info</span>
+                                    </motion.span>
+                                    About {company.company_name}
+                                </h3>
+                                <div className="prose prose-sm md:prose-base dark:prose-invert max-w-none text-gray-600 dark:text-gray-300 leading-relaxed bg-gray-50/50 dark:bg-slate-800/30 p-6 rounded-2xl border border-gray-100 dark:border-slate-800/50">
+                                    {company.description ? (
+                                        <p>{company.description}</p>
+                                    ) : (
+                                        <p className="text-gray-400 italic">No description provided.</p>
+                                    )}
+                                </div>
+                            </motion.div>
+
+                            {/* Contact/Action Details */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.9 }}
+                                className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-100 dark:border-slate-800"
+                            >
+                                {company.website && (
+                                    <motion.a
+                                        whileHover={{ scale: 1.02, y: -2 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        href={company.website}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="flex-1 bg-white hover:bg-gray-50 dark:bg-slate-800 dark:hover:bg-slate-700 border-2 border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 px-6 py-4 rounded-xl font-bold transition-all flex items-center justify-center gap-2 group"
+                                    >
+                                        <motion.span
+                                            className="material-symbols-outlined"
+                                            whileHover={{ scale: 1.1 }}
+                                        >
+                                            language
+                                        </motion.span>
+                                        Visit Website
+                                    </motion.a>
+                                )}
+
+                                {company.email && (
+                                    <motion.a
+                                        whileHover={{ scale: 1.02, y: -2 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        href={`mailto:${company.email}`}
+                                        className="flex-1 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white px-6 py-4 rounded-xl font-bold transition-all shadow-lg shadow-red-500/20 hover:shadow-red-500/30 flex items-center justify-center gap-2 group"
+                                    >
+                                        <motion.span
+                                            className="material-symbols-outlined"
+                                            whileHover={{ rotate: -12 }}
+                                        >
+                                            mail
+                                        </motion.span>
+                                        Contact Company
+                                    </motion.a>
+                                )}
+                            </motion.div>
+                        </div>
+                    </motion.div>
                 </div>
-
-                {/* About Section */}
-                {company.description && (
-                    <div className="mb-6">
-                        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                            <span className="material-symbols-outlined text-red-500">info</span>
-                            About Company
-                        </h3>
-                        <p className="text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
-                            {company.description}
-                        </p>
-                    </div>
-                )}
-
-            </div>
-        </div>
+            )}
+        </AnimatePresence>
     );
 };
 
