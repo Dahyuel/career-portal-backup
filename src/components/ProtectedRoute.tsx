@@ -2,6 +2,7 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import DashboardLoading from './DashboardLoading';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -86,12 +87,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // Show loading only during initial session load (with a max timeout to prevent infinite loading)
   if (loading && !sessionLoaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mx-auto mb-2"></div>
-          <p className="text-gray-600 dark:text-gray-300 text-sm">Loading session...</p>
-        </div>
-      </div>
+      <DashboardLoading message="Loading Your Dashboard" />
     );
   }
 
@@ -107,14 +103,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // BUT: Only show this if localStorage doesn't have the info
   if (isAuthenticated && (!profile || (requiredRole && !profile.role)) && !localUserData?.role) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 to-white dark:from-gray-900 dark:to-gray-800 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mx-auto mb-2"></div>
-          <p className="text-gray-600 dark:text-gray-300 text-sm">
-            {!profile ? 'Loading profile...' : 'Verifying permissions...'}
-          </p>
-        </div>
-      </div>
+      <DashboardLoading
+        message="Loading Your Dashboard"
+        subMessage="Preparing your experience..."
+      />
     );
   }
 

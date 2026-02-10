@@ -93,7 +93,7 @@ const AttendeeDashboard = () => {
   const [isApplying, setIsApplying] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
-  // Full dashboard loading state
+  // Full dashboard loading state - Blocks render until profile and critical data (schedule) are ready
   const [dashboardReady, setDashboardReady] = useState(false);
 
   // Fetch attendee profile once for the entire dashboard
@@ -109,54 +109,61 @@ const AttendeeDashboard = () => {
     window.scrollTo(0, 0);
   }, [activeTab]);
 
-  // Initial dashboard load - wait for profile
+  // Initial dashboard load - wait for profile AND schedule (upcoming events)
   useEffect(() => {
-    if (!profileLoading && attendeeProfile) {
+    // If we have profile and schedule events loaded, we are ready
+    // scheduleEvents is fetched in a separate effect below, which sets scheduleEvents state
+    if (!profileLoading && attendeeProfile && scheduleEvents.length > 0) {
       setDashboardReady(true);
     }
-  }, [profileLoading, attendeeProfile]);
+    // Fallback: If profile loaded but no schedule events found (empty array), strictly we might wait forever if we don't handle it.
+    // However, our initial effect marks 'schedule' as loaded once the fetch finishes.
+    else if (!profileLoading && attendeeProfile && loadedTabs.has('schedule')) {
+      setDashboardReady(true);
+    }
+  }, [profileLoading, attendeeProfile, scheduleEvents, loadedTabs]);
 
-  // Fetch notifications filtered by user role - optimized with single query
+  // COMPREHENSIVE INITIAL DATA LOAD: Parallelize all critical home-tab dependencies
   useEffect(() => {
-    if (!profile?.role || !dashboardReady) return;
+    if (!user?.id || !profile?.role) return;
 
-    const fetchNotifications = async () => {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id, title, content, publish_at, target_roles')
-        .eq('event_id', EVENT_ID)
-        .contains('target_roles', [profile.role])
-        .order('publish_at', { ascending: false });
+    const fetchInitialDashboardData = async () => {
+      // Parallelize everything to avoid waterfall
+      setLoadingSchedule(true);
+      const [notificationsResult, activitiesResult, scheduleResult] = await Promise.all([
+        supabase
+          .from('notifications')
+          .select('id, title, content, publish_at, target_roles')
+          .eq('event_id', EVENT_ID)
+          .contains('target_roles', [profile.role])
+          .order('publish_at', { ascending: false }),
+        supabase
+          .from('user_activities')
+          .select('id, activity_type, description, activity_timestamp, points_earned')
+          .eq('user_id', user.id)
+          .order('activity_timestamp', { ascending: false })
+          .limit(10),
+        // Only fetch schedule if not already loaded
+        !loadedTabs.has('schedule')
+          ? supabase.from('schedule').select('id, title, start_time, end_time, location, schedule_type, description').eq('event_id', EVENT_ID).order('start_time', { ascending: true })
+          : Promise.resolve({ data: scheduleEvents, error: null })
+      ]);
 
-      if (!error && data) {
-        setNotifications(data);
-      } else if (error) {
-        console.error('Error fetching notifications:', error);
+      if (notificationsResult.data) setNotifications(notificationsResult.data);
+      if (activitiesResult.data) setUserActivities(activitiesResult.data);
+
+      if (!loadedTabs.has('schedule') && scheduleResult.data) {
+        setScheduleEvents(scheduleResult.data);
+        const dates = Array.from(new Set(scheduleResult.data.map((event: any) => new Date(event.start_time).toISOString().split('T')[0])));
+        setUniqueDates(dates);
+        if (dates.length > 0 && !selectedDay) setSelectedDay(dates[0] as any);
+        setLoadedTabs(prev => new Set(prev).add('schedule'));
       }
+      setLoadingSchedule(false);
     };
 
-    fetchNotifications();
-  }, [profile?.role, dashboardReady]);
-
-  // Fetch user activities - optimized
-  useEffect(() => {
-    if (!user?.id || !dashboardReady) return;
-
-    const fetchActivities = async () => {
-      const { data, error } = await supabase
-        .from('user_activities')
-        .select('id, activity_type, description, activity_timestamp, points_earned')
-        .eq('user_id', user.id)
-        .order('activity_timestamp', { ascending: false })
-        .limit(10);
-
-      if (!error && data) {
-        setUserActivities(data);
-      }
-    };
-
-    fetchActivities();
-  }, [user?.id, dashboardReady]);
+    fetchInitialDashboardData();
+  }, [user?.id, profile?.role]); // Only depend on identity; fetches once and updates state
 
   // Derive upcoming events from scheduleEvents - optimized to use shared data
   useEffect(() => {
@@ -171,40 +178,12 @@ const AttendeeDashboard = () => {
     }
   }, [scheduleEvents]);
 
-  // Fetch schedule events and extract unique dates - optimized
+  // Secondary effect to handle tab switches to schedule if not already loaded (fallback)
   useEffect(() => {
-    const fetchScheduleEvents = async () => {
-      if ((activeTab !== 'schedule' && activeTab !== 'home') || loadedTabs.has('schedule')) return;
-
-      setLoadingSchedule(true);
-      const { data, error } = await supabase
-        .from('schedule')
-        .select('id, title, start_time, end_time, location, schedule_type, description')
-        .eq('event_id', EVENT_ID)
-        .order('start_time', { ascending: true });
-
-      if (!error && data) {
-        setScheduleEvents(data);
-
-        // Extract unique dates
-        const dates = Array.from(
-          new Set(
-            data.map((event: any) =>
-              new Date(event.start_time).toISOString().split('T')[0]
-            )
-          )
-        );
-        setUniqueDates(dates);
-        if (dates.length > 0 && !selectedDay) {
-          setSelectedDay(dates[0] as any);
-        }
-        setLoadedTabs(prev => new Set(prev).add('schedule'));
-      }
-      setLoadingSchedule(false);
-    };
-
-    fetchScheduleEvents();
-  }, [activeTab, loadedTabs, selectedDay]);
+    if ((activeTab === 'schedule' || activeTab === 'home') && !loadedTabs.has('schedule')) {
+      // This will be caught by the composite effect above, but kept as a safety guard for tab logic
+    }
+  }, [activeTab, loadedTabs]);
 
   // Fetch booked sessions - optimized with minimal fields
   useEffect(() => {
@@ -696,9 +675,9 @@ const AttendeeDashboard = () => {
     });
   };
 
-  // Full Loading Screen
+  // Full Loading Screen - Waits for Profile & Upcoming Events
   if (!dashboardReady) {
-    return <DashboardLoading />;
+    return <DashboardLoading message="Loading Your Dashboard" subMessage="Preparing your experience..." />;
   }
 
   const renderHomeTab = () => (
@@ -741,18 +720,18 @@ const AttendeeDashboard = () => {
       {/* Recent Activity */}
       <motion.div
         variants={itemVariants}
-        className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"
+        className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
       >
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
           <span className="material-symbols-outlined text-red-600">history</span>
           Recent Activity
         </h3>
         <div className="space-y-4">
           {userActivities.length > 0 ? (
             userActivities.slice(0, 5).map((activity: any, idx: number) => (
-              <div key={idx} className="flex items-start gap-4 pb-4 border-b border-gray-100 last:border-0 last:pb-0">
-                <div className="bg-red-100 p-2 rounded-lg flex-shrink-0">
-                  <span className="material-symbols-outlined text-red-600">
+              <div key={idx} className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-slate-800 last:border-0 last:pb-0">
+                <div className="bg-red-100 dark:bg-red-900/30 p-2 rounded-lg flex-shrink-0">
+                  <span className="material-symbols-outlined text-red-600 dark:text-red-400">
                     {activity.activity_type === 'session_attendance' ? 'event' :
                       activity.activity_type === 'job_application' ? 'work' :
                         activity.activity_type === 'company_visit' ? 'business' :
@@ -760,8 +739,8 @@ const AttendeeDashboard = () => {
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900">{activity.activity_type?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</p>
-                  <p className="text-sm text-gray-600">{activity.description || 'No description'}</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{activity.activity_type?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description || 'No description'}</p>
                   <div className="flex items-center gap-3 mt-1">
                     <p className="text-xs text-gray-400">
                       {new Date(activity.activity_timestamp).toLocaleString()}
@@ -776,8 +755,8 @@ const AttendeeDashboard = () => {
               </div>
             ))
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              <span className="material-symbols-outlined text-5xl text-gray-300 mb-2 block">history</span>
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">history</span>
               <p className="text-sm">No recent activities</p>
             </div>
           )}
@@ -787,10 +766,10 @@ const AttendeeDashboard = () => {
       {/* Upcoming Events */}
       <motion.div
         variants={itemVariants}
-        className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"
+        className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
       >
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <span className="material-symbols-outlined text-red-600">event</span>
+        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+          <span className="material-symbols-outlined text-red-600 dark:text-red-400">event</span>
           Upcoming Events
         </h3>
         <div className="space-y-3">
@@ -803,8 +782,8 @@ const AttendeeDashboard = () => {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900">{event.title}</h4>
-                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600">
+                    <h4 className="font-semibold text-gray-900 dark:text-white">{event.title}</h4>
+                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
                       <span className="flex items-center gap-1">
                         <span className="material-symbols-outlined text-base">schedule</span>
                         {new Date(event.start_time).toLocaleString('en-US', {
@@ -829,8 +808,8 @@ const AttendeeDashboard = () => {
               </button>
             ))
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              <span className="material-symbols-outlined text-5xl text-gray-300 mb-2 block">event_busy</span>
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">event_busy</span>
               <p className="text-sm">No upcoming events</p>
             </div>
           )}
@@ -843,8 +822,15 @@ const AttendeeDashboard = () => {
     if (loadingSchedule) {
       return (
         <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-500 font-medium">Loading schedule...</p>
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 font-medium">Loading schedule...</p>
         </div>
       );
     }
@@ -866,10 +852,10 @@ const AttendeeDashboard = () => {
         exit="exit"
       >
         <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 bg-red-100 rounded-lg">
-            <span className="material-symbols-outlined text-red-600">calendar_month</span>
+          <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">calendar_month</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Event Schedule</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Schedule</h2>
         </div>
 
         {/* Date Cards */}
@@ -888,17 +874,17 @@ const AttendeeDashboard = () => {
                   key={date}
                   onClick={() => setSelectedDay(date as any)}
                   className={`flex-shrink-0 w-40 md:w-auto p-4 rounded-xl border-2 transition-all ${isSelected
-                    ? 'border-red-600 bg-red-50'
-                    : 'border-gray-200 bg-white hover:border-red-300'
+                    ? 'border-red-600 bg-red-50 dark:bg-red-900/20'
+                    : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-red-300 dark:hover:border-red-700'
                     }`}
                 >
-                  <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-red-600' : 'text-gray-600'}`}>
+                  <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
                     Day {idx + 1}
                   </div>
-                  <div className={`text-lg font-bold mb-1 ${isSelected ? 'text-red-700' : 'text-gray-900'}`}>
+                  <div className={`text-lg font-bold mb-1 ${isSelected ? 'text-red-700 dark:text-red-300' : 'text-gray-900 dark:text-white'}`}>
                     {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </div>
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-gray-500 dark:text-gray-500">
                     {dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''}
                   </div>
                 </button>
@@ -917,12 +903,12 @@ const AttendeeDashboard = () => {
               <button
                 key={event.id}
                 onClick={() => setSelectedEvent(event)}
-                className="w-full border border-gray-200 rounded-xl p-4 hover:border-red-300 hover:bg-red-50/30 transition-all text-left"
+                className="w-full border border-gray-200 dark:border-slate-800 rounded-xl p-4 hover:border-red-300 dark:hover:border-red-500/50 hover:bg-red-50/30 dark:hover:bg-red-900/10 transition-all text-left"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900">{event.title}</h4>
-                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600">
+                    <h4 className="font-semibold text-gray-900 dark:text-white">{event.title}</h4>
+                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
                       <span className="flex items-center gap-1">
                         <span className="material-symbols-outlined text-base">schedule</span>
                         {new Date(event.start_time).toLocaleTimeString('en-US', {
@@ -948,8 +934,8 @@ const AttendeeDashboard = () => {
               </button>
             ))
           ) : (
-            <div className="text-center py-12 text-gray-500">
-              <span className="material-symbols-outlined text-6xl text-gray-300 mb-3 block">event_busy</span>
+            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+              <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-gray-700 mb-3 block">event_busy</span>
               <p className="text-lg font-semibold">No events scheduled</p>
               <p className="text-sm">Select a different date to view events</p>
             </div>
@@ -965,8 +951,15 @@ const AttendeeDashboard = () => {
     if (loadingSessions) {
       return (
         <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-500 font-medium">Loading sessions...</p>
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 font-medium">Loading sessions...</p>
         </div>
       );
     }
@@ -980,10 +973,10 @@ const AttendeeDashboard = () => {
         exit="exit"
       >
         <div className="flex items-center gap-3 mb-2">
-          <div className="p-2 bg-red-100 rounded-lg">
-            <span className="material-symbols-outlined text-red-600">event</span>
+          <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">event</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Sessions</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sessions</h2>
         </div>
 
         {/* My Booked Sessions */}
@@ -991,8 +984,8 @@ const AttendeeDashboard = () => {
           variants={itemVariants}
           className="space-y-4"
         >
-          <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="material-symbols-outlined text-red-600">event_available</span>
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">event_available</span>
             My Current Bookings
           </h3>
 
@@ -1076,7 +1069,7 @@ const AttendeeDashboard = () => {
                             e.stopPropagation();
                             setBookingToCancel({ id: session.booking_id, title: session.title });
                           }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-red-600 hover:bg-red-50 transition-colors border border-red-200 hover:border-red-300"
+                          className="px-3 py-1.5 rounded-lg text-xs font-bold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors border border-red-200 dark:border-red-900/50 hover:border-red-300 dark:hover:border-red-700"
                         >
                           Cancel
                         </button>
@@ -1087,10 +1080,10 @@ const AttendeeDashboard = () => {
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 bg-gray-50 rounded-xl">
-              <span className="material-symbols-outlined text-5xl text-gray-300 mb-2 block">event_busy</span>
-              <p className="text-gray-600">No booked sessions yet</p>
-              <p className="text-sm text-gray-500 mt-1">Browse available sessions below</p>
+            <div className="text-center py-8 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800">
+              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">event_busy</span>
+              <p className="text-gray-600 dark:text-gray-400">No booked sessions yet</p>
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Browse available sessions below</p>
             </div>
           )}
         </motion.div>
@@ -1100,8 +1093,8 @@ const AttendeeDashboard = () => {
           variants={itemVariants}
           className="space-y-4"
         >
-          <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <span className="material-symbols-outlined text-red-600">explore</span>
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">explore</span>
             All Available Sessions
           </h3>
 
@@ -1114,13 +1107,13 @@ const AttendeeDashboard = () => {
                 placeholder="Search sessions..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600"
+                className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
               />
             </div>
             <select
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
-              className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600"
+              className="px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
             >
               <option value="">All Days</option>
               {/* Generate dates dynamically from available sessions */}
@@ -1228,10 +1221,10 @@ const AttendeeDashboard = () => {
 
             </div>
           ) : (
-            <div className="text-center py-12 bg-gray-50 rounded-xl">
-              <span className="material-symbols-outlined text-6xl text-gray-300 mb-3 block">search_off</span>
-              <p className="text-lg font-semibold text-gray-600">No sessions found</p>
-              <p className="text-sm text-gray-500 mt-1">Try adjusting your search or filters</p>
+            <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800">
+              <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-gray-700 mb-3 block">search_off</span>
+              <p className="text-lg font-semibold text-gray-600 dark:text-gray-400">No sessions found</p>
+              <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Try adjusting your search or filters</p>
             </div>
           )
           }
@@ -1244,8 +1237,15 @@ const AttendeeDashboard = () => {
     if (loadingJobs) {
       return (
         <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-500 font-medium">Loading jobs...</p>
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 font-medium">Loading jobs...</p>
         </div>
       );
     }
@@ -1260,12 +1260,12 @@ const AttendeeDashboard = () => {
       >
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-100 rounded-lg">
-              <span className="material-symbols-outlined text-red-600">work</span>
+            <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+              <span className="material-symbols-outlined text-red-600 dark:text-red-400">work</span>
             </div>
-            <h2 className="text-2xl font-bold text-gray-900">Job Opportunities</h2>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Job Opportunities</h2>
           </div>
-          <span className="text-sm text-gray-500">{filteredJobs.length} Jobs Found</span>
+          <span className="text-sm text-gray-500 dark:text-gray-400">{filteredJobs.length} Jobs Found</span>
         </div>
 
         {/* Filters */}
@@ -1278,13 +1278,13 @@ const AttendeeDashboard = () => {
               placeholder="Search jobs..."
               value={jobSearch}
               onChange={(e) => setJobSearch(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+              className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
             />
           </div>
           <select
             value={jobTypeFilter}
             onChange={(e) => setJobTypeFilter(e.target.value)}
-            className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+            className="px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
           >
             <option value="All">All Types</option>
             <option value="full-time">Full Time</option>
@@ -1314,7 +1314,7 @@ const AttendeeDashboard = () => {
 
                   <div className="flex items-start gap-4 mb-4">
                     {/* Company Logo - Left Aligned */}
-                    <div className="w-16 h-16 rounded-xl bg-white p-2 shadow-sm border border-slate-100 flex items-center justify-center flex-shrink-0 group-hover:border-red-100 transition-colors">
+                    <div className="w-16 h-16 rounded-xl bg-white dark:bg-white p-2 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center flex-shrink-0 group-hover:border-red-100 dark:group-hover:border-red-500 transition-colors">
                       {job.companies?.logo_url ? (
                         <img
                           src={job.companies.logo_url}
@@ -1357,17 +1357,17 @@ const AttendeeDashboard = () => {
                   </div>
 
                   <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-400">
+                    <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
                       Posted {new Date(job.posted_at).toLocaleDateString()}
                     </span>
 
                     {hasApplied ? (
-                      <span className="flex items-center gap-1 text-green-600 text-xs font-bold bg-green-50 px-2 py-1 rounded-md">
+                      <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-xs font-bold bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-md">
                         <span className="material-symbols-outlined text-sm">check_circle</span>
                         Applied
                       </span>
                     ) : (
-                      <span className="text-red-600 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
+                      <span className="text-red-600 dark:text-red-400 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
                         View Details
                         <span className="material-symbols-outlined text-sm">arrow_forward</span>
                       </span>
@@ -1377,12 +1377,12 @@ const AttendeeDashboard = () => {
               );
             })
           ) : (
-            <div className="text-center py-12 bg-gray-50 rounded-xl border-dashed border-2 border-gray-200">
-              <span className="material-symbols-outlined text-5xl text-gray-300 mb-2 block">work_off</span>
-              <p className="text-gray-600 font-medium">No matching jobs found</p>
+            <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border-dashed border-2 border-gray-200 dark:border-slate-700">
+              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">work_off</span>
+              <p className="text-gray-600 dark:text-gray-400 font-medium">No matching jobs found</p>
               <button
                 onClick={() => { setJobSearch(''); setJobTypeFilter('All'); }}
-                className="mt-2 text-red-600 text-sm font-bold hover:underline"
+                className="mt-2 text-red-600 dark:text-red-400 text-sm font-bold hover:underline"
               >
                 Clear Filters
               </button>
@@ -1397,8 +1397,15 @@ const AttendeeDashboard = () => {
     if (loadingCompanies) {
       return (
         <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-16 h-16 border-4 border-red-100 border-t-red-600 rounded-full animate-spin mb-4"></div>
-          <p className="text-gray-500 font-medium">Loading companies...</p>
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 font-medium">Loading companies...</p>
         </div>
       );
     }
@@ -1413,14 +1420,11 @@ const AttendeeDashboard = () => {
       >
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-100 rounded-lg">
-              <span className="material-symbols-outlined text-red-600">business</span>
+            <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+              <span className="material-symbols-outlined text-red-600 dark:text-red-400">business</span>
             </div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Participating Companies</h2>
           </div>
-          <span className="bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 px-3 py-1 rounded-full text-sm font-bold">
-            {filteredCompanies.length} Partners
-          </span>
         </div>
 
         {/* Search & Filters */}
@@ -1557,7 +1561,7 @@ const AttendeeDashboard = () => {
       onNotificationClick={(notification) => setSelectedNotification(notification)}
       hideDock={showProfile || !!selectedNotification || !!selectedEvent}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-8">
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} className="h-full">
             {renderContent()}

@@ -28,6 +28,7 @@ type AuthContextType = {
   hasRole: (roles: string | string[]) => boolean;
   getRoleBasedRedirect: (role?: string) => string;
   refreshProfile: () => Promise<void>;
+  handleAuthError: (error: any) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -76,30 +77,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+
+
   // Fetch user profile from user_profiles and user_roles tables
   const fetchUserProfile = useCallback(async (userId: string, userEmail: string) => {
     try {
       // Race against a timeout to prevent hanging
       const fetchPromise = async () => {
-        // Get user profile
-        const { data: profileData, error: profileError } = await supabase
-          .from('user_profiles')
-          .select('*')
-          .eq('id', userId)
-          .single();
+        // PARALLEL: Fetch profile and role simultaneously to reduce waterfall effect
+        const [profileResult, roleResult] = await Promise.all([
+          supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', userId)
+            .single(),
+          supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', userId)
+            .order('assigned_at', { ascending: false })
+            .limit(1)
+            .single()
+        ]);
+
+        const { data: profileData, error: profileError } = profileResult;
+        const { data: roleData, error: roleError } = roleResult;
 
         if (profileError && profileError.code !== 'PGRST116') {
           console.error('Error fetching profile:', profileError);
         }
-
-        // Get user role from user_roles table
-        const { data: roleData, error: roleError } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', userId)
-          .order('assigned_at', { ascending: false })
-          .limit(1)
-          .single();
 
         if (roleError && roleError.code !== 'PGRST116') {
           console.error('Error fetching role:', roleError);
@@ -118,31 +124,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const role = roleData?.role || localRole || 'attendee';
-
-        // const role = roleData?.role || localRole || 'attendee';
-
         let teamName = undefined;
 
-        // If volunteer, fetch team info
+        // If volunteer, fetch team info using JOIN for speed
         if (role === 'volunteer') {
           try {
-            // Get volunteer record to find team_id
-            const { data: volunteerData } = await supabase
+            // Get volunteer record and joined team name in ONE query
+            const { data: volData } = await supabase
               .from('volunteers')
-              .select('team_id')
+              .select('team_id, volunteer_teams(team_name)')
               .eq('user_id', userId)
               .single();
 
-            if (volunteerData?.team_id) {
-              // Get team name from teams table
-              const { data: teamData } = await supabase
-                .from('teams')
-                .select('team_name')
-                .eq('id', volunteerData.team_id)
-                .single();
+            if (volData?.volunteer_teams) {
+              // Supabase JS often returns joined data as an object or array depending on relation
+              // Since volunteer -> team is N:1, it should be an object, but we handle array just in case
+              const team = Array.isArray(volData.volunteer_teams)
+                ? volData.volunteer_teams[0]
+                : volData.volunteer_teams;
 
-              if (teamData) {
-                teamName = teamData.team_name;
+              if (team) {
+                teamName = team.team_name;
               }
             }
           } catch (err) {
@@ -163,9 +165,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       };
 
-      // Timeout promise - reduced to 3 seconds, but we catch it now
+      // Timeout promise - Reduced to 5s as requested for fast loading/fail-fast
       const timeoutPromise = new Promise<null>((_, reject) =>
-        setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
       );
 
       try {
@@ -190,10 +192,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return null;
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error in fetchUserProfile:', error);
-      // Keep profile as null only if it's a real error, not just a timeout
-      // setProfile(null); 
+
+      // Check for session expiration
+      if (error?.code === 'PGRST303' || error?.message?.includes('JWT expired')) {
+        console.warn('JWT Expired in fetchUserProfile, cleaning up...');
+        localStorage.removeItem('currentUser');
+        setUser(null);
+        setProfile(null);
+        // We can't safely call signOut() here due to dependency cycles, so we hard redirect
+        window.location.href = '/login';
+      }
       return null;
     }
   }, []);
@@ -351,6 +361,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  const handleAuthError = useCallback(async (error: any) => {
+    // Check for specific Supabase/PostgREST error codes or messages
+    const isSessionExpired =
+      error?.code === 'PGRST303' || // JWT expired
+      error?.message?.includes('JWT expired') ||
+      error?.status === 401 ||
+      error?.status === 403; // Also handle Forbidden as it often means expired token
+
+    if (isSessionExpired) {
+      // console.warn('⚠️ Session expired, cleaning up immediately...');
+
+      // CRITICAL: Clear local state IMMEDIATELY without waiting for server
+      // This prevents the slow 403 response from blocking the redirect
+      localStorage.removeItem('currentUser');
+      setUser(null);
+      setProfile(null);
+
+      // Fire and forget logout to server (don't await)
+      signOutUser().catch(err => console.error('Background logout error:', err));
+
+      // Hard redirect to login to ensure clean state
+      window.location.href = '/login';
+    }
+  }, []);
+
   // Cleanup session without clearing form data (for registration errors)
   const cleanupSession = useCallback(async () => {
     try {
@@ -383,7 +418,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     hasRole,
     getRoleBasedRedirect,
     refreshProfile,
-  }), [user, profile, loading, sessionLoaded, isLoggingOut, hasRole, getRoleBasedRedirect, refreshProfile, signOut, cleanupSession]);
+    handleAuthError,
+  }), [user, profile, loading, sessionLoaded, isLoggingOut, hasRole, getRoleBasedRedirect, refreshProfile, signOut, cleanupSession, handleAuthError]);
 
   return (
     <AuthContext.Provider value={contextValue}>

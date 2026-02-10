@@ -5,7 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRoute
 import { ResetPasswordForm } from './components/ResetPasswordForm';
-import DashboardLoading from './components/DashboardLoading';
+// import DashboardLoading from './components/DashboardLoading'; // Removed as we use shared LoadingScreen
 
 // Auth Components
 import { LoginForm } from './components/LoginForm';
@@ -33,9 +33,8 @@ const Speakers = React.lazy(() => import('./pages/LandingPageContent/Speakers').
 const Agenda = React.lazy(() => import('./pages/LandingPageContent/Agenda').then(module => ({ default: module.Agenda })));
 
 // Loading Screen
-const LoadingScreen: React.FC<{ message?: string }> = () => (
-  <DashboardLoading />
-);
+import DashboardLoading from './components/DashboardLoading';
+
 
 // Main App Router
 const AppRouter: React.FC = () => {
@@ -44,17 +43,17 @@ const AppRouter: React.FC = () => {
       {/* Landing Page */}
       <Route path="/" element={<LandingPage />} />
       <Route path="/about" element={
-        <Suspense fallback={<LoadingScreen message="Loading page..." />}>
+        <Suspense fallback={<DashboardLoading message="Loading page..." />}>
           <AboutCareerCenter />
         </Suspense>
       } />
       <Route path="/speakers" element={
-        <Suspense fallback={<LoadingScreen message="Loading page..." />}>
+        <Suspense fallback={<DashboardLoading message="Loading page..." />}>
           <Speakers />
         </Suspense>
       } />
       <Route path="/agenda" element={
-        <Suspense fallback={<LoadingScreen message="Loading page..." />}>
+        <Suspense fallback={<DashboardLoading message="Loading page..." />}>
           <Agenda />
         </Suspense>
       } />
@@ -64,7 +63,7 @@ const AppRouter: React.FC = () => {
       <Route path="/forgot-password" element={<ForgotPasswordForm />} />
       <Route path="/reset-password" element={<ResetPasswordForm />} />
       <Route path="/employerreg" element={
-        <Suspense fallback={<LoadingScreen message="Loading registration form..." />}>
+        <Suspense fallback={<DashboardLoading message="Loading registration form..." />}>
           <EmployerRegistration />
         </Suspense>
       } />
@@ -76,7 +75,7 @@ const AppRouter: React.FC = () => {
       {/* Protected Dashboards */}
       <Route path="/attendee" element={
         <ProtectedRoute requiredRole="attendee">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading Your Dashboard" />}>
             <AttendeeDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -84,7 +83,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/registration" element={
         <ProtectedRoute requiredRole="registration">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading Your Dashboard" />}>
             <RegTeamDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -92,7 +91,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/building" element={
         <ProtectedRoute requiredRole="building">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading Your Dashboard" />}>
             <BuildTeamDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -100,7 +99,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/volunteer" element={
         <ProtectedRoute requiredRole="volunteer">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <VolunteerDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -108,7 +107,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/info-desk" element={
         <ProtectedRoute requiredRole="info_desk">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <InfoDeskDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -116,7 +115,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/verification" element={
         <ProtectedRoute requiredRole="verification">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <VerificationDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -124,7 +123,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/team-leader" element={
         <ProtectedRoute requiredRole="team_leader">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <TeamLeaderDashboard />
           </Suspense>
         </ProtectedRoute>
@@ -132,7 +131,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/secure-9821panel" element={
         <ProtectedRoute requiredRole="admin">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <AdminPanel />
           </Suspense>
         </ProtectedRoute>
@@ -140,7 +139,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/super-ctrl-92k1x" element={
         <ProtectedRoute requiredRole={['super_admin', 'sadmin']}> {/* Handle both potential role names */}
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <SuperAdminPanel />
           </Suspense>
         </ProtectedRoute>
@@ -148,7 +147,7 @@ const AppRouter: React.FC = () => {
 
       <Route path="/employer" element={
         <ProtectedRoute requiredRole="employer">
-          <Suspense fallback={<LoadingScreen message="Loading dashboard..." />}>
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <EmployerDashboard />
           </Suspense>
         </ProtectedRoute>

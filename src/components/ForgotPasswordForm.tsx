@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { KeyRound, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { resetPassword } from '../lib/supabase';
 
 interface ValidationError {
@@ -11,7 +12,6 @@ interface ValidationError {
 interface ForgotPasswordData {
   email: string;
 }
-
 
 export const ForgotPasswordForm: React.FC = () => {
   const navigate = useNavigate();
@@ -102,19 +102,47 @@ export const ForgotPasswordForm: React.FC = () => {
 
         {/* Success Message */}
         <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-orange-100 w-full max-w-md p-8 text-center">
-            <CheckCircle className="mx-auto h-16 w-16 text-green-500 mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Check Your Email</h2>
-            <p className="text-gray-600 mb-6">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: "spring", duration: 0.6 }}
+            className="bg-white rounded-2xl shadow-2xl border border-orange-100 w-full max-w-md p-8 text-center"
+          >
+            <motion.div
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+            >
+              <CheckCircle className="mx-auto h-16 w-16 text-green-500 mb-4" />
+            </motion.div>
+            <motion.h2
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="text-2xl font-bold text-gray-900 mb-4"
+            >
+              Check Your Email
+            </motion.h2>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              className="text-gray-600 mb-6"
+            >
               We've sent password reset instructions to your email address. Please check your inbox and follow the link to reset your password.
-            </p>
-            <button
+            </motion.p>
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => navigate('/login')}
-              className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-3 px-4 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 transition-all duration-200"
+              className="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white py-3 px-4 rounded-lg font-medium hover:from-orange-600 hover:to-orange-700 transition-all duration-200 shadow-lg"
             >
               Back to Login
-            </button>
-          </div>
+            </motion.button>
+          </motion.div>
         </div>
       </div>
     );
@@ -135,27 +163,63 @@ export const ForgotPasswordForm: React.FC = () => {
 
       {/* Forgot Password Form */}
       <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-red-100 dark:border-gray-700 w-full max-w-md overflow-hidden fade-in-up-blur modal-content-blur">
+        <motion.div
+          className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-red-100 dark:border-gray-700 w-full max-w-md overflow-hidden relative"
+        >
           {/* Header */}
-          <div className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-6 text-center">
-            <KeyRound className="mx-auto h-12 w-12 text-white mb-3" />
-            <h1 className="text-2xl font-bold text-white mb-2">Reset Password</h1>
-            <p className="text-red-100">Enter your email to reset your password</p>
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-gradient-to-r from-red-500 to-red-600 px-6 py-6 text-center"
+          >
+            <motion.div
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
+            >
+              <KeyRound className="mx-auto h-12 w-12 text-white mb-3" />
+            </motion.div>
+            <motion.h1
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="text-2xl font-bold text-white mb-2"
+            >
+              Reset Password
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              className="text-red-100"
+            >
+              Enter your email to reset your password
+            </motion.p>
+          </motion.div>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="p-8">
             {/* General Error */}
             {getFieldError('general') && (
-              <div className="bg-red-50 border border-red-200 p-4 rounded-lg flex items-center space-x-2 mb-6">
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ type: "spring" }}
+                className="bg-red-50 border border-red-200 p-4 rounded-lg flex items-center space-x-2 mb-6"
+              >
                 <AlertCircle className="h-5 w-5 text-red-600" />
                 <p className="text-red-700">{getFieldError('general')}</p>
-              </div>
+              </motion.div>
             )}
 
             <div className="space-y-6">
               {/* Email */}
-              <div>
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 }}
+              >
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Email Address
                 </label>
@@ -168,15 +232,26 @@ export const ForgotPasswordForm: React.FC = () => {
                   placeholder="Enter your registered email address"
                 />
                 {getFieldError('email') && (
-                  <p className="text-sm text-red-600 mt-2">{getFieldError('email')}</p>
+                  <motion.p
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-sm text-red-600 mt-2"
+                  >
+                    {getFieldError('email')}
+                  </motion.p>
                 )}
-              </div>
+              </motion.div>
 
               {/* Submit Button */}
-              <button
+              <motion.button
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.6 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
                 type="submit"
                 disabled={loading}
-                className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-4 rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-4 rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
               >
                 {loading ? (
                   <div className="flex items-center justify-center space-x-2">
@@ -186,18 +261,23 @@ export const ForgotPasswordForm: React.FC = () => {
                 ) : (
                   'Send Reset Link'
                 )}
-              </button>
+              </motion.button>
             </div>
           </form>
           {/* Back Button */}
-          <button
+          <motion.button
+            initial={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
             onClick={() => navigate('/login')}
             className="absolute top-4 left-4 z-20 p-2 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors shadow-sm"
             aria-label="Go back"
           >
             <ArrowLeft className="h-5 w-5" />
-          </button>
-        </div>
+          </motion.button>
+        </motion.div>
       </div>
     </div>
   );

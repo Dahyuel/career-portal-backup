@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, forwardRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import SettingsModal from './SettingsModal';
 
 // Navigation item type
 export interface NavItem {
@@ -123,7 +124,7 @@ const MobileDockItem = ({ item, activeItem, onItemChange }: { item: NavItem; act
 
 
 
-const SharedNavigation: React.FC<SharedNavigationProps> = ({
+const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     children,
     navItems,
     activeItem,
@@ -133,13 +134,14 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     onNotificationClick,
     onProfileClick,
     hideDock = false
-}) => {
+}, ref) => {
     const { signOut } = useAuth();
     const navigate = useNavigate();
 
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
     const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
+    const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
 
     // Animation control state - initializes from sessionStorage
@@ -221,13 +223,13 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     const unreadCount = notifications.filter((n: any) => !n.is_read).length;
 
     return (
-        <div className="flex min-h-screen bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 transition-colors duration-200">
+        <div ref={ref} className="flex min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
             {/* Desktop Sidebar */}
             <aside className={`${navItems.length > 0 ? 'lg:flex' : 'hidden'} hidden flex-col w-80 h-screen sticky top-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-50`}>
                 <SidebarLogo animate={shouldAnimate} />
 
                 {/* Navigation Menu */}
-                <nav className="flex-1 px-4 mt-4 space-y-2 overflow-y-auto">
+                <nav className="flex-1 px-4 mt-0 space-y-2 overflow-y-auto">
                     {navItems.map((item, index) => (
                         <SidebarButton
                             key={item.key}
@@ -244,7 +246,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
             {/* Main Content Area */}
             <main className="flex-1 min-w-0">
                 {/* Desktop Header */}
-                <header className={`hidden lg:flex ${navItems.length === 0 ? 'justify-between' : 'justify-end'} items-center px-8 py-4 lg:py-6 gap-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-40`}>
+                <header className={`hidden lg:flex ${navItems.length === 0 ? 'justify-between' : 'justify-end'} items-center px-8 py-4 lg:py-6 gap-4 bg-transparent dark:bg-transparent sticky top-0 z-40`}>
                     {navItems.length === 0 && (
                         <motion.div
                             className="flex items-center gap-3"
@@ -300,7 +302,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                                                     {notification.title || 'Notification'}
                                                                 </p>
                                                                 <p className="text-xs text-slate-600 dark:text-slate-400">
-                                                                    {notification.message}
+                                                                    {notification.content || notification.message}
                                                                 </p>
                                                                 {notification.created_at && (
                                                                     <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
@@ -362,7 +364,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                             <button
                                                 onClick={() => {
                                                     setShowProfileDropdown(false);
-                                                    // Navigate to settings
+                                                    setShowSettingsModal(true);
                                                 }}
                                                 className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
                                             >
@@ -388,7 +390,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                 </header>
 
                 {/* Mobile Header */}
-                <header className="lg:hidden bg-white dark:bg-slate-900 px-6 py-4 flex items-center justify-between z-40 sticky top-0 border-b border-slate-200 dark:border-slate-800">
+                <header className="lg:hidden bg-transparent dark:bg-transparent px-6 py-4 flex items-center justify-between z-40 sticky top-0">
                     <div className="flex items-center gap-3">
                         <img src="/images/logo.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
                         <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
@@ -462,17 +464,30 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                                             setShowMobileProfileDropdown(false);
                                             onProfileClick?.();
                                         }}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 hover:bg-slate-50"
+                                        className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
                                     >
-                                        <span className="material-symbols-outlined">person</span>
-                                        <span>Profile</span>
+                                        <span className="material-symbols-outlined text-xl">person</span>
+                                        <span className="font-medium">Profile</span>
                                     </button>
                                     <button
-                                        onClick={handleSignOut}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50"
+                                        onClick={() => {
+                                            setShowMobileProfileDropdown(false);
+                                            setShowSettingsModal(true);
+                                        }}
+                                        className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
                                     >
-                                        <span className="material-symbols-outlined">logout</span>
-                                        <span>Logout</span>
+                                        <span className="material-symbols-outlined text-xl">settings</span>
+                                        <span className="font-medium">Settings</span>
+                                    </button>
+                                    <div className="border-t border-slate-200 dark:border-slate-800 my-1"></div>
+                                    <button
+                                        type="button"
+                                        onClick={handleSignOut}
+                                        disabled={loggingOut}
+                                        className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all text-left disabled:opacity-50"
+                                    >
+                                        <span className="material-symbols-outlined text-xl">logout</span>
+                                        <span className="font-medium">{loggingOut ? 'Logging out...' : 'Logout'}</span>
                                     </button>
                                 </nav>
                             </motion.div>
@@ -485,6 +500,13 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                     {children}
                 </div>
             </main>
+
+            {/* Settings Modal */}
+            <AnimatePresence>
+                {showSettingsModal && (
+                    <SettingsModal onClose={() => setShowSettingsModal(false)} />
+                )}
+            </AnimatePresence>
 
             {/* Mobile Bottom Navigation - Floating Dock */}
             {!hideDock && navItems.length > 0 && (
@@ -508,6 +530,8 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
             )}
         </div>
     );
-};
+});
+
+SharedNavigation.displayName = 'SharedNavigation';
 
 export default SharedNavigation;

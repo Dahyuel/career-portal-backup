@@ -90,6 +90,8 @@ const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, onClose, onApply, 
                         >
                             {[
                                 { icon: 'work', text: job.job_type, color: 'red' },
+                                { icon: 'layers', text: job.experience_level, color: 'slate' },
+                                { icon: 'pnp', text: job.employment_mode, color: 'slate' },
                                 { icon: 'location_on', text: job.location || 'Remote', color: 'slate' },
                                 { icon: 'schedule', text: new Date(job.posted_at).toLocaleDateString(), color: 'slate' }
                             ].map((badge, index) => (
@@ -99,9 +101,9 @@ const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, onClose, onApply, 
                                     animate={{ scale: 1 }}
                                     transition={{ delay: 0.4 + index * 0.1, type: "spring" }}
                                     className={`px-3 py-1.5 rounded-lg ${badge.color === 'red'
-                                            ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                                            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                                        } text-sm font-bold flex items-center gap-1.5`}
+                                        ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'
+                                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                                        } text-[10px] font-bold uppercase flex items-center gap-1.5`}
                                 >
                                     <span className="material-symbols-outlined text-lg">{badge.icon}</span>
                                     {badge.text}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface AttendeeProfile {
     // From user_profiles
@@ -18,7 +19,6 @@ export interface AttendeeProfile {
     university?: string;
     faculty?: string;
     department?: string;
-    nationality?: string;
     cv_url?: string;
     enrollment_proof_url?: string;
     registration_status?: string;
@@ -27,7 +27,26 @@ export interface AttendeeProfile {
 }
 
 export const useAttendeeProfile = (userId: string | undefined, enabled: boolean = true) => {
-    const [attendeeProfile, setAttendeeProfile] = useState<AttendeeProfile | null>(null);
+    const { handleAuthError, profile: authProfile } = useAuth();
+
+    // Initialize with auth profile if available (partial data) to prevent double loading
+    const [attendeeProfile, setAttendeeProfile] = useState<AttendeeProfile | null>(() => {
+        if (authProfile && authProfile.id === userId) {
+            return {
+                id: authProfile.id,
+                full_name: authProfile.full_name || '',
+                email: authProfile.email || '',
+                phone: authProfile.phone || '',
+                personal_id: authProfile.personal_id || '',
+                preferred_language: 'en',
+                score: 0,
+                created_at: authProfile.created_at || new Date().toISOString(),
+                attendee_id: authProfile.id
+            };
+        }
+        return null;
+    });
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -41,23 +60,19 @@ export const useAttendeeProfile = (userId: string | undefined, enabled: boolean 
             setLoading(true);
             setError(null);
 
-            // Fetch user profile
-            const { data: userProfile, error: profileError } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('id', userId)
-                .single();
+            // PARALLEL: Fetch user profile (if not in auth) and attendee data simultaneously
+            const [profileResult, attendeeResult] = await Promise.all([
+                (authProfile && authProfile.id === userId)
+                    ? Promise.resolve({ data: authProfile, error: null })
+                    : supabase.from('user_profiles').select('*').eq('id', userId).single(),
+                supabase.from('attendees').select('*').eq('user_id', userId).single()
+            ]);
 
-            if (profileError) {
-                throw profileError;
-            }
+            const { data: userProfile, error: profileError } = profileResult;
+            const { data: attendeeData } = attendeeResult;
 
-            // Fetch attendee data
-            const { data: attendeeData } = await supabase
-                .from('attendees')
-                .select('*')
-                .eq('user_id', userId)
-                .single();
+            if (profileError) throw profileError;
+            if (!userProfile) throw new Error('Profile not found');
 
             // Combine both datasets
             const combinedProfile: AttendeeProfile = {
@@ -76,7 +91,6 @@ export const useAttendeeProfile = (userId: string | undefined, enabled: boolean 
                 university: attendeeData?.university,
                 faculty: attendeeData?.faculty,
                 department: attendeeData?.department,
-                nationality: attendeeData?.nationality,
                 cv_url: attendeeData?.cv_url,
                 enrollment_proof_url: attendeeData?.enrollment_proof_url,
                 registration_status: attendeeData?.registration_status,
@@ -88,10 +102,11 @@ export const useAttendeeProfile = (userId: string | undefined, enabled: boolean 
         } catch (err: any) {
             console.error('Error fetching attendee profile:', err);
             setError(err.message || 'Failed to fetch profile');
+            await handleAuthError(err);
         } finally {
             setLoading(false);
         }
-    }, [userId]);
+    }, [userId, authProfile]);
 
     useEffect(() => {
         if (enabled) {

@@ -1,8 +1,9 @@
 // components/UnifiedAttendeeRegistration.tsx
 // Merges AuthRegistration + RegistrationForm into one unified, step-based component
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User, GraduationCap, ChevronRight, CheckCircle, AlertCircle, FileText, X, Mail, Lock, UserPlus, ArrowLeft } from 'lucide-react';
+import { User, GraduationCap, ChevronRight, CheckCircle, AlertCircle, FileText, X, Mail, Lock, UserPlus, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { RegistrationData, ValidationError, FileUpload as FileUploadType } from '../types';
 import { FACULTIES, CLASS_YEARS, HOW_DID_YOU_HEAR_OPTIONS } from '../utils/constants';
 import { validatePhone, validatePersonalId, validateVolunteerId, validateEmail, validatePassword, validateConfirmPassword, validateName } from '../utils/validation';
@@ -48,7 +49,13 @@ const ErrorPopup: React.FC<{
     const styles = getStyles();
 
     return (
-        <div className="fixed top-4 right-4 z-50 animate-fade-in">
+        <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            transition={{ type: "spring", duration: 0.5 }}
+            className="fixed top-4 right-4 z-50"
+        >
             <div className={`rounded-lg shadow-lg border p-4 max-w-sm ${styles.container}`}>
                 <div className="flex items-start space-x-3">
                     <div className={`flex-shrink-0 ${styles.icon}`}>
@@ -59,15 +66,17 @@ const ErrorPopup: React.FC<{
                             {message}
                         </p>
                     </div>
-                    <button
+                    <motion.button
+                        whileHover={{ scale: 1.1, rotate: 90 }}
+                        whileTap={{ scale: 0.9 }}
                         onClick={onClose}
                         className={`flex-shrink-0 hover:opacity-70 transition-opacity ${styles.button}`}
                     >
                         <X className="w-4 h-4" />
-                    </button>
+                    </motion.button>
                 </div>
             </div>
-        </div>
+        </motion.div>
     );
 };
 
@@ -92,25 +101,37 @@ const FileUpload: React.FC<{
     };
 
     return (
-        <div className="space-y-2 fade-in-blur">
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-2"
+        >
             <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${currentFile
-                ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20 transform hover:scale-[1.02]'
+                ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
                 : 'border-orange-200 dark:border-orange-800 hover:border-orange-300 dark:hover:border-orange-700'
                 }`}>
                 {currentFile ? (
-                    <div className="flex items-center justify-center space-x-3 fade-in-scale">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ type: "spring" }}
+                        className="flex items-center justify-center space-x-3"
+                    >
                         <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
                         <span className="text-sm font-medium text-gray-900 dark:text-white">{currentFile.name}</span>
-                        <button
+                        <motion.button
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
                             type="button"
                             onClick={onFileRemove}
                             className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 transition-colors duration-200"
                         >
                             Remove
-                        </button>
-                    </div>
+                        </motion.button>
+                    </motion.div>
                 ) : (
-                    <div className="fade-in-blur">
+                    <div>
                         <input
                             type="file"
                             accept={accept}
@@ -121,14 +142,14 @@ const FileUpload: React.FC<{
                         />
                         <label
                             htmlFor={`file-${label.replace(/\s+/g, '-').toLowerCase()}`}
-                            className="cursor-pointer text-sm font-medium text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors duration-200 smooth-hover"
+                            className="cursor-pointer text-sm font-medium text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors duration-200"
                         >
                             {label} {required ? '*' : '(Optional)'}
                         </label>
                     </div>
                 )}
             </div>
-        </div>
+        </motion.div>
     );
 };
 
@@ -161,6 +182,8 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
     const [errors, setErrors] = useState<ValidationError[]>([]);
     const [loading, setLoading] = useState(false);
     const [errorPopup, setErrorPopup] = useState<{ message: string; type?: 'error' | 'warning' | 'success' } | null>(null);
+    const [showPassword, setShowPassword] = useState(false);
+    const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
     const sectionChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -430,9 +453,20 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
 
     // Step 0: Account Creation
     const renderAccountCreation = () => (
-        <div className="space-y-6 stagger-children">
+        <motion.div
+            key="account-creation"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+        >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         First Name *
                     </label>
@@ -448,11 +482,21 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         />
                     </div>
                     {getFieldError('firstName') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('firstName')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('firstName')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
 
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Last Name *
                     </label>
@@ -468,12 +512,22 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         />
                     </div>
                     {getFieldError('lastName') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('lastName')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('lastName')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
             </div>
 
-            <div className="fade-in-blur">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+            >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Email Address *
                 </label>
@@ -489,53 +543,98 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     />
                 </div>
                 {getFieldError('email') && (
-                    <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('email')}</p>
+                    <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-1 text-sm text-red-600"
+                    >
+                        {getFieldError('email')}
+                    </motion.p>
                 )}
-            </div>
+            </motion.div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.25 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Password *
                     </label>
                     <div className="relative">
                         <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                         <input
-                            type="password"
+                            type={showPassword ? 'text' : 'password'}
                             value={formData.password}
                             onChange={(e) => updateField('password', e.target.value)}
-                            className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                            className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                 }`}
                             placeholder="Create a password"
                         />
+                        <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                        >
+                            {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
                     </div>
                     {getFieldError('password') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('password')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('password')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
 
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Confirm Password *
                     </label>
                     <div className="relative">
                         <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
                         <input
-                            type="password"
+                            type={showConfirmPassword ? 'text' : 'password'}
                             value={formData.confirmPassword}
                             onChange={(e) => updateField('confirmPassword', e.target.value)}
-                            className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('confirmPassword') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                            className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('confirmPassword') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                 }`}
                             placeholder="Confirm your password"
                         />
+                        <button
+                            type="button"
+                            onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                        >
+                            {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
                     </div>
                     {getFieldError('confirmPassword') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('confirmPassword')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('confirmPassword')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
             </div>
 
-            <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35 }}
+                className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4"
+            >
                 <div className="flex items-start">
                     <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mr-2 flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
@@ -544,15 +643,26 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         </p>
                     </div>
                 </div>
-            </div>
-        </div>
+            </motion.div>
+        </motion.div>
     );
 
     // Step 1: Personal Info (from RegistrationForm)
     const renderPersonalInfo = () => (
-        <div className="space-y-6 stagger-children">
+        <motion.div
+            key="personal-info"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+        >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Gender *
                     </label>
@@ -567,11 +677,21 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         <option value="female">Female</option>
                     </select>
                     {getFieldError('gender') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('gender')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('gender')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
 
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Nationality *
                     </label>
@@ -586,13 +706,23 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         <option value="other">Other</option>
                     </select>
                     {getFieldError('nationality') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('nationality')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('nationality')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Phone Number *
                     </label>
@@ -605,11 +735,21 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         placeholder="e.g., 01012345678"
                     />
                     {getFieldError('phone') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('phone')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('phone')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
 
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.25 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         National ID / Passport *
                     </label>
@@ -622,17 +762,36 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         placeholder="Enter your National ID or Passport number"
                     />
                     {getFieldError('personalId') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('personalId')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('personalId')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
             </div>
-        </div>
+        </motion.div>
     );
+
+    // Rest of the component continues in next file segment...
 
     // Step 2: Academic Info (from RegistrationForm)
     const renderAcademicInfo = () => (
-        <div className="space-y-6 stagger-children">
-            <div className="fade-in-blur">
+        <motion.div
+            key="academic-info"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+        >
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+            >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     University *
                 </label>
@@ -648,12 +807,23 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     ))}
                 </select>
                 {getFieldError('university') && (
-                    <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('university')}</p>
+                    <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-1 text-sm text-red-600"
+                    >
+                        {getFieldError('university')}
+                    </motion.p>
                 )}
-            </div>
+            </motion.div>
 
             {formData.university === 'Other' && (
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Custom University Name *
                     </label>
@@ -666,12 +836,22 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         placeholder="Enter your university name"
                     />
                     {getFieldError('customUniversity') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('customUniversity')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('customUniversity')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
             )}
 
-            <div className="fade-in-blur">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+            >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Faculty *
                 </label>
@@ -687,12 +867,22 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     ))}
                 </select>
                 {getFieldError('faculty') && (
-                    <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('faculty')}</p>
+                    <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-1 text-sm text-red-600"
+                    >
+                        {getFieldError('faculty')}
+                    </motion.p>
                 )}
-            </div>
+            </motion.div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="fade-in-blur">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                >
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                         Degree Level *
                     </label>
@@ -707,12 +897,23 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         <option value="graduate">Graduate</option>
                     </select>
                     {getFieldError('degreeLevel') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('degreeLevel')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('degreeLevel')}
+                        </motion.p>
                     )}
-                </div>
+                </motion.div>
 
                 {formData.degreeLevel === 'student' && (
-                    <div className="fade-in-blur">
+                    <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3 }}
+                    >
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                             Class Year *
                         </label>
@@ -728,13 +929,23 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                             ))}
                         </select>
                         {getFieldError('classYear') && (
-                            <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('classYear')}</p>
+                            <motion.p
+                                initial={{ opacity: 0, y: -5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="mt-1 text-sm text-red-600"
+                            >
+                                {getFieldError('classYear')}
+                            </motion.p>
                         )}
-                    </div>
+                    </motion.div>
                 )}
             </div>
 
-            <div className="fade-in-blur">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+            >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Program/Major *
                 </label>
@@ -747,16 +958,33 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     placeholder="Enter your program or major"
                 />
                 {getFieldError('program') && (
-                    <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('program')}</p>
+                    <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-1 text-sm text-red-600"
+                    >
+                        {getFieldError('program')}
+                    </motion.p>
                 )}
-            </div>
-        </div>
+            </motion.div>
+        </motion.div>
     );
 
     // Step 3: Event & Documents (from RegistrationForm)
     const renderEventInfo = () => (
-        <div className="space-y-6 stagger-children">
-            <div className="fade-in-blur">
+        <motion.div
+            key="event-info"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-6"
+        >
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+            >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     How did you hear about us? *
                 </label>
@@ -776,11 +1004,21 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     <ChevronRight className="absolute right-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400 rotate-90" />
                 </div>
                 {getFieldError('howDidYouHear') && (
-                    <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('howDidYouHear')}</p>
+                    <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-1 text-sm text-red-600"
+                    >
+                        {getFieldError('howDidYouHear')}
+                    </motion.p>
                 )}
-            </div>
+            </motion.div>
 
-            <div className="fade-in-blur">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+            >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Referral Code (Volunteer ID)
                 </label>
@@ -796,11 +1034,22 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     />
                 </div>
                 {getFieldError('volunteerId') && (
-                    <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('volunteerId')}</p>
+                    <motion.p
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-1 text-sm text-red-600"
+                    >
+                        {getFieldError('volunteerId')}
+                    </motion.p>
                 )}
-            </div>
+            </motion.div>
 
-            <div className="space-y-4 fade-in-blur">
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="space-y-4"
+            >
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white">Required Documents</h3>
 
                 <div>
@@ -820,7 +1069,13 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         required={true}
                     />
                     {getFieldError('universityId') && (
-                        <p className="mt-1 text-sm text-red-600 fade-in-blur">{getFieldError('universityId')}</p>
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('universityId')}
+                        </motion.p>
                     )}
                 </div>
 
@@ -842,7 +1097,12 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                     />
                 </div>
 
-                <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4"
+                >
                     <div className="flex items-start">
                         <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mr-2 flex-shrink-0 mt-0.5" />
                         <div className="flex-1">
@@ -851,9 +1111,9 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                             </p>
                         </div>
                     </div>
-                </div>
-            </div>
-        </div>
+                </motion.div>
+            </motion.div>
+        </motion.div>
     );
 
     const renderStepContent = () => {
@@ -882,13 +1142,15 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
 
     return (
         <div className="min-h-screen relative bg-white dark:bg-gray-950 transition-colors duration-300">
-            {errorPopup && (
-                <ErrorPopup
-                    message={errorPopup.message}
-                    type={errorPopup.type}
-                    onClose={closeErrorPopup}
-                />
-            )}
+            <AnimatePresence>
+                {errorPopup && (
+                    <ErrorPopup
+                        message={errorPopup.message}
+                        type={errorPopup.type}
+                        onClose={closeErrorPopup}
+                    />
+                )}
+            </AnimatePresence>
 
             <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
@@ -899,74 +1161,124 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                 <div className="absolute inset-0 bg-black bg-opacity-10 dark:bg-opacity-60"></div>
             </div>
 
-
             <div className="relative z-10 min-h-screen flex items-center justify-center py-8 px-4">
                 <div className="max-w-4xl mx-auto">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 border border-red-100 dark:border-gray-700 fade-in-up-blur modal-content-blur transition-colors duration-300">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        transition={{ type: "spring", duration: 0.6 }}
+                        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 border border-red-100 dark:border-gray-700 transition-colors duration-300 relative"
+                    >
                         {/* Back Button */}
-                        <button
+                        <motion.button
+                            initial={{ opacity: 0, scale: 0 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: 0.2 }}
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
                             onClick={prevStep}
-                            className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 hover:scale-105 transition-all duration-300 shadow-sm group"
+                            className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 transition-all duration-300 shadow-sm group"
                             aria-label="Go back"
                         >
                             <ArrowLeft className="h-5 w-5" />
                             <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-xs group-hover:opacity-100 group-hover:ml-2 transition-all duration-300">Back</span>
-                        </button>
+                        </motion.button>
 
                         {/* Step Progress */}
                         <div className="mb-8 pt-10 md:pt-0">
-                            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <motion.div
+                                initial={{ scale: 0, rotate: -180 }}
+                                animate={{ scale: 1, rotate: 0 }}
+                                transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
+                                className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4"
+                            >
                                 <GraduationCap className="w-8 h-8 text-red-600 dark:text-red-400" />
-                            </div>
-                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4 text-center">
+                            </motion.div>
+                            <motion.h1
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.2 }}
+                                className="text-3xl font-bold text-gray-900 dark:text-white mb-4 text-center"
+                            >
                                 Attendee Registration
-                            </h1>
-                            <div className="flex items-center justify-center mb-4">
+                            </motion.h1>
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.3 }}
+                                className="flex items-center justify-center mb-4"
+                            >
                                 {steps.map((step, index) => (
                                     <React.Fragment key={step.id}>
-                                        <div className="flex flex-col items-center">
+                                        <motion.div
+                                            initial={{ scale: 0 }}
+                                            animate={{ scale: 1 }}
+                                            transition={{ delay: 0.4 + index * 0.1 }}
+                                            className="flex flex-col items-center"
+                                        >
                                             <div className={`flex items-center justify-center w-10 h-10 rounded-full border-2 transition-all duration-300 ${currentStep >= step.id
-                                                ? 'bg-red-500 border-red-500 text-white transform scale-110'
+                                                ? 'bg-red-500 border-red-500 text-white'
                                                 : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400'
                                                 }`}>
                                                 <step.icon className="w-5 h-5" />
                                             </div>
-                                        </div>
+                                        </motion.div>
                                         {index < steps.length - 1 && (
-                                            <div className={`flex-1 h-0.5 mx-2 transition-all duration-300 ${currentStep > step.id ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'
-                                                }`} />
+                                            <motion.div
+                                                initial={{ scaleX: 0 }}
+                                                animate={{ scaleX: 1 }}
+                                                transition={{ delay: 0.5 + index * 0.1 }}
+                                                className={`flex-1 h-0.5 mx-2 transition-all duration-300 ${currentStep > step.id ? 'bg-red-500' : 'bg-gray-300 dark:bg-gray-600'
+                                                    }`}
+                                            />
                                         )}
                                     </React.Fragment>
                                 ))}
-                            </div>
-                            <div className="text-center">
+                            </motion.div>
+                            <motion.div
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ delay: 0.6 }}
+                                className="text-center"
+                            >
                                 <p className="text-sm text-gray-600 dark:text-gray-400">
                                     Step {currentStep + 1} of {steps.length}: {steps[currentStep].title}
                                 </p>
-                            </div>
+                            </motion.div>
                         </div>
 
                         {/* Form Content */}
                         <form onSubmit={handleSubmit} className="space-y-6">
-                            {renderStepContent()}
+                            <AnimatePresence mode="wait">
+                                {renderStepContent()}
+                            </AnimatePresence>
 
                             {/* Navigation Buttons */}
-                            <div className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-700">
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.4 }}
+                                className="flex justify-between pt-6 border-t border-gray-200 dark:border-gray-700"
+                            >
                                 {currentStep < steps.length - 1 ? (
-                                    <button
+                                    <motion.button
+                                        whileHover={{ scale: 1.02, x: 5 }}
+                                        whileTap={{ scale: 0.98 }}
                                         type="button"
                                         onClick={nextStep}
                                         disabled={loading}
-                                        className="ml-auto px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 transform hover:scale-105 flex items-center smooth-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="ml-auto px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 flex items-center disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                                     >
                                         Next
                                         <ChevronRight className="w-4 h-4 ml-2" />
-                                    </button>
+                                    </motion.button>
                                 ) : (
-                                    <button
+                                    <motion.button
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
                                         type="submit"
                                         disabled={loading}
-                                        className="ml-auto px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center smooth-hover"
+                                        className="ml-auto px-8 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center shadow-lg"
                                     >
                                         {loading ? (
                                             <>
@@ -976,11 +1288,11 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                                         ) : (
                                             'Complete Registration'
                                         )}
-                                    </button>
+                                    </motion.button>
                                 )}
-                            </div>
+                            </motion.div>
                         </form>
-                    </div>
+                    </motion.div>
                 </div>
             </div>
         </div>

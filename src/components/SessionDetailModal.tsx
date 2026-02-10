@@ -275,7 +275,7 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                     </motion.div>
 
                     {/* Availability */}
-                    {session.max_attendees && (
+                    {session.max_attendees && !isBooked && (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -353,8 +353,8 @@ const SessionDetailModal: React.FC<SessionDetailModalProps> = ({
                                 onClick={onBook}
                                 disabled={session.is_full}
                                 className={`w-full px-6 py-3.5 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-600/20 ${session.is_full
-                                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
-                                        : 'bg-red-600 hover:bg-red-700 text-white hover:shadow-xl'
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                                    : 'bg-red-600 hover:bg-red-700 text-white hover:shadow-xl'
                                     }`}
                             >
                                 <span className="material-symbols-outlined">{session.is_full ? 'block' : 'event_available'}</span>

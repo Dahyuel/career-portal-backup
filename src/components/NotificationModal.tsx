@@ -1,4 +1,4 @@
-import React from 'react';
+import { forwardRef } from 'react';
 import { motion } from 'framer-motion';
 
 interface Notification {
@@ -15,7 +15,7 @@ interface NotificationModalProps {
     onClose: () => void;
 }
 
-const NotificationModal: React.FC<NotificationModalProps> = ({ notification, onClose }) => {
+const NotificationModal = forwardRef<HTMLDivElement, NotificationModalProps>(({ notification, onClose }, ref) => {
     const getTypeColor = (type: string) => {
         switch (type) {
             case 'urgent':
@@ -43,7 +43,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({ notification, onC
     };
 
     return (
-        <div className="fixed inset-0 flex items-center justify-center p-4 z-[100]">
+        <div ref={ref} className="fixed inset-0 flex items-center justify-center p-4 z-[100]">
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -137,6 +137,8 @@ const NotificationModal: React.FC<NotificationModalProps> = ({ notification, onC
             </motion.div>
         </div>
     );
-};
+});
+
+NotificationModal.displayName = 'NotificationModal';
 
 export default NotificationModal;
