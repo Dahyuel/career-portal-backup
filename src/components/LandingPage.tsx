@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Briefcase, Users, Calendar, Award, MapPin, Clock, Target, Sparkles, Building2, GraduationCap, Handshake } from 'lucide-react';
+import { ArrowRight, Briefcase, Users, Calendar, Award, MapPin, Clock, Target, Sparkles, Building2, GraduationCap, Handshake, ExternalLink, Ticket } from 'lucide-react';
 import { Navbar } from './shared/Navbar';
 
 // Counter Animation Hook
@@ -85,14 +85,16 @@ export const LandingPage: React.FC = () => {
 
             {/* Hero Section */}
             <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16 md:pt-20">
-                {/* Background */}
-                <div
-                    className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
-                    style={{
-                        backgroundImage: 'url("/images/w.JPG")',
-                    }}
-                >
-                    <div className="absolute inset-0 bg-gradient-to-br from-gray-900/85 via-gray-800/80 to-gray-900/85 dark:from-gray-950/95 dark:via-gray-900/90 dark:to-red-950/60"></div>
+                {/* Video Background */}
+                <div className="absolute inset-0 z-0 overflow-hidden bg-gray-900">
+                    <iframe
+                        className="absolute top-1/2 left-1/2 min-w-full min-h-full w-auto h-auto -translate-x-1/2 -translate-y-1/2 pointer-events-none aspect-video"
+                        style={{ width: 'max(100%, 177.78vh)', height: 'max(100%, 56.25vw)', border: 'none' }}
+                        src="https://www.youtube.com/embed/l6LLgP62te0?autoplay=1&mute=1&loop=1&playlist=l6LLgP62te0&start=0&end=14&controls=0&showinfo=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&fs=0&playsinline=1"
+                        title="Hero Background Video"
+                        allow="autoplay; encrypted-media"
+                    ></iframe>
+                    <div className="absolute inset-0 bg-gradient-to-br from-gray-900/70 via-gray-800/60 to-gray-900/70 dark:from-gray-950/85 dark:via-gray-900/75 dark:to-red-950/50"></div>
                 </div>
 
                 {/* Animated background elements - more subtle and reddish */}
@@ -170,25 +172,40 @@ export const LandingPage: React.FC = () => {
                                 <span className="text-sm font-medium text-red-50/95 mt-1 tracking-wide">or login if you have an account</span>
                             </div>
                         </button>
+                    </div>
+                </div>
+            </section>
 
-                        {/* Open for All Notice */}
-                        <p className="mt-16 text-base sm:text-lg md:text-xl text-white font-semibold text-center px-4">
-                            This year it is open for ASU and Non-ASU Students and Alumni!
-                        </p>
+            {/* Open for All Notice Section */}
+            <section className="py-10 md:py-14 bg-red-50 dark:bg-gray-900 transition-colors duration-300 border-y border-red-100 dark:border-red-900/30">
+                <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div className="flex flex-col md:flex-row items-center justify-center gap-6 md:gap-10 text-center md:text-left">
+                        {/* Large Icon */}
+                        <div className="flex-shrink-0">
+                            <div className="w-20 h-20 md:w-24 md:h-24 bg-red-100 dark:bg-red-900/20 rounded-3xl flex items-center justify-center transform rotate-3 hover:rotate-6 transition-transform duration-300">
+                                <Ticket className="h-10 w-10 md:h-12 md:w-12 text-red-600 dark:text-red-400" />
+                            </div>
+                        </div>
 
-                        {/* Non-ASU Students Notice */}
-                        <p className="mt-4 text-sm sm:text-base text-white/80 text-center px-4">
-                            <span className="font-semibold text-white">Non-ASU Students?</span> Join the event via{' '}
-                            <a
-                                href="https://ticketmarche.com"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-red-300 font-semibold underline hover:text-red-200 transition-colors"
-                            >
-                                Ticket Marche
-                            </a>{' '}
-                            payment link.
-                        </p>
+                        {/* Text Content */}
+                        <div>
+                            <p className="text-lg sm:text-xl md:text-2xl text-gray-900 dark:text-white font-bold mb-3 md:mb-4">
+                                This year it is open for ASU and Non-ASU Students and Alumni!
+                            </p>
+                            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-300 max-w-2xl">
+                                <span className="font-semibold text-red-600 dark:text-red-400">Non-ASU Students?</span> Join the event via{' '}
+                                <a
+                                    href="https://ticketmarche.com"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 font-bold underline hover:text-red-700 dark:hover:text-red-300 transition-colors group"
+                                >
+                                    Ticket Marche
+                                    <ExternalLink className="h-4 w-4 animate-bounce" />
+                                </a>{' '}
+                                payment link.
+                            </p>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -376,7 +393,7 @@ export const LandingPage: React.FC = () => {
                             Leading <span className="text-red-500">Companies</span> Joining Us
                         </h2>
                         <p className="text-lg text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
-                            Meet the industry giants and innovative companies looking for talented individuals like you.
+                            Meet our sponsors, the industry giants, looking for talented individuals like you.
                         </p>
                     </div>
 
