@@ -1,119 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mic, Linkedin, Twitter, Globe, ChevronRight } from 'lucide-react';
 import { Navbar } from '../../components/shared/Navbar';
+import { supabase } from '../../lib/supabase';
+import { motion } from 'framer-motion';
 
-// Speaker data - you can update this with real speaker information
-const speakers = [
-    {
-        id: 1,
-        name: "Dr. Ahmed Hassan",
-        title: "CEO",
-        company: "TechVision Egypt",
-        image: "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Leading technology innovator with 20+ years of experience in digital transformation and AI development across MENA region.",
-        linkedin: "https://linkedin.com/in/example",
-        twitter: "https://twitter.com/example",
-        topic: "The Future of AI in Career Development"
-    },
-    {
-        id: 2,
-        name: "Eng. Sarah Mohamed",
-        title: "HR Director",
-        company: "Global Industries",
-        image: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Expert in talent acquisition and development with a passion for bridging the gap between academia and industry.",
-        linkedin: "https://linkedin.com/in/example",
-        website: "https://example.com",
-        topic: "Building Your Personal Brand"
-    },
-    {
-        id: 3,
-        name: "Dr. Omar Khalil",
-        title: "Founder & CTO",
-        company: "StartUp Hub",
-        image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Serial entrepreneur who has launched 5 successful startups and mentored over 100 young professionals.",
-        linkedin: "https://linkedin.com/in/example",
-        twitter: "https://twitter.com/example",
-        topic: "Entrepreneurship & Innovation"
-    },
-    {
-        id: 4,
-        name: "Dr. Layla Ibrahim",
-        title: "Regional Manager",
-        company: "Multinational Corp",
-        image: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Seasoned executive with expertise in strategic planning and organizational development across various sectors.",
-        linkedin: "https://linkedin.com/in/example",
-        topic: "Leadership in the Modern Workplace"
-    },
-    {
-        id: 5,
-        name: "Eng. Khaled Youssef",
-        title: "Senior Engineer",
-        company: "Engineering Excellence",
-        image: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Award-winning engineer specializing in sustainable infrastructure and green technology solutions.",
-        linkedin: "https://linkedin.com/in/example",
-        website: "https://example.com",
-        topic: "Engineering for a Sustainable Future"
-    },
-    {
-        id: 6,
-        name: "Dr. Nadia Mostafa",
-        title: "Career Coach",
-        company: "Success Pathways",
-        image: "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Certified career coach with a track record of helping thousands of graduates land their dream jobs.",
-        linkedin: "https://linkedin.com/in/example",
-        twitter: "https://twitter.com/example",
-        topic: "Acing Your Job Interview"
-    },
-    {
-        id: 7,
-        name: "Dr. Kareem Soliman",
-        title: "Creative Director",
-        company: "Design Matters",
-        image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Award-winning creative director helping brands tell their stories through compelling visual narratives.",
-        linkedin: "https://linkedin.com/in/example",
-        website: "https://example.com",
-        topic: "The Power of Visual Storytelling"
-    },
-    {
-        id: 8,
-        name: "Eng. Mariam Faheem",
-        title: "Product Manager",
-        company: "Innovate Tech",
-        image: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Product leader with extensive experience in agile methodologies and user-centered design principles.",
-        linkedin: "https://linkedin.com/in/example",
-        twitter: "https://twitter.com/example",
-        topic: "Product Management 101"
-    },
-    {
-        id: 9,
-        name: "Mr. Tarek El-Sayed",
-        title: "Financial Analyst",
-        company: "Future Finance",
-        image: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&h=800&q=80",
-        bio: "Financial expert specializing in investment strategies and economic forecasting for emerging markets.",
-        linkedin: "https://linkedin.com/in/example",
-        topic: "Financial Literacy for Young Professionals"
-    }
-];
-
+// Speaker type matching the database schema
 interface Speaker {
-    id: number;
-    name: string;
+    id: string;
+    first_name: string;
+    last_name: string;
     title: string;
-    company: string;
-    image: string;
-    bio: string;
-    linkedin?: string;
-    twitter?: string;
-    website?: string;
-    topic: string;
+    linkedin_url?: string;
+    photo_url?: string;
 }
 
 const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
@@ -123,6 +21,7 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
         setIsFlipped(!isFlipped);
     };
 
+    const fullName = `${speaker.first_name} ${speaker.last_name}`;
     const gradientClass = 'from-red-500/45 via-orange-400/30 to-orange-100/15 dark:from-red-600/45 dark:via-orange-700/30 dark:to-orange-900/15';
 
     return (
@@ -138,30 +37,31 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
                     <div className="h-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden hover:shadow-xl transition-shadow duration-300">
                         {/* Image Section */}
                         <div className={`relative h-64 overflow-hidden bg-gradient-to-br ${gradientClass} flex items-center justify-center`}>
-                            <img
-                                src={speaker.image}
-                                alt={speaker.name}
-                                className="h-full w-auto object-cover max-w-full mx-auto transition-transform duration-500 group-hover:scale-105 relative z-10"
-                                style={{
-                                    maskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)',
-                                    WebkitMaskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)'
-                                }}
-                                onError={(e) => {
-                                    // Fallback to initials if image fails
-                                    e.currentTarget.style.display = 'none';
-                                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                                }}
-                            />
+                            {speaker.photo_url ? (
+                                <img
+                                    src={speaker.photo_url}
+                                    alt={fullName}
+                                    className="h-full w-auto object-cover max-w-full mx-auto transition-transform duration-500 group-hover:scale-105 relative z-10"
+                                    style={{
+                                        maskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)',
+                                        WebkitMaskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)'
+                                    }}
+                                    onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                        e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                    }}
+                                />
+                            ) : null}
                             {/* Fallback Initials */}
-                            <div className="hidden absolute inset-0 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-gray-800 flex items-center justify-center">
+                            <div className={`${speaker.photo_url ? 'hidden' : ''} absolute inset-0 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-gray-800 flex items-center justify-center`}>
                                 <div className="w-32 h-32 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center shadow-xl">
                                     <span className="text-4xl font-bold text-white">
-                                        {speaker.name.split(' ').map(n => n[0]).join('')}
+                                        {fullName.split(' ').map(n => n[0]).join('')}
                                     </span>
                                 </div>
                             </div>
 
-                            {/* Gradient Overlay for text readability if needed, or just style */}
+                            {/* Gradient Overlay */}
                             <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20"></div>
                             {/* Decorative elements */}
                             <div className="absolute top-4 right-4 p-2 bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded-full z-20">
@@ -172,17 +72,14 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
                         {/* Info Section */}
                         <div className="p-6">
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
-                                {speaker.name}
+                                {fullName}
                             </h3>
                             <p className="text-red-600 dark:text-red-400 font-medium mb-1">
                                 {speaker.title}
                             </p>
-                            <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
-                                {speaker.company}
-                            </p>
 
                             {/* Click to flip hint */}
-                            <div className="flex items-center justify-center gap-2 text-sm text-gray-400 dark:text-gray-500 group-hover:text-red-500 transition-colors">
+                            <div className="flex items-center justify-center gap-2 text-sm text-gray-400 dark:text-gray-500 group-hover:text-red-500 transition-colors mt-4">
                                 <span>Click to learn more</span>
                                 <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                             </div>
@@ -193,27 +90,27 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
                 {/* Back of card */}
                 <div className="absolute w-full h-full backface-hidden rotate-y-180">
                     <div className="h-full bg-gradient-to-br from-red-600 to-red-700 dark:from-red-700 dark:to-red-900 rounded-2xl shadow-lg p-6 flex flex-col">
-                        {/* Topic Badge */}
+                        {/* Title Badge */}
                         <div className="mb-4">
                             <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 backdrop-blur-sm text-white text-sm font-medium rounded-full">
                                 <Mic className="w-4 h-4" />
-                                Topic
+                                Speaker
                             </span>
                         </div>
 
                         <h4 className="text-xl font-bold text-white mb-4">
-                            {speaker.topic}
+                            {fullName}
                         </h4>
 
                         <p className="text-red-100 text-sm leading-relaxed flex-grow">
-                            {speaker.bio}
+                            {speaker.title}
                         </p>
 
                         {/* Social Links */}
-                        <div className="flex gap-3 mt-4 pt-4 border-t border-white/20">
-                            {speaker.linkedin && (
+                        {speaker.linkedin_url && (
+                            <div className="flex gap-3 mt-4 pt-4 border-t border-white/20">
                                 <a
-                                    href={speaker.linkedin}
+                                    href={speaker.linkedin_url}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
@@ -221,30 +118,8 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
                                 >
                                     <Linkedin className="w-5 h-5 text-white" />
                                 </a>
-                            )}
-                            {speaker.twitter && (
-                                <a
-                                    href={speaker.twitter}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
-                                >
-                                    <Twitter className="w-5 h-5 text-white" />
-                                </a>
-                            )}
-                            {speaker.website && (
-                                <a
-                                    href={speaker.website}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors"
-                                >
-                                    <Globe className="w-5 h-5 text-white" />
-                                </a>
-                            )}
-                        </div>
+                            </div>
+                        )}
 
                         {/* Click to flip back hint */}
                         <div className="mt-4 text-center text-sm text-red-200">
@@ -258,6 +133,33 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
 };
 
 export const Speakers: React.FC = () => {
+    const [speakers, setSpeakers] = useState<Speaker[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchSpeakers = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('speaker')
+                    .select('id, first_name, last_name, title, linkedin_url, photo_url')
+                    .order('created_at', { ascending: true });
+
+                if (error) {
+                    console.error('Error fetching speakers:', error);
+                    return;
+                }
+
+                setSpeakers(data || []);
+            } catch (err) {
+                console.error('Error fetching speakers:', err);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchSpeakers();
+    }, []);
+
     return (
         <div className="min-h-screen bg-white dark:bg-gray-950 transition-colors duration-300">
             <Navbar />
@@ -285,11 +187,33 @@ export const Speakers: React.FC = () => {
             {/* Speakers Grid */}
             <section className="py-12 md:py-20 bg-gray-50 dark:bg-gray-900/50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {speakers.map((speaker) => (
-                            <SpeakerCard key={speaker.id} speaker={speaker} />
-                        ))}
-                    </div>
+                    {isLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20">
+                            <div className="relative w-16 h-16 mb-4">
+                                <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+                                <motion.div
+                                    className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+                                    animate={{ rotate: 360 }}
+                                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                                />
+                            </div>
+                            <p className="text-gray-500 dark:text-gray-400 font-medium">Loading speakers...</p>
+                        </div>
+                    ) : speakers.length === 0 ? (
+                        <div className="text-center py-20">
+                            <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-gray-700 mb-3 block">
+                                mic_off
+                            </span>
+                            <p className="text-lg font-semibold text-gray-600 dark:text-gray-400">Speakers will be announced soon</p>
+                            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">Check back later for our lineup</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                            {speakers.map((speaker) => (
+                                <SpeakerCard key={speaker.id} speaker={speaker} />
+                            ))}
+                        </div>
+                    )}
                 </div>
             </section>
 
