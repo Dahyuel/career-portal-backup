@@ -9,7 +9,7 @@ const speakers = [
         name: "Dr. Ahmed Hassan",
         title: "CEO",
         company: "TechVision Egypt",
-        image: "/images/speakers/speaker1.jpg",
+        image: "https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=600&h=800&q=80",
         bio: "Leading technology innovator with 20+ years of experience in digital transformation and AI development across MENA region.",
         linkedin: "https://linkedin.com/in/example",
         twitter: "https://twitter.com/example",
@@ -20,7 +20,7 @@ const speakers = [
         name: "Eng. Sarah Mohamed",
         title: "HR Director",
         company: "Global Industries",
-        image: "/images/speakers/speaker2.jpg",
+        image: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=600&h=800&q=80",
         bio: "Expert in talent acquisition and development with a passion for bridging the gap between academia and industry.",
         linkedin: "https://linkedin.com/in/example",
         website: "https://example.com",
@@ -31,7 +31,7 @@ const speakers = [
         name: "Dr. Omar Khalil",
         title: "Founder & CTO",
         company: "StartUp Hub",
-        image: "/images/speakers/speaker3.jpg",
+        image: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=600&h=800&q=80",
         bio: "Serial entrepreneur who has launched 5 successful startups and mentored over 100 young professionals.",
         linkedin: "https://linkedin.com/in/example",
         twitter: "https://twitter.com/example",
@@ -42,7 +42,7 @@ const speakers = [
         name: "Dr. Layla Ibrahim",
         title: "Regional Manager",
         company: "Multinational Corp",
-        image: "/images/speakers/speaker4.jpg",
+        image: "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=600&h=800&q=80",
         bio: "Seasoned executive with expertise in strategic planning and organizational development across various sectors.",
         linkedin: "https://linkedin.com/in/example",
         topic: "Leadership in the Modern Workplace"
@@ -52,7 +52,7 @@ const speakers = [
         name: "Eng. Khaled Youssef",
         title: "Senior Engineer",
         company: "Engineering Excellence",
-        image: "/images/speakers/speaker5.jpg",
+        image: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=600&h=800&q=80",
         bio: "Award-winning engineer specializing in sustainable infrastructure and green technology solutions.",
         linkedin: "https://linkedin.com/in/example",
         website: "https://example.com",
@@ -63,11 +63,43 @@ const speakers = [
         name: "Dr. Nadia Mostafa",
         title: "Career Coach",
         company: "Success Pathways",
-        image: "/images/speakers/speaker6.jpg",
+        image: "https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=600&h=800&q=80",
         bio: "Certified career coach with a track record of helping thousands of graduates land their dream jobs.",
         linkedin: "https://linkedin.com/in/example",
         twitter: "https://twitter.com/example",
         topic: "Acing Your Job Interview"
+    },
+    {
+        id: 7,
+        name: "Dr. Kareem Soliman",
+        title: "Creative Director",
+        company: "Design Matters",
+        image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&h=800&q=80",
+        bio: "Award-winning creative director helping brands tell their stories through compelling visual narratives.",
+        linkedin: "https://linkedin.com/in/example",
+        website: "https://example.com",
+        topic: "The Power of Visual Storytelling"
+    },
+    {
+        id: 8,
+        name: "Eng. Mariam Faheem",
+        title: "Product Manager",
+        company: "Innovate Tech",
+        image: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=600&h=800&q=80",
+        bio: "Product leader with extensive experience in agile methodologies and user-centered design principles.",
+        linkedin: "https://linkedin.com/in/example",
+        twitter: "https://twitter.com/example",
+        topic: "Product Management 101"
+    },
+    {
+        id: 9,
+        name: "Mr. Tarek El-Sayed",
+        title: "Financial Analyst",
+        company: "Future Finance",
+        image: "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&h=800&q=80",
+        bio: "Financial expert specializing in investment strategies and economic forecasting for emerging markets.",
+        linkedin: "https://linkedin.com/in/example",
+        topic: "Financial Literacy for Young Professionals"
     }
 ];
 
@@ -84,12 +116,25 @@ interface Speaker {
     topic: string;
 }
 
-const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
+const SpeakerCard: React.FC<{ speaker: Speaker; index: number }> = ({ speaker, index }) => {
     const [isFlipped, setIsFlipped] = useState(false);
 
     const handleFlip = () => {
         setIsFlipped(!isFlipped);
     };
+
+    const colorMap = [
+        'from-blue-600/30 via-blue-500/15 to-blue-50/5 dark:from-blue-600/30 dark:via-blue-800/15 dark:to-blue-950/5',     // Blue
+        'from-emerald-600/30 via-emerald-500/15 to-emerald-100/5 dark:from-emerald-800/30 dark:via-emerald-700/15 dark:to-emerald-950/5', // Darker Green
+        'from-red-400/30 via-orange-300/15 to-orange-50/5 dark:from-red-600/30 dark:via-orange-800/15 dark:to-orange-950/5'   // Reddish Orange
+    ];
+
+    // Use index for diagonal distribution in 3-column grid to avoid vertical stacking
+    // Pattern: 0, 1, 2, 1, 2, 0, 2, 0, 1...
+    // Algorithm: (index + floor(index/3)) % 3
+    const colorIndex = (index + Math.floor(index / 3)) % 3;
+
+    const gradientClass = colorMap[colorIndex];
 
     return (
         <div
@@ -103,16 +148,34 @@ const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
                 <div className="absolute w-full h-full backface-hidden">
                     <div className="h-full bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden hover:shadow-xl transition-shadow duration-300">
                         {/* Image Section */}
-                        <div className="relative h-56 overflow-hidden bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-gray-800">
-                            <div className="absolute inset-0 flex items-center justify-center">
+                        <div className={`relative h-64 overflow-hidden bg-gradient-to-br ${gradientClass} flex items-center justify-center`}>
+                            <img
+                                src={speaker.image}
+                                alt={speaker.name}
+                                className="h-full w-auto object-cover max-w-full mx-auto transition-transform duration-500 group-hover:scale-105 relative z-10"
+                                style={{
+                                    maskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)',
+                                    WebkitMaskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)'
+                                }}
+                                onError={(e) => {
+                                    // Fallback to initials if image fails
+                                    e.currentTarget.style.display = 'none';
+                                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                                }}
+                            />
+                            {/* Fallback Initials */}
+                            <div className="hidden absolute inset-0 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900/30 dark:to-gray-800 flex items-center justify-center">
                                 <div className="w-32 h-32 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center shadow-xl">
                                     <span className="text-4xl font-bold text-white">
                                         {speaker.name.split(' ').map(n => n[0]).join('')}
                                     </span>
                                 </div>
                             </div>
+
+                            {/* Gradient Overlay for text readability if needed, or just style */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20"></div>
                             {/* Decorative elements */}
-                            <div className="absolute top-4 right-4 p-2 bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded-full">
+                            <div className="absolute top-4 right-4 p-2 bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded-full z-20">
                                 <Mic className="w-5 h-5 text-red-600 dark:text-red-400" />
                             </div>
                         </div>
@@ -234,8 +297,8 @@ export const Speakers: React.FC = () => {
             <section className="py-12 md:py-20 bg-gray-50 dark:bg-gray-900/50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {speakers.map((speaker) => (
-                            <SpeakerCard key={speaker.id} speaker={speaker} />
+                        {speakers.map((speaker, index) => (
+                            <SpeakerCard key={speaker.id} speaker={speaker} index={index} />
                         ))}
                     </div>
                 </div>
