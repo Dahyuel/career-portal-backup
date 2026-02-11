@@ -116,25 +116,14 @@ interface Speaker {
     topic: string;
 }
 
-const SpeakerCard: React.FC<{ speaker: Speaker; index: number }> = ({ speaker, index }) => {
+const SpeakerCard: React.FC<{ speaker: Speaker }> = ({ speaker }) => {
     const [isFlipped, setIsFlipped] = useState(false);
 
     const handleFlip = () => {
         setIsFlipped(!isFlipped);
     };
 
-    const colorMap = [
-        'from-blue-600/30 via-blue-500/15 to-blue-50/5 dark:from-blue-600/30 dark:via-blue-800/15 dark:to-blue-950/5',     // Blue
-        'from-emerald-600/30 via-emerald-500/15 to-emerald-100/5 dark:from-emerald-800/30 dark:via-emerald-700/15 dark:to-emerald-950/5', // Darker Green
-        'from-red-400/30 via-orange-300/15 to-orange-50/5 dark:from-red-600/30 dark:via-orange-800/15 dark:to-orange-950/5'   // Reddish Orange
-    ];
-
-    // Use index for diagonal distribution in 3-column grid to avoid vertical stacking
-    // Pattern: 0, 1, 2, 1, 2, 0, 2, 0, 1...
-    // Algorithm: (index + floor(index/3)) % 3
-    const colorIndex = (index + Math.floor(index / 3)) % 3;
-
-    const gradientClass = colorMap[colorIndex];
+    const gradientClass = 'from-red-500/45 via-orange-400/30 to-orange-100/15 dark:from-red-600/45 dark:via-orange-700/30 dark:to-orange-900/15';
 
     return (
         <div
@@ -297,8 +286,8 @@ export const Speakers: React.FC = () => {
             <section className="py-12 md:py-20 bg-gray-50 dark:bg-gray-900/50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                        {speakers.map((speaker, index) => (
-                            <SpeakerCard key={speaker.id} speaker={speaker} index={index} />
+                        {speakers.map((speaker) => (
+                            <SpeakerCard key={speaker.id} speaker={speaker} />
                         ))}
                     </div>
                 </div>

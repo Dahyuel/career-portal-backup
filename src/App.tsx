@@ -1,11 +1,13 @@
 // App.tsx
-import React, { Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { Suspense, useLayoutEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRoute
 import { ResetPasswordForm } from './components/ResetPasswordForm';
 // import DashboardLoading from './components/DashboardLoading'; // Removed as we use shared LoadingScreen
+
+
 
 // Auth Components
 import { LoginForm } from './components/LoginForm';
@@ -38,6 +40,12 @@ import DashboardLoading from './components/DashboardLoading';
 
 // Main App Router
 const AppRouter: React.FC = () => {
+  const { pathname } = useLocation();
+
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   return (
     <Routes>
       {/* Landing Page */}
