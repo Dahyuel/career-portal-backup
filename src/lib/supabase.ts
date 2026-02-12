@@ -1119,13 +1119,21 @@ export const getAttendeeByPersonalId = async (personalId: string) => {
       return { data: null, error: attendeeError };
     }
 
+    // Get role from user_roles
+    const { data: roleData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', profile.id)
+      .single();
+
     // Merge data
     return {
       data: {
         ...attendee,
         ...profile,
         // Ensure consistent ID usage
-        id: profile.id // Use profile.id (user_id) as primary identifier
+        id: profile.id, // Use profile.id (user_id) as primary identifier
+        role: roleData?.role || 'attendee' // Default to attendee if not found, but we should find it
       },
       error: null
     };
@@ -1191,11 +1199,18 @@ export const searchAttendeesByPersonalId = async (query: string) => {
           .eq('user_id', profile.id)
           .single();
 
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', profile.id)
+          .single();
+
         if (!attendee) return null;
 
         return {
           ...attendee,
-          ...profile
+          ...profile,
+          role: roleData?.role
         };
       })
     );
@@ -1758,12 +1773,20 @@ export const getUserProfileByUUID = async (uuid: string) => {
 
     const lastAttendance = attendanceData && attendanceData.length > 0 ? attendanceData[0] : null;
 
+    // 4. Get role
+    const { data: roleData } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', uuid)
+      .single();
+
     return {
       data: {
         ...profile,
         university: attendeeDetails?.university,
         faculty: attendeeDetails?.faculty,
-        last_attendance: lastAttendance
+        last_attendance: lastAttendance,
+        role: roleData?.role || 'attendee'
       },
       error: null
     };
