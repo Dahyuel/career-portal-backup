@@ -81,6 +81,7 @@ export interface VolunteerRegistrationData {
   personalId: string;
   gender: string;
   teamId: string;
+  isTeamLeader?: boolean;
 }
 
 export interface EmployerRegistrationData {
@@ -690,12 +691,19 @@ export const registerVolunteer = async (data: VolunteerRegistrationData): Promis
     // ========================================================================
     console.log('🎭 [VOLUNTEER] Step 4: Assigning volunteer role...');
 
+    // Override role if team leader
+    let finalRole = volunteerRole;
+    if (data.isTeamLeader) {
+      finalRole = 'team_leader';
+      console.log('👑 [VOLUNTEER] User is registering as Team Leader');
+    }
+
     const { error: roleError } = await supabase
       .from('user_roles')
       .insert({
         user_id: authUserId,
         event_id: DEFAULT_EVENT_ID,
-        role: volunteerRole // Use the specific role determined in Step 1
+        role: finalRole
       });
 
     if (roleError) {
@@ -709,6 +717,26 @@ export const registerVolunteer = async (data: VolunteerRegistrationData): Promis
     }
 
     console.log('✅ [VOLUNTEER] Step 4 complete. Role assigned.');
+
+    // ========================================================================
+    // STEP 4.5: Update volunteer_teams if Team Leader
+    // ========================================================================
+    if (data.isTeamLeader) {
+      console.log('👑 [VOLUNTEER] Step 4.5: Updating volunteer_teams with team_leader_id...');
+
+      const { error: teamUpdateError } = await supabase
+        .from('volunteer_teams')
+        .update({ team_leader_id: authUserId })
+        .eq('id', data.teamId);
+
+      if (teamUpdateError) {
+        console.error('❌ [VOLUNTEER] Team leader assignment failed:', teamUpdateError.message);
+        // This is not critical - user is still created, but team won't have leader set
+        console.warn('⚠️ [VOLUNTEER] Continuing despite team leader assignment failure');
+      } else {
+        console.log('✅ [VOLUNTEER] Step 4.5 complete. Team leader assigned to team.');
+      }
+    }
 
     // ========================================================================
     // STEP 5: Link to Default Event (SKIPPED)
@@ -1764,14 +1792,36 @@ export const getUserProfileByUUID = async (uuid: string) => {
       .single();
 
     // 3. Check for attendance records to determine current status
+    // Get the latest attendance record (ordered by created_at desc)
     const { data: attendanceData } = await supabase
       .from('attendee_attendance')
-      .select('type, created_at')
+      .select('created_at, check_in_time, check_out_time')
       .eq('attendee_id', uuid)
       .order('created_at', { ascending: false })
       .limit(1);
 
-    const lastAttendance = attendanceData && attendanceData.length > 0 ? attendanceData[0] : null;
+    const lastRecord = attendanceData && attendanceData.length > 0 ? attendanceData[0] : null;
+
+    // Determine if they are currently inside
+    // They are inside if we have a record with check_in_time BUT NO check_out_time
+    let currentStatus: 'inside' | 'outside' = 'outside';
+    let lastAttendance = null;
+
+    if (lastRecord) {
+      if (lastRecord.check_in_time && !lastRecord.check_out_time) {
+        currentStatus = 'inside';
+        lastAttendance = {
+          type: 'entry', // Derived for compatibility
+          timestamp: lastRecord.check_in_time
+        };
+      } else {
+        currentStatus = 'outside';
+        lastAttendance = {
+          type: 'exit', // Derived for compatibility
+          timestamp: lastRecord.check_out_time || lastRecord.created_at
+        };
+      }
+    }
 
     // 4. Get role
     const { data: roleData } = await supabase
@@ -1785,7 +1835,8 @@ export const getUserProfileByUUID = async (uuid: string) => {
         ...profile,
         university: attendeeDetails?.university,
         faculty: attendeeDetails?.faculty,
-        last_attendance: lastAttendance,
+        last_attendance: lastAttendance, // Legacy structure for compatibility
+        current_status: currentStatus, // Explicit status
         role: roleData?.role || 'attendee'
       },
       error: null
@@ -1799,6 +1850,7 @@ export const getUserProfileByUUID = async (uuid: string) => {
 
 /**
  * Record attendee attendance (entry or exit)
+ * Refactored: Entry = INSERT new record, Exit = UPDATE latest active record
  */
 export const recordAttendeeAttendance = async ({
   attendeeId,
@@ -1812,47 +1864,88 @@ export const recordAttendeeAttendance = async ({
   try {
     const now = new Date().toISOString();
 
-    const insertData: {
-      attendee_id: string;
-      event_id: string;
-      checked_in_by: string;
-      type: string;
-      check_in_time?: string;
-      check_out_time?: string;
-    } = {
-      attendee_id: attendeeId,
-      event_id: DEFAULT_EVENT_ID,
-      checked_in_by: checkedInBy,
-      type: type
-    };
+    console.log(`--- recordAttendeeAttendance (${type}) ---`);
+    console.log('Attendee ID:', attendeeId);
 
-    console.log('--- recordAttendeeAttendance DEBUG ---');
-    console.log('Inserting Attendance for Attendee ID:', attendeeId);
-    console.log('Type:', type);
-
-    // Set the appropriate time field based on type
-    if (type === 'entry') {
-      insertData.check_in_time = now;
-    } else {
-      insertData.check_out_time = now;
-    }
-
-    const { data, error } = await supabase
+    // Get the latest record to check current status
+    const { data: latestRecord, error: fetchError } = await supabase
       .from('attendee_attendance')
-      .insert(insertData)
-      .select()
-      .single();
+      .select('id, check_in_time, check_out_time')
+      .eq('attendee_id', attendeeId)
+      .eq('event_id', DEFAULT_EVENT_ID) // Ensure strictly strictly for this event
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (error) {
-      console.error('Error recording attendance:', error);
-      return { data: null, error: { message: error.message } };
+    if (fetchError) {
+      console.error('Error fetching latest attendance:', fetchError);
+      return { data: null, error: { message: 'Failed to verify current status' } };
     }
 
-    console.log('Attendance Recorded Successfully:', data);
-    console.log('--------------------------------------');
+    const isCurrentlyInside = latestRecord && latestRecord.check_in_time && !latestRecord.check_out_time;
 
-    return { data, error: null };
+    // LOGIC:
+    // Entry: User must be OUTSIDE (no active record). Create NEW record.
+    // Exit: User must be INSIDE (has active record). Update THAT record.
+
+    if (type === 'entry') {
+      // CHECK-IN
+      if (isCurrentlyInside) {
+        return { data: null, error: { message: 'User is already checked in!' } };
+      }
+
+      const insertData = {
+        attendee_id: attendeeId,
+        event_id: DEFAULT_EVENT_ID,
+        checked_in_by: checkedInBy,
+        check_in_time: now
+        // check_out_time is null by default
+        // type column is removed
+      };
+
+      const { data, error } = await supabase
+        .from('attendee_attendance')
+        .insert(insertData)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error recording check-in:', error);
+        return { data: null, error: { message: error.message } };
+      }
+
+      console.log('Check-in Successful:', data);
+      return { data, error: null };
+
+    } else {
+      // CHECK-OUT
+      if (!isCurrentlyInside) {
+        return { data: null, error: { message: 'User is not checked in!' } };
+      }
+
+      // Update the EXISTING active record
+      const { data, error } = await supabase
+        .from('attendee_attendance')
+        .update({
+          check_out_time: now
+          // We don't update checked_in_by on exit, typically check-out is just closing the loop
+          // But if we want to track who checked them out, we'd need a checked_out_by column
+        })
+        .eq('id', latestRecord.id) // Update SPECIFIC record
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error recording check-out:', error);
+        return { data: null, error: { message: error.message } };
+      }
+
+      console.log('Check-out Successful:', data);
+      return { data, error: null };
+    }
+
   } catch (error: any) {
+    console.error('recordAttendeeAttendance Exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
@@ -1862,11 +1955,12 @@ export const recordAttendeeAttendance = async ({
  */
 export const getTotalEntryCount = async () => {
   try {
+    // Count ALL records in attendee_attendance for this event
+    // Since each record represents a check-in (visit), this is the total number of visits
     const { count, error } = await supabase
       .from('attendee_attendance')
       .select('*', { count: 'exact', head: true })
-      .eq('event_id', DEFAULT_EVENT_ID)
-      .eq('type', 'entry');
+      .eq('event_id', DEFAULT_EVENT_ID);
 
     if (error) {
       console.error('Error getting entry count:', error);
@@ -1884,11 +1978,12 @@ export const getTotalEntryCount = async () => {
  */
 export const getRecentScansByVolunteer = async (volunteerId: string, limit: number = 10) => {
   try {
+    // We need to fetch records where this volunteer checked them in
+    // Note: We currently don't track who checked them OUT, so we only show Check-ins here primarily
     const { data, error } = await supabase
       .from('attendee_attendance')
       .select(`
         id,
-        type,
         check_in_time,
         check_out_time,
         created_at,
@@ -1909,16 +2004,23 @@ export const getRecentScansByVolunteer = async (volunteerId: string, limit: numb
     }
 
     // Transform the data for easier consumption
-    const transformedData = (data || []).map((scan: any) => ({
-      id: scan.id,
-      type: scan.type,
-      time: scan.check_in_time || scan.check_out_time || scan.created_at,
-      attendee: scan.user_profiles ? {
-        id: scan.user_profiles.id,
-        name: scan.user_profiles.full_name,
-        personalId: scan.user_profiles.personal_id
-      } : null
-    }));
+    const transformedData = (data || []).map((scan: any) => {
+      // Determine type based on check_out_time presence
+      const hasCheckedOut = !!scan.check_out_time;
+
+      return {
+        id: scan.id,
+        type: hasCheckedOut ? 'visit' : 'entry', // 'visit' means completed (in and out), 'entry' means currently inside
+        check_in_time: scan.check_in_time || scan.created_at,
+        check_out_time: scan.check_out_time,
+        time: scan.check_in_time || scan.created_at, // Keep for legacy, but UI should prefer specific times
+        attendee: scan.user_profiles ? {
+          id: scan.user_profiles.id,
+          name: scan.user_profiles.full_name,
+          personalId: scan.user_profiles.personal_id
+        } : null
+      };
+    });
 
     return { data: transformedData, error: null };
   } catch (error: any) {

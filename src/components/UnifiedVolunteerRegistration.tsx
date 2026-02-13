@@ -113,6 +113,7 @@ interface VolunteerFormData {
 
     teamId: string;
     gender: string;
+    isTeamLeader: boolean;
 }
 
 const genderOptions = [
@@ -139,7 +140,8 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         personalId: '',
 
         teamId: '',
-        gender: ''
+        gender: '',
+        isTeamLeader: false
     });
 
     const [errors, setErrors] = useState<ValidationError[]>([]);
@@ -218,7 +220,7 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         if (section === 3) {
             // Team Selection validation
             if (!formData.teamId) {
-                validationErrors.push({ field: 'teamId', message: 'Please select a team' });
+                validationErrors.push({ field: 'teamId', message: formData.isTeamLeader ? 'Please select a team to lead' : 'Please select a team' });
             }
         }
 
@@ -308,7 +310,8 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                 personalId: formData.personalId.trim(),
 
                 gender: formData.gender.trim(),
-                teamId: formData.teamId
+                teamId: formData.teamId,
+                isTeamLeader: formData.isTeamLeader
             });
 
             if (!result.success) {
@@ -326,12 +329,16 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             // Success handling
             setSuccessData({ firstName: formData.firstName });
 
-            // Determine role based on team ID for local storage
-            let assignedRole = 'volunteer';
-            if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') assignedRole = 'building';
-            else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') assignedRole = 'registration';
-            else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') assignedRole = 'info_desk';
-            else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') assignedRole = 'verification';
+            // Determine role - team leader gets 'team_leader' role
+            let assignedRole = formData.isTeamLeader ? 'team_leader' : 'volunteer';
+
+            // Or specific role based on team if not a team leader
+            if (!formData.isTeamLeader) {
+                if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') assignedRole = 'building';
+                else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') assignedRole = 'registration';
+                else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') assignedRole = 'info_desk';
+                else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') assignedRole = 'verification';
+            }
 
             const volunteerData = {
                 id: result.data?.user?.id,
@@ -349,12 +356,19 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             setLoading(false);
             setShowSuccess(true);
 
-            // Redirect to appropriate dashboard based on team
+            // Redirect to appropriate dashboard
             let redirectPath = '/volunteer';
-            if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') redirectPath = '/buildteam';
-            else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') redirectPath = '/registration';
-            else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') redirectPath = '/info-desk';
-            else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') redirectPath = '/verification';
+            if (formData.isTeamLeader) {
+                redirectPath = '/team-leader';
+            } else if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') {
+                redirectPath = '/buildteam';
+            } else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') {
+                redirectPath = '/registration';
+            } else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') {
+                redirectPath = '/info-desk';
+            } else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') {
+                redirectPath = '/verification';
+            }
 
             setTimeout(() => {
                 navigate(redirectPath, { replace: true });
@@ -670,56 +684,94 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                     <h3 className="text-lg font-semibold text-red-900 dark:text-red-200">Team Selection</h3>
                 </div>
                 <p className="text-red-800 dark:text-red-300">
-                    Please select the team you would like to join. This helps us assign you to the most suitable position.
+                    Please select whether you want to join a team or be a Team Leader.
                 </p>
+            </motion.div>
+
+            {/* Team Leader Toggle */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg"
+            >
+                <input
+                    type="checkbox"
+                    id="isTeamLeader"
+                    checked={formData.isTeamLeader}
+                    onChange={(e) => {
+                        setFormData(prev => ({ ...prev, isTeamLeader: e.target.checked, teamId: '' }));
+                    }}
+                    className="w-5 h-5 text-red-600 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-red-500"
+                />
+                <label htmlFor="isTeamLeader" className="text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                    Register as Team Leader
+                </label>
             </motion.div>
 
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.15 }}
+                transition={{ delay: 0.2 }}
             >
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
-                    Preferred Team *
+                    {formData.isTeamLeader ? 'Select Team to Lead *' : 'Preferred Team *'}
                 </label>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {VOLUNTEER_TEAMS.map((team, index) => (
-                        <motion.div
-                            key={team.id}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.2 + index * 0.05 }}
-                            className={`relative flex cursor-pointer rounded-lg border p-4 focus:outline-none transition-all duration-300 ${formData.teamId === team.id
-                                ? 'border-red-500 bg-red-50 dark:bg-red-900/30 ring-2 ring-red-500'
-                                : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600'
-                                }`}
-                            onClick={() => updateField('teamId', team.id)}
-                        >
-                            <input
-                                type="radio"
-                                name="teamId"
-                                value={team.id}
-                                checked={formData.teamId === team.id}
-                                onChange={(e) => updateField('teamId', e.target.value)}
-                                className="sr-only"
-                            />
-                            <div className="flex w-full items-center justify-between">
-                                <div className="flex flex-col">
-                                    <span className="font-medium text-gray-900 dark:text-white">{team.team_name} Team</span>
+
+                {formData.isTeamLeader ? (
+                    /* Team Leader: Dropdown */
+                    <select
+                        value={formData.teamId}
+                        onChange={(e) => updateField('teamId', e.target.value)}
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('teamId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                    >
+                        <option value="">Select a team to lead</option>
+                        {VOLUNTEER_TEAMS.map(team => (
+                            <option key={team.id} value={team.id}>{team.team_name} Team</option>
+                        ))}
+                    </select>
+                ) : (
+                    /* Regular Volunteer: Cards */
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {VOLUNTEER_TEAMS.map((team, index) => (
+                            <motion.div
+                                key={team.id}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.25 + index * 0.05 }}
+                                className={`relative flex cursor-pointer rounded-lg border p-4 focus:outline-none transition-all duration-300 ${formData.teamId === team.id
+                                    ? 'border-red-500 bg-red-50 dark:bg-red-900/30 ring-2 ring-red-500'
+                                    : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                    }`}
+                                onClick={() => updateField('teamId', team.id)}
+                            >
+                                <input
+                                    type="radio"
+                                    name="teamId"
+                                    value={team.id}
+                                    checked={formData.teamId === team.id}
+                                    onChange={(e) => updateField('teamId', e.target.value)}
+                                    className="sr-only"
+                                />
+                                <div className="flex w-full items-center justify-between">
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-gray-900 dark:text-white">{team.team_name} Team</span>
+                                    </div>
+                                    <motion.div
+                                        initial={{ scale: 0 }}
+                                        animate={{ scale: formData.teamId === team.id ? 1 : 0 }}
+                                        transition={{ type: "spring", stiffness: 300 }}
+                                        className={`flex-shrink-0 ${formData.teamId === team.id ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-500'
+                                            }`}
+                                    >
+                                        <CheckCircle className="h-6 w-6" />
+                                    </motion.div>
                                 </div>
-                                <motion.div
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: formData.teamId === team.id ? 1 : 0 }}
-                                    transition={{ type: "spring", stiffness: 300 }}
-                                    className={`flex-shrink-0 ${formData.teamId === team.id ? 'text-red-600 dark:text-red-400' : 'text-gray-300 dark:text-gray-500'
-                                        }`}
-                                >
-                                    <CheckCircle className="h-6 w-6" />
-                                </motion.div>
-                            </div>
-                        </motion.div>
-                    ))}
-                </div>
+                            </motion.div>
+                        ))}
+                    </div>
+                )}
                 {getFieldError('teamId') && (
                     <motion.p
                         initial={{ opacity: 0, y: -5 }}

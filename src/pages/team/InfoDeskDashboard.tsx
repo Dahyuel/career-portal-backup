@@ -12,6 +12,8 @@ import { supabase } from "../../lib/supabase";
 import { QRScanner } from "../../components/shared/QRScanner";
 import { useAttendeeProfile } from "../../hooks/useAttendeeProfile";
 import AttendeeProfileCard from "../../components/AttendeeProfileCard";
+import { useVolunteerProfile } from "../../hooks/useVolunteerProfile";
+import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileModal";
 
 // --- Animation Variants (matching BuildTeamDashboard) ---
 const containerVariants: Variants = {
@@ -96,7 +98,10 @@ export const InfoDeskDashboard: React.FC = () => {
   // Activity
   const [recentActivity, setRecentActivity] = useState<{ id: string; description: string; timestamp: string; type: string }[]>([]);
 
-  const firstName = profile?.full_name?.split(" ")[0] || "Volunteer";
+  const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
+  const [showVolunteerProfile, setShowVolunteerProfile] = useState(false);
+
+  const firstName = volunteerProfile?.full_name?.split(" ")[0] || profile?.full_name?.split(" ")[0] || "Volunteer";
 
   // --- Helpers ---
   const showFeedback = (type: "success" | "error", message: string) => {
@@ -479,7 +484,13 @@ export const InfoDeskDashboard: React.FC = () => {
   // MAIN RETURN
   // ===================================================================
   return (
-    <SharedNavigation navItems={navItems} activeItem={activeTab} onItemChange={setActiveTab} title="Info Desk">
+    <SharedNavigation
+      navItems={navItems}
+      activeItem={activeTab}
+      onItemChange={setActiveTab}
+      title="Info Desk"
+      onProfileClick={() => setShowVolunteerProfile(true)}
+    >
       {/* Feedback Toast */}
       <AnimatePresence>
         {feedback && (
@@ -744,6 +755,14 @@ export const InfoDeskDashboard: React.FC = () => {
           />
         )}
       </AnimatePresence>
+
+      {/* Volunteer Profile Modal */}
+      <VolunteerProfileModal
+        isOpen={showVolunteerProfile}
+        onClose={() => setShowVolunteerProfile(false)}
+        profile={volunteerProfile}
+        loading={loadingProfile}
+      />
     </SharedNavigation>
   );
 };

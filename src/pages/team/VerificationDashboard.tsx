@@ -9,6 +9,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import SettingsModal from '../../components/shared/SettingsModal';
+import { useVolunteerProfile } from '../../hooks/useVolunteerProfile';
+import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
 
 // --- Animation Variants ---
 const containerVariants: Variants = {
@@ -49,6 +51,10 @@ export const VerificationDashboard: React.FC = () => {
     const { profile } = useAuth();
     useTheme();
     const [activeTab, setActiveTab] = useState('home');
+    const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
+    const [showProfile, setShowProfile] = useState(false);
+
+    // Settings State
     const [showSettings, setShowSettings] = useState(false);
 
     // Attendee data
@@ -303,7 +309,7 @@ export const VerificationDashboard: React.FC = () => {
                         <div className="relative z-10">
                             <p className="uppercase tracking-widest text-red-200 font-semibold text-xs mb-2">Verification Team</p>
                             <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                                Welcome, {profile?.full_name?.split(' ')[0] || 'Verifier'}
+                                Welcome, {volunteerProfile?.full_name?.split(' ')[0] || profile?.full_name?.split(' ')[0] || 'Verifier'}
                             </h1>
                             <p className="text-lg text-red-100 opacity-90 max-w-md mb-8">
                                 Verify attendee registrations and ensure smooth event check-in.
@@ -489,7 +495,7 @@ export const VerificationDashboard: React.FC = () => {
             activeItem={activeTab}
             onItemChange={setActiveTab}
             title="Verification"
-            onProfileClick={() => setShowSettings(true)}
+            onProfileClick={() => setShowProfile(true)}
         >
             {/* Feedback Toast */}
             <AnimatePresence>
@@ -798,7 +804,7 @@ export const VerificationDashboard: React.FC = () => {
                             ) : (
                                 <img
                                     src={previewImage}
-                                    alt="Full size proof"
+                                    alt="Enlarged Proof"
                                     className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
                                 />
                             )}
@@ -813,6 +819,13 @@ export const VerificationDashboard: React.FC = () => {
                     <SettingsModal onClose={() => setShowSettings(false)} />
                 )}
             </AnimatePresence>
+            {/* Volunteer Profile Modal */}
+            <VolunteerProfileModal
+                isOpen={showProfile}
+                onClose={() => setShowProfile(false)}
+                profile={volunteerProfile}
+                loading={loadingProfile}
+            />
         </SharedNavigation>
     );
 };

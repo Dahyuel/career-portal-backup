@@ -26,6 +26,8 @@ import {
   supabase
 } from "../../lib/supabase";
 import { mockActivities } from "../../mocks";
+import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
+import { useVolunteerProfile } from "../../hooks/useVolunteerProfile";
 
 // Animation variants (matching BuildTeamDashboard pattern)
 const containerVariants: Variants = {
@@ -107,16 +109,17 @@ export const RegTeamDashboard: React.FC = () => {
   // Validation state
   // const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Feedback state
-  const [feedback, setFeedback] = useState<{
-    type: 'success' | 'error';
-    message: string;
-  } | null>(null);
+  // Feedback
+  const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Volunteer profile state
+  const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
+  const [showProfile, setShowProfile] = useState(false);
 
   // Mock stats for Home tab (reused from VolunteerDashboard)
   const userStats = {
-    score: user?.score || 1250,
-    rank: 12
+    score: volunteerProfile?.total_points || 0,
+    rank: 0
   };
 
   // Total entry count state
@@ -127,7 +130,9 @@ export const RegTeamDashboard: React.FC = () => {
     id: string;
     name: string;
     personalId: string;
-    time: string;
+    time: string; // Keep for legacy or fallback
+    check_in_time?: string;
+    check_out_time?: string;
     type: string;
   }[]>([]);
 
@@ -165,13 +170,15 @@ export const RegTeamDashboard: React.FC = () => {
       setTotalEntryCount(count);
 
       // Fetch recent scans by this volunteer
-      const { data: scans } = await getRecentScansByVolunteer(user.id, 6);
+      const { data: scans } = await getRecentScansByVolunteer(user.id, 3);
       if (scans) {
         setRecentScans(scans.map((scan: any) => ({
           id: scan.id,
           name: scan.attendee?.name || 'Unknown',
           personalId: scan.attendee?.personalId || '',
           time: formatRelativeTime(scan.time),
+          check_in_time: scan.check_in_time,
+          check_out_time: scan.check_out_time,
           type: scan.type
         })));
       }
@@ -197,21 +204,49 @@ export const RegTeamDashboard: React.FC = () => {
   const performDynamicSearch = async (query: string) => {
     try {
       setSearchLoading(true);
-      // Search by personal ID directly in user_profiles like BuildTeamDashboard
-      const { data, error } = await supabase
+
+      // Step 1: Search by personal ID directly in user_profiles
+      // We fetch more results (e.g. 20) to clear buffer for non-attendees
+      const { data: profiles, error } = await supabase
         .from('user_profiles')
         .select('id, full_name, phone, email, personal_id')
         .ilike('personal_id', `%${query}%`)
-        .limit(5);
+        .limit(20);
 
       if (error) {
         console.error("Search error:", error);
         setSearchResults([]);
-      } else if (!data || data.length === 0) {
+        return;
+      }
+
+      if (!profiles || profiles.length === 0) {
         setSearchResults([]);
         setShowSearchResults(false);
-      } else {
-        const attendees = data.map((d: { id: string; full_name: string | null; phone: string | null; email: string | null; personal_id: string | null }) => castToAttendee({
+        return;
+      }
+
+      // Step 2: Filter for attendees only by checking user_roles
+      const profileIds = profiles.map(p => p.id);
+
+      const { data: roles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .in('user_id', profileIds)
+        .eq('role', 'attendee');
+
+      if (rolesError) {
+        console.error("Role check error:", rolesError);
+        // If role check fails, treat as no results to be safe
+        setSearchResults([]);
+        return;
+      }
+
+      const attendeeIds = new Set(roles?.map(r => r.user_id));
+
+      const validAttendees = profiles
+        .filter(p => attendeeIds.has(p.id))
+        .slice(0, 5) // Limit to top 5 valid matches
+        .map((d: any) => castToAttendee({
           id: d.id,
           full_name: d.full_name || 'Unknown',
           first_name: d.full_name?.split(' ')[0] || '',
@@ -219,11 +254,10 @@ export const RegTeamDashboard: React.FC = () => {
           phone: d.phone || 'N/A',
           email: d.email || 'N/A',
           personal_id: d.personal_id,
-
         }));
-        setSearchResults(attendees);
-        setShowSearchResults(true);
-      }
+
+      setSearchResults(validAttendees);
+      setShowSearchResults(true);
     } catch (error) {
       console.error("Search exception:", error);
       setSearchResults([]);
@@ -459,16 +493,55 @@ export const RegTeamDashboard: React.FC = () => {
       } : null);
 
       // Update recent scans with proper type structure
-      setRecentScans(prev => [
-        {
-          id: data?.id || crypto.randomUUID(),
-          name: `${selectedAttendee.first_name} ${selectedAttendee.last_name}`,
-          personalId: selectedAttendee.personal_id,
-          time: 'Just now',
-          type: type
-        },
-        ...prev.slice(0, 5)
-      ]);
+      // Note: data might be null if it was an update (check-out), but in that case we should update the existing item if possible
+
+      setRecentScans(prev => {
+        const now = new Date().toISOString();
+        let newScans = [...prev];
+
+        if (action === 'exit') {
+          // Find the existing entry for this attendee and update it
+          // Since we don't have the record ID easily accessible for updates (unless we track it),
+          // we can try to find the LATEST incomplete entry for this person in the list.
+          // OR, relying on the fact that if we just checked them in, they are at the top.
+          const index = newScans.findIndex(s => s.personalId === selectedAttendee.personal_id && !s.check_out_time);
+
+          if (index !== -1) {
+            // Update existing
+            newScans[index] = {
+              ...newScans[index],
+              check_out_time: now,
+              type: 'visit' // Mark as completed visit
+            };
+            // Move to top? Or keep in place? Ideally move to top as "recently updated"
+            const updatedItem = newScans.splice(index, 1)[0];
+            newScans.unshift(updatedItem);
+          } else {
+            // Not found in recent list (maybe old check-in), add new "Completed" item
+            newScans.unshift({
+              id: data?.id || crypto.randomUUID(),
+              name: `${selectedAttendee.first_name} ${selectedAttendee.last_name}`,
+              personalId: selectedAttendee.personal_id,
+              time: 'Just now', // Relative
+              check_in_time: undefined, // Unknown entry time if not in list, or we could fetch it, but keeping it simple for UI
+              check_out_time: now,
+              type: 'visit'
+            });
+          }
+        } else {
+          // Entry - New record
+          newScans.unshift({
+            id: data?.id || crypto.randomUUID(),
+            name: `${selectedAttendee.first_name} ${selectedAttendee.last_name}`,
+            personalId: selectedAttendee.personal_id,
+            time: 'Just now',
+            check_in_time: now,
+            type: 'entry'
+          });
+        }
+
+        return newScans.slice(0, 3); // Limit to 3 as requested
+      });
 
       // Update total entry count if this was an entry
       if (action === 'enter') {
@@ -491,8 +564,11 @@ export const RegTeamDashboard: React.FC = () => {
   const handleSearchInputBlur = () => {
     setTimeout(() => {
       setShowSearchResults(false);
-    }, 200);
+    }, 3000);
   };
+
+  // Fetch volunteer profile data
+
 
   const renderHomeTab = () => (
     <motion.div
@@ -517,12 +593,15 @@ export const RegTeamDashboard: React.FC = () => {
             <div className="relative z-10">
               <p className="uppercase tracking-widest text-red-100 font-semibold text-xs mb-2">Volunteer Dashboard</p>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
-                Welcome, {user?.user_metadata?.full_name?.split(' ')[0] || user?.email?.split('@')[0] || 'Volunteer'}
+                Welcome, {volunteerProfile?.full_name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || 'Volunteer'}
               </h1>
               <p className="text-lg text-red-50 opacity-90 max-w-md mb-8">
                 Your support makes this event possible. Thank you for your dedication!
               </p>
-              <button className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit">
+              <button
+                onClick={() => setShowProfile(true)}
+                className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit"
+              >
                 <User className="w-5 h-5" />
                 Show Profile
               </button>
@@ -764,7 +843,7 @@ export const RegTeamDashboard: React.FC = () => {
             <h3 className="text-xl font-bold text-slate-900 dark:text-white">Recent Scans</h3>
             <span className="bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-gray-400 px-3 py-1 rounded-full text-xs font-bold">Today</span>
           </div>
-          <button className="text-primary font-bold text-sm hover:underline">View All History</button>
+          {/* View All History button removed as requested */}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {recentScans.length === 0 ? (
@@ -772,28 +851,50 @@ export const RegTeamDashboard: React.FC = () => {
               No recent scans. Start scanning to see activity here.
             </div>
           ) : (
-            recentScans.map((scan) => (
-              <div key={scan.id} className="flex items-center gap-5 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${scan.type === 'entry' ? 'bg-emerald-100 dark:bg-emerald-500/10' : 'bg-orange-100 dark:bg-orange-500/10'}`}>
-                  {scan.type === 'entry' ? (
-                    <CheckCircle className="text-emerald-500 w-8 h-8" />
-                  ) : (
-                    <X className="text-orange-500 w-8 h-8" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-slate-900 dark:text-white truncate">{scan.name}</h4>
-                  <p className="text-sm text-slate-500 dark:text-gray-400">ID: #{scan.personalId}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="text-[12px] text-slate-400 font-medium">{scan.time}</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${scan.type === 'entry' ? 'bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600' : 'bg-orange-100 dark:bg-orange-500/10 text-orange-600'}`}>
-                      {scan.type === 'entry' ? 'IN' : 'OUT'}
-                    </span>
+            recentScans.map((scan) => {
+              const isVisit = scan.type === 'visit' || (scan.check_in_time && scan.check_out_time);
+              // Calculate duration if visit
+              let duration = '';
+              if (isVisit && scan.check_in_time && scan.check_out_time) {
+                const diff = new Date(scan.check_out_time).getTime() - new Date(scan.check_in_time).getTime();
+                const mins = Math.floor(diff / 60000);
+                duration = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+              }
+
+              return (
+                <div key={scan.id} className="flex items-center gap-5 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
+                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${isVisit ? 'bg-blue-100 dark:bg-blue-500/10' : 'bg-emerald-100 dark:bg-emerald-500/10'}`}>
+                    {isVisit ? (
+                      <span className="material-symbols-outlined text-blue-600 text-2xl">history</span>
+                    ) : (
+                      <CheckCircle className="text-emerald-500 w-8 h-8" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-bold text-slate-900 dark:text-white truncate">{scan.name}</h4>
+                    <p className="text-sm text-slate-500 dark:text-gray-400">ID: #{scan.personalId}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+
+                      {isVisit && scan.check_in_time && scan.check_out_time ? (
+                        <div className="flex flex-col">
+                          <span className="text-[12px] text-slate-500 font-medium">
+                            {new Date(scan.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(scan.check_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          {duration && <span className="text-[10px] text-slate-400">Duration: {duration}</span>}
+                        </div>
+                      ) : (
+                        <span className="text-[12px] text-slate-400 font-medium">{scan.time}</span>
+                      )}
+
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isVisit ? 'bg-blue-100 dark:bg-blue-500/10 text-blue-600' : 'bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600'}`}>
+                        {isVisit ? 'VISIT' : 'IN'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </motion.div>
@@ -805,7 +906,8 @@ export const RegTeamDashboard: React.FC = () => {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="ASU Career Week"
+      title="Registration Team"
+      onProfileClick={() => setShowProfile(true)}
     >
       {/* Feedback Toast */}
       <AnimatePresence>
@@ -1032,6 +1134,13 @@ export const RegTeamDashboard: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Volunteer Profile Modal */}
+      <VolunteerProfileModal
+        isOpen={showProfile}
+        onClose={() => setShowProfile(false)}
+        profile={volunteerProfile}
+        loading={loadingProfile}
+      />
     </SharedNavigation>
   );
 };

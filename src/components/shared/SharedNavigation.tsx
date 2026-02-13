@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import SettingsModal from './SettingsModal';
+import LeaderboardModal from './LeaderboardModal';
 
 // Navigation item type
 export interface NavItem {
@@ -135,13 +136,13 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     onProfileClick,
     hideDock = false
 }, ref) => {
-    const { signOut } = useAuth();
     const navigate = useNavigate();
-
+    const { signOut, user, profile } = useAuth(); // FIXED: Added profile from useAuth
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
     const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
 
     // Animation control state - initializes from sessionStorage
@@ -167,6 +168,18 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
             return () => clearTimeout(timer);
         }
     }, [shouldAnimate]);
+
+    // Debug logging to help identify the issue
+    useEffect(() => {
+        console.log('User object:', user);
+        console.log('Profile object:', profile);
+        console.log('Profile role:', profile?.role);
+    }, [user, profile]);
+
+    // Roles that can view the leaderboard
+    // FIXED: Use profile.role instead of user.role
+    const canViewLeaderboard = profile?.role &&
+        ['volunteer', 'registration', 'building', 'info_desk', 'verification', 'team_leader', 'admin', 'super_admin', 'sadmin'].includes(profile.role);
 
     // Click outside to close dropdowns
     useEffect(() => {
@@ -246,7 +259,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
             {/* Main Content Area */}
             <main className="flex-1 min-w-0">
                 {/* Desktop Header */}
-                <header className={`hidden lg:flex ${navItems.length === 0 ? 'justify-between' : 'justify-end'} items-center px-8 py-4 lg:py-6 gap-4 bg-transparent dark:bg-transparent sticky top-0 z-40`}>
+                <header className={`hidden lg:flex ${navItems.length === 0 ? 'justify-between' : 'justify-end'} items-center px-8 py-4 lg:py-6 gap-4 bg-transparent sticky top-0 z-40`}>
                     {navItems.length === 0 && (
                         <motion.div
                             className="flex items-center gap-3"
@@ -351,15 +364,42 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                                         className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] min-w-[180px]"
                                     >
                                         <nav className="py-2">
+                                            {/* View Profile - Only for volunteer roles */}
+                                            {profile?.role && ['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
+                                                <button
+                                                    onClick={() => {
+                                                        setShowProfileDropdown(false);
+                                                        onProfileClick?.();
+                                                    }}
+                                                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                                                >
+                                                    <span className="material-symbols-outlined text-xl">badge</span>
+                                                    <span className="font-medium">View Profile</span>
+                                                </button>
+                                            )}
+                                            {/* Profile - For all other roles */}
+                                            {profile?.role && !['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
+                                                <button
+                                                    onClick={() => {
+                                                        setShowProfileDropdown(false);
+                                                        onProfileClick?.();
+                                                    }}
+                                                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                                                >
+                                                    <span className="material-symbols-outlined text-xl">person</span>
+                                                    <span className="font-medium">Profile</span>
+                                                </button>
+                                            )}
+                                            {/* Leaderboard - ALWAYS SHOW for debugging, or use the conditional */}
                                             <button
                                                 onClick={() => {
                                                     setShowProfileDropdown(false);
-                                                    onProfileClick?.();
+                                                    setShowLeaderboardModal(true);
                                                 }}
                                                 className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
                                             >
-                                                <span className="material-symbols-outlined text-xl">person</span>
-                                                <span className="font-medium">Profile</span>
+                                                <span className="material-symbols-outlined text-xl">leaderboard</span>
+                                                <span className="font-medium">Leaderboard</span>
                                             </button>
                                             <button
                                                 onClick={() => {
@@ -388,9 +428,8 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                         </div>
                     </div>
                 </header>
-
                 {/* Mobile Header */}
-                <header className="lg:hidden bg-transparent dark:bg-transparent px-6 py-4 flex items-center justify-between z-40 sticky top-0">
+                <header className="lg:hidden bg-slate-50 dark:bg-slate-950 px-6 py-4 flex items-center justify-between z-40 sticky top-0">
                     <div className="flex items-center gap-3">
                         <img src="/images/logo.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
                         <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
@@ -459,15 +498,42 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                                 className="absolute top-[73px] right-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[55] min-w-[180px]"
                             >
                                 <nav className="py-2">
+                                    {/* View Profile - Only for volunteer roles */}
+                                    {profile?.role && ['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
+                                        <button
+                                            onClick={() => {
+                                                setShowMobileProfileDropdown(false);
+                                                onProfileClick?.();
+                                            }}
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
+                                        >
+                                            <span className="material-symbols-outlined text-xl">badge</span>
+                                            <span className="font-medium">View Profile</span>
+                                        </button>
+                                    )}
+                                    {/* Profile - For all other roles */}
+                                    {profile?.role && !['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
+                                        <button
+                                            onClick={() => {
+                                                setShowMobileProfileDropdown(false);
+                                                onProfileClick?.();
+                                            }}
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
+                                        >
+                                            <span className="material-symbols-outlined text-xl">person</span>
+                                            <span className="font-medium">Profile</span>
+                                        </button>
+                                    )}
+                                    {/* Leaderboard - ALWAYS SHOW for debugging, or use the conditional */}
                                     <button
                                         onClick={() => {
                                             setShowMobileProfileDropdown(false);
-                                            onProfileClick?.();
+                                            setShowLeaderboardModal(true);
                                         }}
                                         className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
                                     >
-                                        <span className="material-symbols-outlined text-xl">person</span>
-                                        <span className="font-medium">Profile</span>
+                                        <span className="material-symbols-outlined text-xl">leaderboard</span>
+                                        <span className="font-medium">Leaderboard</span>
                                     </button>
                                     <button
                                         onClick={() => {
@@ -507,6 +573,12 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                     <SettingsModal onClose={() => setShowSettingsModal(false)} />
                 )}
             </AnimatePresence>
+
+            {/* Leaderboard Modal */}
+            <LeaderboardModal
+                isOpen={showLeaderboardModal}
+                onClose={() => setShowLeaderboardModal(false)}
+            />
 
             {/* Mobile Bottom Navigation - Floating Dock */}
             {!hideDock && navItems.length > 0 && (

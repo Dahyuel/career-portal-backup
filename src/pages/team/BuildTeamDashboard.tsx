@@ -14,10 +14,12 @@ import {
 } from "lucide-react";
 import SharedNavigation, { NavItem } from "../../components/shared/SharedNavigation";
 import { QRScanner } from "../../components/shared/QRScanner";
-import { useAuth } from "../../contexts/AuthContext";
+
 import { useTheme } from "../../contexts/ThemeContext";
 import { supabase } from "../../lib/supabase";
 import SettingsModal from "../../components/shared/SettingsModal";
+import { useVolunteerProfile } from "../../hooks/useVolunteerProfile";
+import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileModal";
 
 
 
@@ -97,9 +99,11 @@ const mockActivities = [
 ];
 
 export const BuildTeamDashboard: React.FC = () => {
-  useAuth();
+
   useTheme();
   const [activeTab, setActiveTab] = useState('home');
+  const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
+  const [showProfile, setShowProfile] = useState(false);
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
@@ -139,9 +143,9 @@ export const BuildTeamDashboard: React.FC = () => {
   } | null>(null);
 
   const userStats = {
-    score: 1250,
-    rank: 12,
-    first_name: 'Volunteer'
+    score: volunteerProfile?.total_points || 0,
+    rank: 0, // Rank implementation would require efficient DB query or Leaderboard context
+    first_name: volunteerProfile?.full_name?.split(' ')[0] || 'Volunteer'
   };
 
   // --- Helpers ---
@@ -441,7 +445,10 @@ export const BuildTeamDashboard: React.FC = () => {
               <p className="text-lg text-red-100 opacity-90 max-w-md mb-8">
                 Your support makes this event possible. Thank you for your dedication!
               </p>
-              <button className="bg-white text-red-600 hover:bg-red-50 px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit shadow-lg active:scale-95">
+              <button
+                onClick={() => setShowProfile(true)}
+                className="bg-white text-red-600 hover:bg-red-50 px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit shadow-lg active:scale-95"
+              >
                 <User className="w-5 h-5" />
                 Show Profile
               </button>
@@ -647,7 +654,7 @@ export const BuildTeamDashboard: React.FC = () => {
       activeItem={activeTab}
       onItemChange={setActiveTab}
       title="Build Team"
-      onProfileClick={() => setShowSettings(true)}
+      onProfileClick={() => setShowProfile(true)}
     >
       {/* Feedback Toast */}
       <AnimatePresence>
@@ -1047,6 +1054,13 @@ export const BuildTeamDashboard: React.FC = () => {
           <SettingsModal onClose={() => setShowSettings(false)} />
         )}
       </AnimatePresence>
+      {/* Volunteer Profile Modal */}
+      <VolunteerProfileModal
+        isOpen={showProfile}
+        onClose={() => setShowProfile(false)}
+        profile={volunteerProfile}
+        loading={loadingProfile}
+      />
     </SharedNavigation>
   );
 };

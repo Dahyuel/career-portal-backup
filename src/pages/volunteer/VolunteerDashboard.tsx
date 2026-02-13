@@ -1,13 +1,16 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useAttendeeProfile } from '../../hooks/useAttendeeProfile';
+import { useVolunteerProfile } from '../../hooks/useVolunteerProfile';
 import { mockActivities } from '../../mocks';
 import SharedNavigation from '../../components/shared/SharedNavigation';
-import AttendeeProfileCard from '../../components/AttendeeProfileCard';
+import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
+
 
 export const VolunteerDashboard: React.FC = () => {
   const { user } = useAuth();
   const { attendeeProfile } = useAttendeeProfile(user?.id);
+  const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
   const [showProfile, setShowProfile] = useState(false);
 
   // Get user stats from mock data
@@ -165,13 +168,13 @@ export const VolunteerDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Profile Card */}
-      {showProfile && attendeeProfile && (
-        <AttendeeProfileCard
-          profile={attendeeProfile}
-          onClose={() => setShowProfile(false)}
-        />
-      )}
+      {/* Profile Modal */}
+      <VolunteerProfileModal
+        isOpen={showProfile}
+        onClose={() => setShowProfile(false)}
+        profile={volunteerProfile}
+        loading={loadingProfile}
+      />
     </SharedNavigation>
   );
 };
