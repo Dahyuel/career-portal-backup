@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Mic, Linkedin, Twitter, Globe, ChevronRight } from 'lucide-react';
+import { Mic, Linkedin, ChevronRight } from 'lucide-react';
 import { Navbar } from '../../components/shared/Navbar';
 import { supabase } from '../../lib/supabase';
 import { motion } from 'framer-motion';
