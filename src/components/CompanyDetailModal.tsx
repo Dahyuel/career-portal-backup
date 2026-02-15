@@ -20,34 +20,43 @@ interface CompanyDetailModalProps {
 }
 
 const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen, onClose }) => {
-    if (!isOpen || !company) return null;
-
+    // Move AnimatePresence outside the conditional logic
     return (
-        <AnimatePresence>
-            {isOpen && (
+        <AnimatePresence mode="wait">
+            {isOpen && company && (
                 <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000]">
-                    {/* Backdrop */}
+                    {/* Backdrop with exit animation */}
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
                         onClick={onClose}
                         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
                     />
 
-                    {/* Modal Container */}
+                    {/* Modal Container with enhanced exit animation */}
                     <motion.div
                         initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                        exit={{
+                            opacity: 0,
+                            scale: 0.9,
+                            y: 30,
+                            transition: {
+                                duration: 0.3,
+                                ease: [0.4, 0, 0.2, 1] // Custom easing for smooth exit
+                            }
+                        }}
                         transition={{ type: "spring", duration: 0.5 }}
                         className="relative bg-white dark:bg-slate-900 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl shadow-2xl z-10"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* Close Button */}
+                        {/* Close Button with exit animation */}
                         <motion.button
-                            initial={{ opacity: 0, scale: 0 }}
-                            animate={{ opacity: 1, scale: 1 }}
+                            initial={{ opacity: 0, scale: 0, rotate: -90 }}
+                            animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                            exit={{ opacity: 0, scale: 0, rotate: 90 }}
                             transition={{ delay: 0.2 }}
                             whileHover={{ scale: 1.1, rotate: 90 }}
                             whileTap={{ scale: 0.9 }}
@@ -57,9 +66,8 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                             <span className="material-symbols-outlined text-xl">close</span>
                         </motion.button>
 
-                        {/* Hero Header with Logo */}
+                        {/* Hero Header with Logo - Staggered exit animations */}
                         <div className="relative h-64 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-900 flex flex-col items-center justify-center overflow-hidden border-b border-gray-100 dark:border-slate-800">
-                            {/* Background Pattern */}
                             <div className="absolute inset-0 opacity-[0.03]" style={{
                                 backgroundImage: 'radial-gradient(circle at 2px 2px, black 1px, transparent 0)',
                                 backgroundSize: '24px 24px'
@@ -69,6 +77,7 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                                 <motion.div
                                     initial={{ scale: 0.5, opacity: 0, rotate: -180 }}
                                     animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                                    exit={{ scale: 0.5, opacity: 0, rotate: 180 }}
                                     transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
                                     className="w-32 h-32 mx-auto bg-white dark:bg-slate-800 rounded-3xl shadow-xl flex items-center justify-center p-4 mb-6 ring-4 ring-white/50 dark:ring-slate-700/50"
                                 >
@@ -86,12 +95,14 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                                 <motion.div
                                     initial={{ y: 20, opacity: 0 }}
                                     animate={{ y: 0, opacity: 1 }}
+                                    exit={{ y: -20, opacity: 0 }}
                                     transition={{ delay: 0.2 }}
                                 >
                                     <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-2 tracking-tight">{company.company_name}</h2>
                                     <motion.div
                                         initial={{ scale: 0 }}
                                         animate={{ scale: 1 }}
+                                        exit={{ scale: 0 }}
                                         transition={{ delay: 0.3, type: "spring" }}
                                         className="flex items-center justify-center gap-2"
                                     >
@@ -112,12 +123,14 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                             <motion.div
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -20 }}
                                 transition={{ delay: 0.4 }}
                                 className="grid grid-cols-1 md:grid-cols-2 gap-4"
                             >
                                 <motion.div
                                     initial={{ opacity: 0, x: -20 }}
                                     animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -20 }}
                                     transition={{ delay: 0.5 }}
                                     whileHover={{ y: -4 }}
                                     className="bg-gray-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-start gap-4 transition-all"
@@ -138,6 +151,7 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                                 <motion.div
                                     initial={{ opacity: 0, x: 20 }}
                                     animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: 20 }}
                                     transition={{ delay: 0.6 }}
                                     whileHover={{ y: -4 }}
                                     className="bg-gray-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-gray-100 dark:border-slate-800 flex items-start gap-4 transition-all"
@@ -156,6 +170,7 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                             <motion.div
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -20 }}
                                 transition={{ delay: 0.7 }}
                             >
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
@@ -181,6 +196,7 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                             <motion.div
                                 initial={{ opacity: 0, y: 20 }}
                                 animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 20 }}
                                 transition={{ delay: 0.9 }}
                                 className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-gray-100 dark:border-slate-800"
                             >

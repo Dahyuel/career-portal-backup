@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { useAuth } from '../../contexts/AuthContext';
-import { useEmployerProfile } from '../../hooks/useEmployerProfile';
 import EmployerProfileCard from '../../components/EmployerProfileCard';
 import AddEditJobModal from '../../components/employer/AddEditJobModal';
 import JobApplicantsModal from '../../components/employer/JobApplicantsModal';
@@ -32,33 +31,65 @@ const itemVariants: Variants = {
     }
 };
 
+// Type definitions
+interface Job {
+    id: string;
+    title: string;
+    company_id: string;
+    employer_id: string;
+    event_id: string;
+    job_type: string;
+    location: string;
+    experience_level: string;
+    employment_mode: string;
+    posted_at: string;
+    is_active: boolean;
+    no_of_applicants: number;
+    description: string;
+    required_skills: string;
+}
+
+interface Notification {
+    id: string;
+    title: string;
+    content: string;
+    publish_at: string;
+    type: string;
+}
+
+interface Stats {
+    totalJobs: number;
+    totalApplicants: number;
+}
+
 export const EmployerDashboard: React.FC = () => {
     const { user, profile } = useAuth();
-    const { employerProfile, loading: profileLoading } = useEmployerProfile(user?.id);
+
+    // REMOVED: useEmployerProfile hook - now using profile from AuthContext
     const [showProfile, setShowProfile] = useState(false);
     const [activeTab, setActiveTab] = useState('home');
 
     // Jobs State
-    const [jobs, setJobs] = useState<any[]>([]);
+    const [jobs, setJobs] = useState<Job[]>([]);
     const [loadingJobs, setLoadingJobs] = useState(false);
     const [showJobModal, setShowJobModal] = useState(false);
-    const [selectedJob, setSelectedJob] = useState<any | null>(null);
+    const [selectedJob, setSelectedJob] = useState<Job | null>(null);
     const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
 
     // Applicants State
     const [showApplicantsModal, setShowApplicantsModal] = useState(false);
-    const [selectedJobForApplicants, setSelectedJobForApplicants] = useState<any | null>(null);
+    const [selectedJobForApplicants, setSelectedJobForApplicants] = useState<Job | null>(null);
 
     // Job Management (Redesign)
     const [showManagementModal, setShowManagementModal] = useState(false);
-    const [jobForManagement, setJobForManagement] = useState<any | null>(null);
+    const [jobForManagement, setJobForManagement] = useState<Job | null>(null);
 
     // Optimization States
-    const [dashboardReady, setDashboardReady] = useState(false);
-    const [notifications, setNotifications] = useState<any[]>([]);
-    const [stats, setStats] = useState({ totalJobs: 0, totalApplicants: 0 });
+    const [notifications, setNotifications] = useState<Notification[]>([]);
+    const [stats, setStats] = useState<Stats>({ totalJobs: 0, totalApplicants: 0 });
     const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['home']));
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
+    const [isInitializing, setIsInitializing] = useState(true);
 
     const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
@@ -68,59 +99,90 @@ export const EmployerDashboard: React.FC = () => {
         { key: 'cvs', label: 'CVs', icon: 'description' }
     ];
 
-    const fetchJobs = async () => {
-        if (!employerProfile?.employer_id) return;
+    // Extract employer data from profile - OPTIMIZED
+    const employerData = useMemo(() => {
+        if (!profile?.employer) return null;
+
+        return {
+            id: user?.id || (profile?.id || ''), // Use user.id as primary, then profile.id
+            personal_id: profile.personal_id || '', // Required by EmployerProfile
+            employer_id: profile.employer.user_id,
+            company_id: profile.employer.company_id,
+            job_title: profile.employer.job_title,
+            company_name: profile.company?.company_name || '',
+            company_logo: profile.company?.logo_url || '',
+            company_website: profile.company?.website || '',
+            event_id: profile.event_id || EVENT_ID,
+            full_name: profile.full_name,
+            email: profile.email || user?.email || '', // Fallback to user email
+            phone: profile.phone || ''
+        };
+    }, [profile, user]);
+
+    // Fetch Jobs - OPTIMIZED with useCallback
+    const fetchJobs = useCallback(async () => {
+        if (!employerData?.employer_id) return;
+
         setLoadingJobs(true);
         try {
+            // Use a more efficient query with aggregate
             const { data, error } = await supabase
                 .from('job_positions')
-                .select('*, job_applications(count)')
-                .eq('employer_id', employerProfile.employer_id)
+                .select(`
+                    *,
+                    job_applications(count)
+                `)
+                .eq('employer_id', employerData.employer_id)
                 .order('posted_at', { ascending: false });
 
             if (error) throw error;
 
             const jobsWithCounts = data?.map(job => ({
                 ...job,
-                no_of_applicants: (job.job_applications as any)?.[0]?.count || 0
+                no_of_applicants: job.job_applications?.[0]?.count || 0
             })) || [];
 
             setJobs(jobsWithCounts);
             setLoadedTabs(prev => new Set(prev).add('jobs').add('cvs'));
 
-            // Sync stats if they've changed
+            // Sync stats
             const totalApplicants = jobsWithCounts.reduce((acc, job) => acc + (job.no_of_applicants || 0), 0);
             setStats({ totalJobs: jobsWithCounts.length, totalApplicants });
         } catch (error) {
             console.error('Error fetching jobs:', error);
+            setToast({
+                message: 'Failed to load jobs. Please try again.',
+                type: 'error'
+            });
         } finally {
             setLoadingJobs(false);
         }
-    };
+    }, [employerData?.employer_id]);
 
-    // Parallel Initial Data Load (Profile, Notifications, Stats)
+    // Initial Data Load - OPTIMIZED
     useEffect(() => {
-        if (profileLoading || !employerProfile?.employer_id || !profile?.role) return;
+        if (!profile || !employerData?.employer_id) {
+            setIsInitializing(false);
+            return;
+        }
 
         const fetchInitialData = async () => {
             try {
-                const [notificationsResult, jobsCountResult, applicantsCountResult] = await Promise.all([
+                // Parallel fetch for better performance
+                const [notificationsResult, jobsCountResult] = await Promise.all([
                     supabase
                         .from('notifications')
                         .select('id, title, content, publish_at, announcement_type, target_roles')
                         .eq('event_id', EVENT_ID)
-                        .contains('target_roles', [profile.role])
-                        .order('publish_at', { ascending: false }),
-                    // Efficiently count jobs
+                        .contains('target_roles', ['employer'])
+                        .order('publish_at', { ascending: false })
+                        .limit(10),
+
+                    // Count jobs efficiently
                     supabase
                         .from('job_positions')
                         .select('id', { count: 'exact', head: true })
-                        .eq('employer_id', employerProfile.employer_id),
-                    // For total applicants, we'll fetch job IDs and then count applications in one go
-                    supabase
-                        .from('job_positions')
-                        .select('id')
-                        .eq('employer_id', employerProfile.employer_id)
+                        .eq('employer_id', employerData.employer_id)
                 ]);
 
                 if (notificationsResult.data) {
@@ -132,38 +194,42 @@ export const EmployerDashboard: React.FC = () => {
 
                 const totalJobs = jobsCountResult.count || 0;
 
-                // Get total applicants across all jobs
+                // Get total applicants efficiently if there are jobs
                 let totalApplicants = 0;
-                if (jobsCountResult.count && jobsCountResult.count > 0) {
-                    const jobIds = applicantsCountResult.data?.map(j => j.id) || [];
-                    if (jobIds.length > 0) {
+                if (totalJobs > 0) {
+                    const { data: jobIds } = await supabase
+                        .from('job_positions')
+                        .select('id')
+                        .eq('employer_id', employerData.employer_id);
+
+                    if (jobIds && jobIds.length > 0) {
                         const { count } = await supabase
                             .from('job_applications')
                             .select('id', { count: 'exact', head: true })
-                            .in('job_position_id', jobIds);
+                            .in('job_position_id', jobIds.map(j => j.id));
                         totalApplicants = count || 0;
                     }
                 }
 
                 setStats({ totalJobs, totalApplicants });
-                setDashboardReady(true);
             } catch (error) {
                 console.error('Error in initial data fetch:', error);
-                setDashboardReady(true); // Allow render anyway
+            } finally {
+                setIsInitializing(false);
             }
         };
 
         fetchInitialData();
-    }, [profileLoading, employerProfile?.employer_id, profile?.role]);
+    }, [profile, employerData]);
 
-    // Lazy Loading Tab Data
+    // Lazy Loading Tab Data - OPTIMIZED
     useEffect(() => {
-        if ((activeTab === 'jobs' || activeTab === 'cvs') && !loadedTabs.has('jobs')) {
+        if ((activeTab === 'jobs' || activeTab === 'cvs') && !loadedTabs.has('jobs') && employerData?.employer_id) {
             fetchJobs();
         }
-    }, [activeTab, loadedTabs, employerProfile?.employer_id]);
+    }, [activeTab, loadedTabs, employerData?.employer_id, fetchJobs]);
 
-    const getTypeBadgeColor = (type: string): string => {
+    const getTypeBadgeColor = useCallback((type: string): string => {
         const colors: Record<string, string> = {
             'Full-Time': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
             'full-time': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
@@ -177,14 +243,14 @@ export const EmployerDashboard: React.FC = () => {
             'remote': 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300'
         };
         return colors[type] || 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300';
-    };
+    }, []);
 
-    const handleManagementAction = (job: any) => {
+    const handleManagementAction = useCallback((job: Job) => {
         setJobForManagement(job);
         setShowManagementModal(true);
-    };
+    }, []);
 
-    const handleDeleteAttempt = (job: any) => {
+    const handleDeleteAttempt = useCallback((job: Job) => {
         if (job.no_of_applicants > 0) {
             setToast({
                 message: "Cannot delete a job with active applicants. Please review the applicants first.",
@@ -194,10 +260,9 @@ export const EmployerDashboard: React.FC = () => {
         }
         setDeleteJobId(job.id);
         setShowManagementModal(false);
-    };
+    }, []);
 
-
-    const confirmDeleteJob = async () => {
+    const confirmDeleteJob = useCallback(async () => {
         if (!deleteJobId) return;
 
         try {
@@ -207,15 +272,24 @@ export const EmployerDashboard: React.FC = () => {
                 .eq('id', deleteJobId);
 
             if (error) throw error;
-            fetchJobs(); // Refresh
+
+            setToast({
+                message: 'Job deleted successfully',
+                type: 'success'
+            });
+
+            fetchJobs();
             setDeleteJobId(null);
         } catch (error) {
             console.error('Error deleting job:', error);
-            alert('Failed to delete job');
+            setToast({
+                message: 'Failed to delete job',
+                type: 'error'
+            });
         }
-    };
+    }, [deleteJobId, fetchJobs]);
 
-    const renderContent = () => {
+    const renderContent = useCallback(() => {
         switch (activeTab) {
             case 'home':
                 return (
@@ -239,7 +313,7 @@ export const EmployerDashboard: React.FC = () => {
                             </div>
                             <div className="relative z-10">
                                 <h2 className="text-3xl font-bold text-white mb-2">
-                                    Welcome, {employerProfile?.full_name?.split(' ')[0] || 'Partner'}!
+                                    Welcome, {employerData?.full_name?.split(' ')[0] || 'Partner'}!
                                 </h2>
                                 <p className="text-red-100 text-lg mb-6 max-w-xl">
                                     Here's what's happening with your job postings and applications today.
@@ -284,17 +358,17 @@ export const EmployerDashboard: React.FC = () => {
                                     </div>
                                     <div>
                                         <h3 className="font-bold text-slate-900 dark:text-white text-lg leading-tight">
-                                            {employerProfile?.company_name || 'Company Name'}
+                                            {employerData?.company_name || 'Company Name'}
                                         </h3>
                                         <p className="text-sm text-slate-500 dark:text-slate-400">
-                                            {employerProfile?.job_title || 'Employer'}
+                                            {employerData?.job_title || 'Employer'}
                                         </p>
                                     </div>
                                 </div>
                                 <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                                     <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm">
                                         <span className="material-symbols-outlined text-lg opacity-70">mail</span>
-                                        <span className="truncate">{employerProfile?.email}</span>
+                                        <span className="truncate">{employerData?.email}</span>
                                     </div>
                                 </div>
                             </motion.div>
@@ -498,10 +572,28 @@ export const EmployerDashboard: React.FC = () => {
             default:
                 return null;
         }
-    };
+    }, [activeTab, employerData, stats, loadingJobs, jobs, handleManagementAction, getTypeBadgeColor]);
 
-    if (!dashboardReady) {
+    // Show loading while initializing
+    if (isInitializing || !profile) {
         return <DashboardLoading />;
+    }
+
+    // Check if user has employer role
+    if (!profile.roles.includes('employer') && !employerData) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="text-center">
+                    <span className="material-symbols-outlined text-6xl text-red-500 mb-4">error</span>
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+                        Access Denied
+                    </h2>
+                    <p className="text-slate-600 dark:text-slate-400">
+                        You don't have employer access. Please contact support.
+                    </p>
+                </div>
+            </div>
+        );
     }
 
     return (
@@ -522,9 +614,8 @@ export const EmployerDashboard: React.FC = () => {
 
             {/* Profile Card */}
             <AnimatePresence>
-                {showProfile && (
+                {showProfile && employerData && (
                     <EmployerProfileCard
-                        profile={employerProfile}
                         onClose={() => setShowProfile(false)}
                     />
                 )}
@@ -532,12 +623,12 @@ export const EmployerDashboard: React.FC = () => {
 
             {/* Add/Edit Job Modal */}
             <AnimatePresence>
-                {showJobModal && employerProfile && (
+                {showJobModal && employerData && (
                     <AddEditJobModal
                         job={selectedJob}
-                        companyId={employerProfile.company_id || ''}
-                        employerId={employerProfile.employer_id || ''}
-                        eventId={employerProfile.event_id || ''}
+                        companyId={employerData.company_id || ''}
+                        employerId={employerData.employer_id || ''}
+                        eventId={employerData.event_id || ''}
                         onClose={() => setShowJobModal(false)}
                         onSave={fetchJobs}
                     />

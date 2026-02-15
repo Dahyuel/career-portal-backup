@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, forwardRef } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -24,9 +24,9 @@ interface SharedNavigationProps {
     hideDock?: boolean;
 }
 
-// --- Independent Sub-Components ---
+// --- Memoized Sub-Components for Performance ---
 
-const SidebarLogo = ({ animate }: { animate: boolean }) => (
+const SidebarLogo = memo(({ animate }: { animate: boolean }) => (
     <motion.div
         className="p-6 flex items-center gap-3"
         initial={animate ? { opacity: 0, y: -20 } : false}
@@ -42,37 +42,43 @@ const SidebarLogo = ({ animate }: { animate: boolean }) => (
             ASU Employment Fair
         </span>
     </motion.div>
-);
+));
 
-const SidebarButton = forwardRef<HTMLButtonElement, { item: NavItem; index: number; activeItem: string; onItemChange: (key: string) => void; animate: boolean }>(({ item, index, activeItem, onItemChange, animate }, ref) => {
-    const isActive = activeItem === item.key;
-    return (
-        <motion.button
-            ref={ref}
-            key={item.key}
-            onClick={() => onItemChange(item.key)}
-            initial={animate ? { opacity: 0, x: -20 } : false}
-            animate={{ opacity: 1, x: 0 }}
-            transition={animate ? {
-                duration: 0.3,
-                delay: 0.1 + (index * 0.05), // Reduced delay for snappier feel
-                ease: "easeOut"
-            } : {}}
-            whileHover={{ scale: 1.02, x: 5 }}
-            whileTap={{ scale: 0.98 }}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-colors ${isActive
-                ? 'bg-primary/10 text-primary'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-primary'
-                }`}
-            style={isActive ? { color: '#DC2626', backgroundColor: 'rgba(220, 38, 38, 0.1)' } : {}}
-        >
-            <span className="material-symbols-outlined">{item.icon}</span>
-            <span>{item.label}</span>
-        </motion.button>
-    );
-});
+SidebarLogo.displayName = 'SidebarLogo';
 
-const TopBarIcon = ({
+const SidebarButton = memo(forwardRef<HTMLButtonElement, {
+    item: NavItem;
+    index: number;
+    isActive: boolean;
+    onItemChange: (key: string) => void;
+    animate: boolean
+}>(({ item, index, isActive, onItemChange, animate }, ref) => (
+    <motion.button
+        ref={ref}
+        onClick={() => onItemChange(item.key)}
+        initial={animate ? { opacity: 0, x: -20 } : false}
+        animate={{ opacity: 1, x: 0 }}
+        transition={animate ? {
+            duration: 0.3,
+            delay: 0.1 + (index * 0.05),
+            ease: "easeOut"
+        } : {}}
+        whileHover={{ scale: 1.02, x: 5 }}
+        whileTap={{ scale: 0.98 }}
+        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-colors ${isActive
+            ? 'bg-primary/10 text-primary'
+            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-primary'
+            }`}
+        style={isActive ? { color: '#DC2626', backgroundColor: 'rgba(220, 38, 38, 0.1)' } : {}}
+    >
+        <span className="material-symbols-outlined">{item.icon}</span>
+        <span>{item.label}</span>
+    </motion.button>
+)));
+
+SidebarButton.displayName = 'SidebarButton';
+
+const TopBarIcon = memo(({
     icon,
     onClick,
     badgeCount,
@@ -101,29 +107,71 @@ const TopBarIcon = ({
             />
         )}
     </motion.button>
-);
+));
 
-const MobileDockItem = ({ item, activeItem, onItemChange }: { item: NavItem; activeItem: string; onItemChange: (key: string) => void }) => {
-    const isActive = activeItem === item.key;
-    return (
-        <motion.button
-            key={item.key}
-            onClick={() => onItemChange(item.key)}
-            whileHover={{ y: -5 }}
-            whileTap={{ scale: 0.9 }}
-            className={`flex flex-col items-center gap-1 transition-colors min-w-[60px] ${isActive
-                ? 'text-primary'
-                : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-                }`}
-            style={isActive ? { color: '#DC2626' } : {}}
-        >
-            <span className="material-symbols-outlined">{item.icon}</span>
-            <span className="text-[10px] font-bold">{item.label}</span>
-        </motion.button>
-    );
-};
+TopBarIcon.displayName = 'TopBarIcon';
 
+const MobileDockItem = memo(({ item, isActive, onItemChange }: {
+    item: NavItem;
+    isActive: boolean;
+    onItemChange: (key: string) => void
+}) => (
+    <motion.button
+        onClick={() => onItemChange(item.key)}
+        whileHover={{ y: -5 }}
+        whileTap={{ scale: 0.9 }}
+        className={`flex flex-col items-center gap-1 transition-colors min-w-[60px] ${isActive
+            ? 'text-primary'
+            : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+            }`}
+        style={isActive ? { color: '#DC2626' } : {}}
+    >
+        <span className="material-symbols-outlined">{item.icon}</span>
+        <span className="text-[10px] font-bold">{item.label}</span>
+    </motion.button>
+));
 
+MobileDockItem.displayName = 'MobileDockItem';
+
+// Notification Item Component
+const NotificationItem = memo(({ notification, onClick }: {
+    notification: any;
+    onClick: (e: React.MouseEvent) => void
+}) => (
+    <div
+        className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer border-b border-slate-100 dark:border-slate-800/50 last:border-0 ${!notification.is_read ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''
+            }`}
+        onClick={onClick}
+    >
+        <div className="flex gap-3">
+            <div className="shrink-0 mt-1">
+                <span className="material-symbols-outlined text-primary" style={{ color: '#DC2626' }}>
+                    {notification.type === 'success' ? 'check_circle' : 'info'}
+                </span>
+            </div>
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
+                    {notification.title || 'Notification'}
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400">
+                    {notification.content || notification.message}
+                </p>
+                {notification.created_at && (
+                    <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                        {new Date(notification.created_at).toLocaleDateString()}
+                    </p>
+                )}
+            </div>
+            {!notification.is_read && (
+                <div className="shrink-0">
+                    <span className="w-2 h-2 bg-blue-500 rounded-full block"></span>
+                </div>
+            )}
+        </div>
+    </div>
+));
+
+NotificationItem.displayName = 'NotificationItem';
 
 const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     children,
@@ -137,7 +185,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     hideDock = false
 }, ref) => {
     const navigate = useNavigate();
-    const { signOut, user, profile } = useAuth(); // FIXED: Added profile from useAuth
+    const { signOut, hasAnyRole } = useAuth();
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
     const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
@@ -145,11 +193,8 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
 
-    // Animation control state - initializes from sessionStorage
-    const [shouldAnimate, setShouldAnimate] = useState(() => {
-        const hasAnimated = sessionStorage.getItem('nav_animated');
-        return !hasAnimated;
-    });
+    // Animation control - only animate once per session
+    const [shouldAnimate] = useState(() => !sessionStorage.getItem('nav_animated'));
 
     const profileDropdownRef = useRef<HTMLDivElement>(null);
     const mobileProfileDropdownRef = useRef<HTMLDivElement>(null);
@@ -160,41 +205,34 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     useEffect(() => {
         if (shouldAnimate) {
             sessionStorage.setItem('nav_animated', 'true');
-            // Disable animation for future renders in this session
-            // We use a timeout to let the initial animation play
-            const timer = setTimeout(() => {
-                setShouldAnimate(false);
-            }, 1000);
-            return () => clearTimeout(timer);
         }
     }, [shouldAnimate]);
 
-    // Debug logging to help identify the issue
-    useEffect(() => {
-        console.log('User object:', user);
-        console.log('Profile object:', profile);
-        console.log('Profile role:', profile?.role);
-    }, [user, profile]);
+    // Determine if user can view leaderboard based on roles
+    const canViewLeaderboard = hasAnyRole([
+        'volunteer', 'registration', 'building', 'info_desk', 'verification',
+        'team_leader', 'admin', 'super_admin', 'sadmin'
+    ]);
 
-    // Roles that can view the leaderboard
-    // FIXED: Use profile.role instead of user.role
-    const canViewLeaderboard = profile?.role &&
-        ['volunteer', 'registration', 'building', 'info_desk', 'verification', 'team_leader', 'admin', 'super_admin', 'sadmin'].includes(profile.role);
+    // Determine if user has volunteer-style profile view
+    const hasVolunteerProfile = hasAnyRole([
+        'volunteer', 'registration', 'building', 'info_desk', 'verification'
+    ]);
 
     // Click outside to close dropdowns
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (profileDropdownRef.current && !profileDropdownRef.current.contains(event.target as Node)) {
+            const target = event.target as Node;
+
+            if (profileDropdownRef.current && !profileDropdownRef.current.contains(target)) {
                 setShowProfileDropdown(false);
             }
-            if (mobileProfileDropdownRef.current && !mobileProfileDropdownRef.current.contains(event.target as Node)) {
+            if (mobileProfileDropdownRef.current && !mobileProfileDropdownRef.current.contains(target)) {
                 setShowMobileProfileDropdown(false);
             }
-            if (notificationDropdownRef.current && !notificationDropdownRef.current.contains(event.target as Node)) {
-                // Check if it's also outside mobile notification dropdown
-                if (!mobileNotificationDropdownRef.current || !mobileNotificationDropdownRef.current.contains(event.target as Node)) {
-                    setShowNotificationDropdown(false);
-                }
+            if (notificationDropdownRef.current && !notificationDropdownRef.current.contains(target) &&
+                (!mobileNotificationDropdownRef.current || !mobileNotificationDropdownRef.current.contains(target))) {
+                setShowNotificationDropdown(false);
             }
         };
 
@@ -202,7 +240,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const handleSignOut = async () => {
+    const handleSignOut = useCallback(async () => {
         if (loggingOut) return;
 
         setLoggingOut(true);
@@ -223,17 +261,125 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                 setLoggingOut(false);
             }, 1000);
         }
-    };
+    }, [loggingOut, signOut, navigate]);
 
-    const handleNotificationClick = (notification: any, e?: React.MouseEvent) => {
+    const handleNotificationClick = useCallback((notification: any, e?: React.MouseEvent) => {
         if (e) {
             e.stopPropagation();
         }
         setShowNotificationDropdown(false);
         onNotificationClick?.(notification);
-    };
+    }, [onNotificationClick]);
+
+    const handleProfileClick = useCallback(() => {
+        setShowProfileDropdown(false);
+        setShowMobileProfileDropdown(false);
+        onProfileClick?.();
+    }, [onProfileClick]);
+
+    const handleLeaderboardClick = useCallback(() => {
+        setShowProfileDropdown(false);
+        setShowMobileProfileDropdown(false);
+        setShowLeaderboardModal(true);
+    }, []);
+
+    const handleSettingsClick = useCallback(() => {
+        setShowProfileDropdown(false);
+        setShowMobileProfileDropdown(false);
+        setShowSettingsModal(true);
+    }, []);
 
     const unreadCount = notifications.filter((n: any) => !n.is_read).length;
+
+    // Profile Dropdown Menu Component
+    const ProfileMenu = useCallback(({ onItemClick }: { onItemClick: () => void }) => (
+        <nav className="py-2">
+            {/* Profile/View Profile Button */}
+            {onProfileClick && (
+                <button
+                    onClick={() => {
+                        onItemClick();
+                        handleProfileClick();
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                >
+                    <span className="material-symbols-outlined text-xl">
+                        {hasVolunteerProfile ? 'badge' : 'person'}
+                    </span>
+                    <span className="font-medium">
+                        {hasVolunteerProfile ? 'View Profile' : 'Profile'}
+                    </span>
+                </button>
+            )}
+
+            {/* Leaderboard - Only for roles that can view it */}
+            {canViewLeaderboard && (
+                <button
+                    onClick={() => {
+                        onItemClick();
+                        handleLeaderboardClick();
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+                >
+                    <span className="material-symbols-outlined text-xl">leaderboard</span>
+                    <span className="font-medium">Leaderboard</span>
+                </button>
+            )}
+
+            {/* Settings */}
+            <button
+                onClick={() => {
+                    onItemClick();
+                    handleSettingsClick();
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
+            >
+                <span className="material-symbols-outlined text-xl">settings</span>
+                <span className="font-medium">Settings</span>
+            </button>
+
+            <div className="border-t border-slate-200 dark:border-slate-800 my-1"></div>
+
+            {/* Logout */}
+            <button
+                type="button"
+                onClick={handleSignOut}
+                disabled={loggingOut}
+                className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all disabled:opacity-50"
+            >
+                <span className="material-symbols-outlined text-xl">logout</span>
+                <span className="font-medium">{loggingOut ? 'Logging out...' : 'Logout'}</span>
+            </button>
+        </nav>
+    ), [canViewLeaderboard, hasVolunteerProfile, loggingOut, onProfileClick, handleProfileClick,
+        handleLeaderboardClick, handleSettingsClick, handleSignOut]);
+
+    // Notifications Dropdown Content
+    const NotificationsContent = useCallback(() => (
+        <>
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800">
+                <h3 className="text-lg font-bold text-slate-800 dark:text-white">Notifications</h3>
+            </div>
+            <div className="py-2">
+                {notifications.length > 0 ? (
+                    notifications.map((notification: any, index: number) => (
+                        <NotificationItem
+                            key={index}
+                            notification={notification}
+                            onClick={(e) => handleNotificationClick(notification, e)}
+                        />
+                    ))
+                ) : (
+                    <div className="px-4 py-8 text-center">
+                        <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-700 mb-2 block">
+                            notifications_off
+                        </span>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">No notifications</p>
+                    </div>
+                )}
+            </div>
+        </>
+    ), [notifications, handleNotificationClick]);
 
     return (
         <div ref={ref} className="flex min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
@@ -248,7 +394,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                             key={item.key}
                             item={item}
                             index={index}
-                            activeItem={activeItem}
+                            isActive={activeItem === item.key}
                             onItemChange={onItemChange}
                             animate={shouldAnimate}
                         />
@@ -275,7 +421,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
 
                     <div className="flex items-center gap-4">
                         {/* Notification Icon with Dropdown */}
-                        <div className="relative" ref={notificationDropdownRef}>
+                        <div className="relative">
                             <TopBarIcon
                                 icon="notifications"
                                 onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
@@ -283,151 +429,51 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                                 isActive={showNotificationDropdown}
                             />
 
-                            {/* Desktop Notification Dropdown */}
                             <AnimatePresence>
                                 {showNotificationDropdown && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                        transition={{ duration: 0.2 }}
-                                        className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] w-80 max-h-96 overflow-y-auto"
-                                    >
-                                        <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-                                            <h3 className="text-lg font-bold text-slate-800 dark:text-white">Notifications</h3>
-                                        </div>
-                                        <div className="py-2">
-                                            {notifications.length > 0 ? (
-                                                notifications.map((notification: any, index: number) => (
-                                                    <div
-                                                        key={index}
-                                                        className={`px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer border-b border-slate-100 dark:border-slate-800/50 last:border-0 ${!notification.is_read ? 'bg-blue-50/50 dark:bg-blue-950/20' : ''}`}
-                                                        onClick={(e) => handleNotificationClick(notification, e)}
-                                                    >
-                                                        <div className="flex gap-3">
-                                                            <div className="shrink-0 mt-1">
-                                                                <span className="material-symbols-outlined text-primary" style={{ color: '#DC2626' }}>
-                                                                    {notification.type === 'success' ? 'check_circle' : 'info'}
-                                                                </span>
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-                                                                    {notification.title || 'Notification'}
-                                                                </p>
-                                                                <p className="text-xs text-slate-600 dark:text-slate-400">
-                                                                    {notification.content || notification.message}
-                                                                </p>
-                                                                {notification.created_at && (
-                                                                    <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
-                                                                        {new Date(notification.created_at).toLocaleDateString()}
-                                                                    </p>
-                                                                )}
-                                                            </div>
-                                                            {!notification.is_read && (
-                                                                <div className="shrink-0">
-                                                                    <span className="w-2 h-2 bg-blue-500 rounded-full block"></span>
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ))
-                                            ) : (
-                                                <div className="px-4 py-8 text-center">
-                                                    <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-700 mb-2 block">
-                                                        notifications_off
-                                                    </span>
-                                                    <p className="text-sm text-slate-500 dark:text-slate-400">No notifications</p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </motion.div>
+                                    <div ref={notificationDropdownRef}>
+                                        <motion.div
+                                            key="notification-dropdown"
+                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] w-80 max-h-96 overflow-y-auto"
+                                        >
+                                            <NotificationsContent />
+                                        </motion.div>
+                                    </div>
                                 )}
                             </AnimatePresence>
                         </div>
-
                         {/* Profile Icon with Dropdown */}
-                        <div className="relative" ref={profileDropdownRef}>
+                        <div className="relative">
                             <TopBarIcon
                                 icon="person"
                                 onClick={() => setShowProfileDropdown(!showProfileDropdown)}
                                 isActive={showProfileDropdown}
                             />
 
-                            {/* Desktop Profile Dropdown */}
                             <AnimatePresence>
                                 {showProfileDropdown && (
-                                    <motion.div
-                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                        transition={{ duration: 0.2 }}
-                                        className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] min-w-[180px]"
-                                    >
-                                        <nav className="py-2">
-                                            {/* View Profile - Only for volunteer roles */}
-                                            {profile?.role && ['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
-                                                <button
-                                                    onClick={() => {
-                                                        setShowProfileDropdown(false);
-                                                        onProfileClick?.();
-                                                    }}
-                                                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                                                >
-                                                    <span className="material-symbols-outlined text-xl">badge</span>
-                                                    <span className="font-medium">View Profile</span>
-                                                </button>
-                                            )}
-                                            {/* Profile - For all other roles */}
-                                            {profile?.role && !['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
-                                                <button
-                                                    onClick={() => {
-                                                        setShowProfileDropdown(false);
-                                                        onProfileClick?.();
-                                                    }}
-                                                    className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                                                >
-                                                    <span className="material-symbols-outlined text-xl">person</span>
-                                                    <span className="font-medium">Profile</span>
-                                                </button>
-                                            )}
-                                            {/* Leaderboard - ALWAYS SHOW for debugging, or use the conditional */}
-                                            <button
-                                                onClick={() => {
-                                                    setShowProfileDropdown(false);
-                                                    setShowLeaderboardModal(true);
-                                                }}
-                                                className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                                            >
-                                                <span className="material-symbols-outlined text-xl">leaderboard</span>
-                                                <span className="font-medium">Leaderboard</span>
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setShowProfileDropdown(false);
-                                                    setShowSettingsModal(true);
-                                                }}
-                                                className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all"
-                                            >
-                                                <span className="material-symbols-outlined text-xl">settings</span>
-                                                <span className="font-medium">Settings</span>
-                                            </button>
-                                            <div className="border-t border-slate-200 dark:border-slate-800 my-1"></div>
-                                            <button
-                                                type="button"
-                                                onClick={handleSignOut}
-                                                disabled={loggingOut}
-                                                className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all disabled:opacity-50"
-                                            >
-                                                <span className="material-symbols-outlined text-xl">logout</span>
-                                                <span className="font-medium">{loggingOut ? 'Logging out...' : 'Logout'}</span>
-                                            </button>
-                                        </nav>
-                                    </motion.div>
+                                    <div ref={profileDropdownRef}>
+                                        <motion.div
+                                            key="profile-dropdown"
+                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] min-w-[180px]"
+                                        >
+                                            <ProfileMenu onItemClick={() => setShowProfileDropdown(false)} />
+                                        </motion.div>
+                                    </div>
                                 )}
                             </AnimatePresence>
                         </div>
                     </div>
                 </header>
+
                 {/* Mobile Header */}
                 <header className="lg:hidden bg-slate-50 dark:bg-slate-950 px-6 py-4 flex items-center justify-between z-40 sticky top-0">
                     <div className="flex items-center gap-3">
@@ -452,111 +498,40 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                         />
                     </div>
 
-                    {/* Mobile Dropdowns */}
+                    {/* Mobile Notification Dropdown */}
                     <AnimatePresence>
                         {showNotificationDropdown && (
-                            <motion.div
-                                ref={mobileNotificationDropdownRef}
-                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                transition={{ duration: 0.2 }}
-                                className="absolute top-[73px] right-6 left-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] max-h-96 overflow-y-auto"
-                            >
-                                {/* Notification content duplicated here */}
-                                <div className="p-4 border-b border-slate-200 dark:border-slate-800">
-                                    <h3 className="text-lg font-bold text-slate-800 dark:text-white">Notifications</h3>
-                                </div>
-                                <div className="py-2">
-                                    {notifications.length > 0 ? (
-                                        notifications.map((notification: any, index: number) => (
-                                            <div
-                                                key={index}
-                                                className="px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer border-b border-slate-100 dark:border-slate-800/50 last:border-0"
-                                                onClick={(e) => handleNotificationClick(notification, e)}
-                                            >
-                                                <p className="text-sm font-semibold">{notification.title}</p>
-                                                <p className="text-xs text-slate-600">{notification.message}</p>
-                                            </div>
-                                        ))
-                                    ) : (
-                                        <div className="px-4 py-8 text-center text-slate-500">No notifications</div>
-                                    )}
-                                </div>
-                            </motion.div>
+                            <div ref={mobileNotificationDropdownRef}>
+                                <motion.div
+                                    key="mobile-notification-dropdown"
+                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="absolute top-[73px] right-6 left-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] max-h-96 overflow-y-auto"
+                                >
+                                    <NotificationsContent />
+                                </motion.div>
+                            </div>
                         )}
                     </AnimatePresence>
 
+                    {/* Mobile Profile Dropdown */}
+                    {/* Mobile Profile Dropdown */}
                     <AnimatePresence>
                         {showMobileProfileDropdown && (
-                            <motion.div
-                                ref={mobileProfileDropdownRef}
-                                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                animate={{ opacity: 1, y: 0, scale: 1 }}
-                                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                transition={{ duration: 0.2 }}
-                                className="absolute top-[73px] right-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[55] min-w-[180px]"
-                            >
-                                <nav className="py-2">
-                                    {/* View Profile - Only for volunteer roles */}
-                                    {profile?.role && ['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
-                                        <button
-                                            onClick={() => {
-                                                setShowMobileProfileDropdown(false);
-                                                onProfileClick?.();
-                                            }}
-                                            className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
-                                        >
-                                            <span className="material-symbols-outlined text-xl">badge</span>
-                                            <span className="font-medium">View Profile</span>
-                                        </button>
-                                    )}
-                                    {/* Profile - For all other roles */}
-                                    {profile?.role && !['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(profile.role) && (
-                                        <button
-                                            onClick={() => {
-                                                setShowMobileProfileDropdown(false);
-                                                onProfileClick?.();
-                                            }}
-                                            className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
-                                        >
-                                            <span className="material-symbols-outlined text-xl">person</span>
-                                            <span className="font-medium">Profile</span>
-                                        </button>
-                                    )}
-                                    {/* Leaderboard - ALWAYS SHOW for debugging, or use the conditional */}
-                                    <button
-                                        onClick={() => {
-                                            setShowMobileProfileDropdown(false);
-                                            setShowLeaderboardModal(true);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
-                                    >
-                                        <span className="material-symbols-outlined text-xl">leaderboard</span>
-                                        <span className="font-medium">Leaderboard</span>
-                                    </button>
-                                    <button
-                                        onClick={() => {
-                                            setShowMobileProfileDropdown(false);
-                                            setShowSettingsModal(true);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all text-left"
-                                    >
-                                        <span className="material-symbols-outlined text-xl">settings</span>
-                                        <span className="font-medium">Settings</span>
-                                    </button>
-                                    <div className="border-t border-slate-200 dark:border-slate-800 my-1"></div>
-                                    <button
-                                        type="button"
-                                        onClick={handleSignOut}
-                                        disabled={loggingOut}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all text-left disabled:opacity-50"
-                                    >
-                                        <span className="material-symbols-outlined text-xl">logout</span>
-                                        <span className="font-medium">{loggingOut ? 'Logging out...' : 'Logout'}</span>
-                                    </button>
-                                </nav>
-                            </motion.div>
+                            <div ref={mobileProfileDropdownRef}>
+                                <motion.div
+                                    key="mobile-profile-dropdown"
+                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                    transition={{ duration: 0.2 }}
+                                    className="absolute top-[73px] right-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[55] min-w-[180px]"
+                                >
+                                    <ProfileMenu onItemClick={() => setShowMobileProfileDropdown(false)} />
+                                </motion.div>
+                            </div>
                         )}
                     </AnimatePresence>
                 </header>
@@ -593,7 +568,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                             <MobileDockItem
                                 key={item.key}
                                 item={item}
-                                activeItem={activeItem}
+                                isActive={activeItem === item.key}
                                 onItemChange={onItemChange}
                             />
                         ))}

@@ -1,4 +1,4 @@
-// components/LoginForm.tsx - Supabase Authentication
+// components/LoginForm.tsx - Fixed to work with new AuthContext
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, AlertCircle, ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -7,10 +7,11 @@ import { LoginData, ValidationError } from '../types';
 import { validateEmail, validatePassword } from '../utils/validation';
 import { signInUser } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { DEFAULT_EVENT_ID } from '../lib/supabase';
 
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
-  const { getRoleBasedRedirect, isAuthenticated, profile } = useAuth();
+  const { getRoleBasedRedirect, isAuthenticated, profile, refreshProfile, sessionLoaded } = useAuth();
 
   const [formData, setFormData] = useState<LoginData>({
     email: '',
@@ -19,14 +20,16 @@ export const LoginForm: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
 
-  // Instant redirect if already logged in (using AuthContext state)
+  // Redirect if already logged in
   useEffect(() => {
-    if (isAuthenticated && profile?.role) {
+    if (isAuthenticated && profile?.role && sessionLoaded && !isRedirecting) {
       const redirectPath = getRoleBasedRedirect(profile.role);
+      console.log('🔄 Already authenticated, redirecting to:', redirectPath);
       navigate(redirectPath, { replace: true });
     }
-  }, [isAuthenticated, profile, navigate, getRoleBasedRedirect]);
+  }, [isAuthenticated, profile, sessionLoaded, navigate, getRoleBasedRedirect, isRedirecting]);
 
   const updateField = (field: keyof LoginData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -60,6 +63,8 @@ export const LoginForm: React.FC = () => {
     setErrors([]);
 
     try {
+      console.log('🔐 Attempting login for:', formData.email);
+
       // Call Supabase sign in
       const result = await signInUser(formData.email, formData.password);
 
@@ -77,39 +82,81 @@ export const LoginForm: React.FC = () => {
         return;
       }
 
-      // Store user info in localStorage for session management
-      const userData = {
-        id: result.data?.user?.id,
-        email: result.data?.user?.email,
-        role: result.data?.user?.role || 'attendee',
-        fullName: result.data?.profile?.full_name
-      };
-      localStorage.setItem('currentUser', JSON.stringify(userData));
+      if (!result.data?.user) {
+        setErrors([{
+          field: 'general',
+          message: 'Login failed. No user data returned.'
+        }]);
+        setLoading(false);
+        return;
+      }
 
-      console.log('✅ Login successful:', userData);
+      console.log('✅ Auth successful, fetching profile...');
 
-      // DO NOT call refreshProfile() here!
-      // The AuthContext's authStateChange listener will automatically fetch the profile
-      // when it receives the SIGNED_IN event. Calling it here causes a race condition.
+      // Set redirecting flag to prevent the useEffect from interfering
+      setIsRedirecting(true);
 
-      // Give the auth state change event time to fire and set the profile from localStorage
-      // Reduced to 50ms for faster redirects
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Wait a bit for AuthContext's onAuthStateChange to process
+      await new Promise(resolve => setTimeout(resolve, 200));
 
-      // Use AuthContext's getRoleBasedRedirect for proper routing
-      // This handles team-based routing for volunteers (Building -> /building, etc.)
-      const redirectPath = getRoleBasedRedirect(userData.role);
+      // Extract user info from the result
+      const userId = result.data.user.id;
+      const userEmail = result.data.user.email || '';
+
+      // Fetch the user profile with retry logic
+      // Pass parameters in correct order: (eventId, userId, userEmail, forceRefresh)
+      let userProfile = null;
+      let retries = 3;
+
+      while (retries > 0 && !userProfile) {
+        console.log(`🔄 Fetching profile (${4 - retries}/3)...`);
+
+        // FIXED: Correct parameter order
+        userProfile = await refreshProfile(DEFAULT_EVENT_ID, userId, userEmail, true);
+        // The original instruction had commented parameters on separate lines which would cause a syntax error.
+        // The change has been applied to make the call syntactically correct by placing all arguments on one line.
+
+        if (!userProfile) {
+          retries--;
+          if (retries > 0) {
+            console.log(`⏳ Profile not ready, retrying in 500ms... (${retries} retries left)`);
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+      }
+
+      if (!userProfile) {
+        console.error('❌ Failed to fetch user profile after 3 attempts');
+        setErrors([{
+          field: 'general',
+          message: 'Login successful but failed to load profile. Please try again.'
+        }]);
+        setLoading(false);
+        setIsRedirecting(false);
+        return;
+      }
+
+      console.log('✅ Profile loaded:', {
+        role: userProfile.role,
+        roles: userProfile.roles,
+        name: userProfile.full_name
+      });
+
+      // Get role-based redirect path
+      const redirectPath = getRoleBasedRedirect(userProfile.role);
       console.log('🔄 Redirecting to:', redirectPath);
+
+      // Navigate to the appropriate dashboard
       navigate(redirectPath, { replace: true });
 
     } catch (error: any) {
-      console.error('Login error:', error);
+      console.error('💥 Login error:', error);
       setErrors([{
         field: 'general',
         message: 'Login failed. Please try again.'
       }]);
-    } finally {
       setLoading(false);
+      setIsRedirecting(false);
     }
   };
 

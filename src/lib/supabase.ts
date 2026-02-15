@@ -131,7 +131,7 @@ const deleteAuthUser = async (userId: string): Promise<void> => {
 /**
  * Upload file to Supabase Storage
  */
-type FileCategory = 'CV' | 'Uni_ID';
+type FileCategory = 'CV' | 'Uni_ID' | 'company-logo';
 
 export const uploadFile = async (
   category: FileCategory,
@@ -142,7 +142,8 @@ export const uploadFile = async (
     // Validate file type
     const allowedTypes: Record<FileCategory, string[]> = {
       'CV': ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-      'Uni_ID': ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf']
+      'Uni_ID': ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'],
+      'company-logo': ['image/jpeg', 'image/jpg', 'image/png', 'image/svg+xml']
     };
 
     if (!allowedTypes[category].includes(file.type)) {
@@ -1027,35 +1028,17 @@ export const signInUser = async (email: string, password: string): Promise<AuthR
       };
     }
 
-    console.log('✅ [LOGIN] Auth successful, fetching user role...');
+    console.log('✅ [LOGIN] Auth successful');
 
-    // Get user role
-    const { data: roleData, error: roleError } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', data.user.id)
-      .maybeSingle();
-
-    if (roleError) {
-      console.warn('⚠️ [LOGIN] Error fetching role:', roleError.message);
-    }
-
-    const userRole = roleData?.role || data.user.user_metadata?.role || 'attendee';
-    console.log('✅ [LOGIN] Login successful - Role:', userRole);
-
-    // Get user profile
-    const { data: profileData } = await supabase
-      .from('user_profiles')
-      .select('full_name')
-      .eq('id', data.user.id)
-      .maybeSingle();
+    // Note: Profile data will be fetched by AuthContext using get_my_profile RPC
+    // We just return the basic auth data here
 
     return {
       success: true,
       data: {
-        user: { ...data.user, role: userRole },
+        user: data.user,
         session: data.session,
-        profile: profileData
+        profile: null // Will be populated by AuthContext
       },
       error: null
     };
@@ -1078,6 +1061,26 @@ export const signOutUser = async () => {
   return { success: !error, error: error?.message || null };
 };
 
+export const getUserRolesForEvent = async (userId: string, eventId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId)
+      .eq('event_id', eventId);
+
+    if (error) {
+      console.error('Error fetching user roles:', error);
+      return { data: null, error };
+    }
+
+    const roles = data?.map(r => r.role) || [];
+    return { data: roles, error: null };
+  } catch (error: any) {
+    return { data: null, error: { message: error.message } };
+  }
+};
+
 export const getCurrentSession = async () => {
   const { data: { session } } = await supabase.auth.getSession();
   return session;
@@ -1087,13 +1090,9 @@ export const getCurrentUser = async () => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: role } = await supabase
-    .from('user_roles')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-
-  return { ...user, role: role?.role };
+  // Note: Full profile with all roles will be fetched by AuthContext
+  // This function just returns basic auth user data
+  return user;
 };
 
 // ============================================================================
@@ -1148,20 +1147,23 @@ export const getAttendeeByPersonalId = async (personalId: string) => {
     }
 
     // Get role from user_roles
-    const { data: roleData } = await supabase
+    const { data: rolesData } = await supabase
       .from('user_roles')
       .select('role')
       .eq('user_id', profile.id)
-      .single();
+      .eq('event_id', DEFAULT_EVENT_ID);
+
+    const roles = rolesData?.map(r => r.role) || ['attendee'];
+    const primaryRole = roles[0] || 'attendee';
 
     // Merge data
     return {
       data: {
         ...attendee,
         ...profile,
-        // Ensure consistent ID usage
-        id: profile.id, // Use profile.id (user_id) as primary identifier
-        role: roleData?.role || 'attendee' // Default to attendee if not found, but we should find it
+        id: profile.id,
+        role: primaryRole, // Primary role for backwards compatibility
+        roles: roles // All roles
       },
       error: null
     };
@@ -1227,18 +1229,22 @@ export const searchAttendeesByPersonalId = async (query: string) => {
           .eq('user_id', profile.id)
           .single();
 
-        const { data: roleData } = await supabase
+        const { data: rolesData } = await supabase
           .from('user_roles')
           .select('role')
           .eq('user_id', profile.id)
-          .single();
+          .eq('event_id', DEFAULT_EVENT_ID);
+
+        const roles = rolesData?.map(r => r.role) || ['attendee'];
+        const primaryRole = roles[0] || 'attendee';
 
         if (!attendee) return null;
 
         return {
           ...attendee,
           ...profile,
-          role: roleData?.role
+          role: primaryRole,
+          roles: roles
         };
       })
     );
@@ -1824,20 +1830,24 @@ export const getUserProfileByUUID = async (uuid: string) => {
     }
 
     // 4. Get role
-    const { data: roleData } = await supabase
+    const { data: rolesData } = await supabase
       .from('user_roles')
       .select('role')
       .eq('user_id', uuid)
-      .single();
+      .eq('event_id', DEFAULT_EVENT_ID);
+
+    const roles = rolesData?.map(r => r.role) || ['attendee'];
+    const primaryRole = roles[0] || 'attendee';
 
     return {
       data: {
         ...profile,
         university: attendeeDetails?.university,
         faculty: attendeeDetails?.faculty,
-        last_attendance: lastAttendance, // Legacy structure for compatibility
-        current_status: currentStatus, // Explicit status
-        role: roleData?.role || 'attendee'
+        last_attendance: lastAttendance,
+        current_status: currentStatus,
+        role: primaryRole,
+        roles: roles
       },
       error: null
     };

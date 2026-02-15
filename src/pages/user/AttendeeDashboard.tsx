@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { useAttendeeProfile } from '../../hooks/useAttendeeProfile';
 import AttendeeProfileCard from '../../components/AttendeeProfileCard';
 import NotificationModal from '../../components/NotificationModal';
 import ScheduleEventModal from '../../components/ScheduleEventModal';
@@ -96,13 +95,42 @@ const AttendeeDashboard = () => {
   // Full dashboard loading state - Blocks render until profile and critical data (schedule) are ready
   const [dashboardReady, setDashboardReady] = useState(false);
 
-  // Fetch attendee profile once for the entire dashboard
-  const { attendeeProfile, loading: profileLoading } = useAttendeeProfile(user?.id, true);
-
   const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
   // Get first name from full_name
-  const firstName = attendeeProfile?.full_name?.split(' ')[0];
+  const attendeeProfile = useMemo(() => {
+    if (!profile) return null;
+
+    return {
+      // From user_profiles (already in profile)
+      id: profile.id,
+      full_name: profile.full_name,
+      email: profile.email,
+      phone: profile.phone,
+      personal_id: profile.personal_id,
+      preferred_language: profile.preferred_language,
+      score: profile.score,
+      created_at: profile.created_at,
+
+      // From attendees table (in profile.attendee)
+      attendee_id: profile.id,
+      is_asu_student: profile.attendee?.is_asu_student,
+      student_id: profile.attendee?.student_id,
+      university: profile.attendee?.university,
+      faculty: profile.attendee?.faculty,
+      department: profile.attendee?.department,
+      cv_url: profile.attendee?.cv_url,
+      enrollment_proof_url: profile.attendee?.enrollment_proof_url,
+      registration_status: profile.attendee?.registration_status,
+      payment_status: profile.attendee?.payment_status,
+      registered_at: profile.attendee?.registered_at
+    };
+  }, [profile]);
+
+  const firstName = useMemo(() =>
+    attendeeProfile?.full_name?.split(' ')[0],
+    [attendeeProfile?.full_name]
+  );
 
   // Scroll to top on tab change
   useEffect(() => {
@@ -111,41 +139,42 @@ const AttendeeDashboard = () => {
 
   // Initial dashboard load - wait for profile AND schedule (upcoming events)
   useEffect(() => {
-    // If we have profile and schedule events loaded, we are ready
-    // scheduleEvents is fetched in a separate effect below, which sets scheduleEvents state
-    if (!profileLoading && attendeeProfile && scheduleEvents.length > 0) {
+    if (profile && attendeeProfile) {
       setDashboardReady(true);
+      // Ensure we show loading state until schedule is fetched initially
+      if (!loadedTabs.has('schedule') && !loadingSchedule) {
+        setLoadingSchedule(true); // Pre-set loading
+      }
     }
-    // Fallback: If profile loaded but no schedule events found (empty array), strictly we might wait forever if we don't handle it.
-    // However, our initial effect marks 'schedule' as loaded once the fetch finishes.
-    else if (!profileLoading && attendeeProfile && loadedTabs.has('schedule')) {
-      setDashboardReady(true);
-    }
-  }, [profileLoading, attendeeProfile, scheduleEvents, loadedTabs]);
+  }, [profile, attendeeProfile]);
 
   // COMPREHENSIVE INITIAL DATA LOAD: Parallelize all critical home-tab dependencies
-  useEffect(() => {
-    if (!user?.id || !profile?.role) return;
+  const fetchInitialDashboardData = useCallback(async () => {
+    if (!user?.id || !profile?.roles) return;
 
-    const fetchInitialDashboardData = async () => {
-      // Parallelize everything to avoid waterfall
-      setLoadingSchedule(true);
+    setLoadingSchedule(true);
+
+    try {
       const [notificationsResult, activitiesResult, scheduleResult] = await Promise.all([
         supabase
           .from('notifications')
           .select('id, title, content, publish_at, target_roles')
           .eq('event_id', EVENT_ID)
-          .contains('target_roles', [profile.role])
-          .order('publish_at', { ascending: false }),
+          .contains('target_roles', profile.roles) // Note: GIN index would be better, but composite index on (event_id, publish_at) helps
+          .order('publish_at', { ascending: false })
+          .limit(20), // Limit notifications
         supabase
           .from('user_activities')
           .select('id, activity_type, description, activity_timestamp, points_earned')
           .eq('user_id', user.id)
           .order('activity_timestamp', { ascending: false })
           .limit(10),
-        // Only fetch schedule if not already loaded
         !loadedTabs.has('schedule')
-          ? supabase.from('schedule').select('id, title, start_time, end_time, location, schedule_type, description').eq('event_id', EVENT_ID).order('start_time', { ascending: true })
+          ? supabase
+            .from('schedule')
+            .select('id, title, start_time, end_time, location, schedule_type, description')
+            .eq('event_id', EVENT_ID)
+            .order('start_time', { ascending: true })
           : Promise.resolve({ data: scheduleEvents, error: null })
       ]);
 
@@ -154,16 +183,30 @@ const AttendeeDashboard = () => {
 
       if (!loadedTabs.has('schedule') && scheduleResult.data) {
         setScheduleEvents(scheduleResult.data);
-        const dates = Array.from(new Set(scheduleResult.data.map((event: any) => new Date(event.start_time).toISOString().split('T')[0])));
+        const dates = Array.from(
+          new Set(scheduleResult.data.map((event: any) =>
+            new Date(event.start_time).toISOString().split('T')[0]
+          ))
+        );
         setUniqueDates(dates);
         if (dates.length > 0 && !selectedDay) setSelectedDay(dates[0] as any);
         setLoadedTabs(prev => new Set(prev).add('schedule'));
       }
+      setLoadedTabs(prev => new Set(prev).add('schedule'));
+    } catch (error) {
+      console.error('Error fetching initial dashboard data:', error);
+      // Mark as loaded even on error to prevent infinite loading screen
+      setLoadedTabs(prev => new Set(prev).add('schedule'));
+    } finally {
       setLoadingSchedule(false);
-    };
+    }
+  }, [user?.id, profile?.roles, loadedTabs, scheduleEvents, selectedDay]);
 
-    fetchInitialDashboardData();
-  }, [user?.id, profile?.role]); // Only depend on identity; fetches once and updates state
+  useEffect(() => {
+    if (dashboardReady) {
+      fetchInitialDashboardData();
+    }
+  }, [dashboardReady]); // Only run once dashboard is ready
 
   // Derive upcoming events from scheduleEvents - optimized to use shared data
   useEffect(() => {
@@ -184,111 +227,133 @@ const AttendeeDashboard = () => {
       // This will be caught by the composite effect above, but kept as a safety guard for tab logic
     }
   }, [activeTab, loadedTabs]);
-
-  // Fetch booked sessions - optimized with minimal fields
+  // Fetch booked sessions - Query from sessions table for better ordering
   useEffect(() => {
     const fetchBookedSessions = async () => {
       if (!attendeeId) return;
       if (activeTab !== 'sessions' && !loadedTabs.has('sessions')) return;
 
-      const { data, error } = await supabase
-        .from('session_bookings')
-        .select(`
-          id,
-          booking_status,
-          booked_at,
-          checked_in,
-          sessions!inner (
+      try {
+        // SINGLE OPTIMIZED QUERY with JS sorting for safety
+        const { data, error } = await supabase
+          .from('session_bookings')
+          .select(`
             id,
-            title,
-            description,
-            start_time,
-            end_time,
-            room_name,
-            session_type,
-            max_attendees,
-            current_bookings,
-            is_full,
-            speaker (
-              first_name,
-              last_name,
+            booking_status,
+            checked_in,
+            checked_in_at,
+            booked_at,
+            session:sessions!inner (
+              id,
               title,
-              photo_url
+              start_time,
+              end_time,
+              room_name,
+              session_type,
+              status,
+              speaker:speaker_id (
+                first_name,
+                last_name,
+                photo_url
+              )
             )
-          )
-        `)
-        .eq('attendee_id', attendeeId)
-        .neq('booking_status', 'cancelled')
-        .order('booked_at', { ascending: false });
+          `)
+          .eq('attendee_id', attendeeId)
+          .eq('booking_status', 'confirmed')
+          .neq('session.status', 'cancelled')
+          .gte('session.start_time', new Date().toISOString())
+          .limit(50); // Fetch enough to sort
 
-      if (!error && data) {
-        // Flatten the structure
-        const sessions = data.map((booking: any) => ({
-          ...booking.sessions,
-          booking_id: booking.id,
-          booking_status: booking.booking_status,
-          booked_at: booking.booked_at,
-          checked_in: booking.checked_in,
-          speaker: booking.sessions.speaker
-        }));
-        setBookedSessions(sessions);
+        if (error) throw error;
+
+        if (data) {
+          // Sort in JS to avoid complex joined ordering issues
+          const sorted = data.sort((a: any, b: any) =>
+            new Date(a.session.start_time).getTime() - new Date(b.session.start_time).getTime()
+          );
+
+          const formattedSessions = sorted.map((b: any) => ({
+            ...b.session,
+            booking_id: b.id,
+            booking_status: b.booking_status,
+            booked_at: b.booked_at,
+            checked_in: b.checked_in,
+            checked_in_at: b.checked_in_at,
+            speaker: Array.isArray(b.session.speaker) ? b.session.speaker[0] : (b.session.speaker || null)
+          }));
+
+          setBookedSessions(formattedSessions);
+        }
+      } catch (error) {
+        console.error('Error fetching booked sessions:', error);
       }
     };
 
     fetchBookedSessions();
   }, [attendeeId, activeTab, loadedTabs]);
 
-  // Fetch available sessions (excluding booked ones) - optimized
+
   useEffect(() => {
     const fetchAvailableSessions = async () => {
       if (!attendeeId) return;
-      if (activeTab !== 'sessions' || loadedTabs.has('sessions')) return;
+      // Fixed: Load if NOT loaded yet (removed the activeTab check that was preventing load)
+      if (loadedTabs.has('sessions')) return;
 
       setLoadingSessions(true);
 
-      // Parallel fetch for better performance
-      const [sessionsResult, bookingsResult] = await Promise.all([
-        supabase
+      try {
+        // Fixed: Changed speaker!inner to left join and added description
+        const { data, error } = await supabase
           .from('sessions')
           .select(`
-            id,
-            title,
-            description,
-            start_time,
-            end_time,
-            room_name,
-            session_type,
-            max_attendees,
-            current_bookings,
-            is_full,
-            speaker (
-              first_name,
-              last_name,
-              title,
-              photo_url
-            )
-          `)
+          id,
+          title,
+          description,
+          start_time,
+          end_time,
+          room_name,
+          session_type,
+          max_attendees,
+          current_bookings,
+          is_full,
+          status,
+          speaker_id,
+          speaker:speaker_id (
+            first_name,
+            last_name,
+            photo_url
+          )
+        `)
           .eq('event_id', EVENT_ID)
-          .order('start_time', { ascending: true }),
-        supabase
-          .from('session_bookings')
-          .select('session_id')
-          .eq('attendee_id', attendeeId)
-          .neq('booking_status', 'cancelled')
-      ]);
+          .in('status', ['scheduled', 'ongoing'])
+          .gte('start_time', new Date().toISOString())
+          .order('start_time', { ascending: true })
+          .limit(50);
 
-      if (!sessionsResult.error && sessionsResult.data) {
-        const bookedIds = new Set(bookingsResult.data?.map((b: any) => b.session_id) || []);
-        const available = sessionsResult.data.filter((s: any) => !bookedIds.has(s.id));
-        setAvailableSessions(available);
-        setLoadedTabs(prev => new Set(prev).add('sessions'));
+        if (error) throw error;
+
+        if (data) {
+          // RACE CONDITION FIX: Do NOT filter by bookedSessions here.
+          // Store ALL valid future sessions. Filter in renderSessionsTab.
+          const available = data.map((session: any) => ({
+            ...session,
+            speaker: session.speaker
+              ? (Array.isArray(session.speaker) ? session.speaker[0] : session.speaker)
+              : null
+          }));
+
+          setAvailableSessions(available);
+          setLoadedTabs(prev => new Set(prev).add('sessions'));
+        }
+      } catch (error) {
+        console.error('Error fetching available sessions:', error);
+      } finally {
+        setLoadingSessions(false);
       }
-
-      setLoadingSessions(false);
     };
 
     fetchAvailableSessions();
-  }, [attendeeId, bookedSessions, activeTab, loadedTabs]);
+  }, [attendeeId, activeTab, loadedTabs]); // Removed bookedSessions dependency
 
   // Fetch companies - optimized
   useEffect(() => {
@@ -296,70 +361,89 @@ const AttendeeDashboard = () => {
       if (activeTab !== 'companies' || loadedTabs.has('companies')) return;
 
       setLoadingCompanies(true);
-      const { data, error } = await supabase
-        .from('companies')
-        .select('id, company_name, industry, description, logo_url, partner_type, booth_number, website')
-        .eq('event_id', EVENT_ID)
-        .order('company_name');
 
-      if (!error && data) {
-        setCompanies(data);
-        setFilteredCompanies(data);
-        // Extract unique partner types
-        const types = Array.from(new Set(data.map((c: any) => c.partner_type).filter(Boolean)));
-        setPartnerTypes(['All', ...types]);
-        setLoadedTabs(prev => new Set(prev).add('companies'));
+      try {
+        const { data, error } = await supabase
+          .from('companies')
+          .select('id, company_name, industry, logo_url, partner_type, booth_number, description, email, website')
+          .eq('event_id', EVENT_ID)
+          .order('partner_type', { ascending: true }) // Show platinum first
+          .order('company_name', { ascending: true })
+          .limit(100); // Pagination
+
+        if (error) throw error;
+
+        if (!error && data) {
+          setCompanies(data);
+          setFilteredCompanies(data);
+          // Extract unique partner types
+          const types = Array.from(new Set(data.map((c: any) => c.partner_type).filter(Boolean)));
+          setPartnerTypes(['All', ...types]);
+          setLoadedTabs(prev => new Set(prev).add('companies'));
+        }
+        setLoadingCompanies(false);
+      } catch (error) {
+        console.error('Error fetching companies:', error);
+      } finally {
+        setLoadingCompanies(false);
       }
-      setLoadingCompanies(false);
     };
 
     fetchCompanies();
   }, [activeTab, loadedTabs]);
 
-  // Fetch Jobs and Applications - optimized with parallel queries
+  // Fetch Jobs - OPTIMIZED with minimal fields and pagination
   useEffect(() => {
     const fetchJobsData = async () => {
       if (activeTab !== 'jobs' || loadedTabs.has('jobs')) return;
 
       setLoadingJobs(true);
 
-      // Parallel fetch
-      const [jobsResult, applicationsResult] = await Promise.all([
-        supabase
-          .from('job_positions')
-          .select(`
+      try {
+        // Parallel fetch with optimized queries
+        const [jobsResult, applicationsResult] = await Promise.all([
+          supabase
+            .from('job_positions')
+            .select(`
             id,
             title,
-            description,
             job_type,
             location,
             posted_at,
-            companies (
+            companies!inner (
               company_name,
-              logo_url,
-              industry
+              logo_url
             )
-          `)
-          .eq('is_active', true)
-          .order('posted_at', { ascending: false }),
-        attendeeId ? supabase
-          .from('job_applications')
-          .select('job_position_id')
-          .eq('attendee_id', attendeeId) : Promise.resolve({ data: null, error: null })
-      ]);
+          `, { count: 'exact' }) // Get total count for pagination later
+            .eq('event_id', EVENT_ID) // Important for index usage: (event_id, is_active, posted_at)
+            .eq('is_active', true)
+            .order('posted_at', { ascending: false })
+            .limit(50), // Pagination - first 50 jobs
+          attendeeId ? supabase
+            .from('job_applications')
+            .select('job_position_id')
+            .eq('attendee_id', attendeeId)
+            : Promise.resolve({ data: null, error: null })
+        ]);
 
-      if (!jobsResult.error && jobsResult.data) {
-        setJobs(jobsResult.data);
-        setFilteredJobs(jobsResult.data);
+        if (jobsResult.error) throw jobsResult.error;
+
+        if (jobsResult.data) {
+          setJobs(jobsResult.data);
+          setFilteredJobs(jobsResult.data);
+        }
+
+        if (applicationsResult.data) {
+          const appliedIds = new Set(applicationsResult.data.map((app: any) => app.job_position_id));
+          setAppliedJobIds(appliedIds);
+        }
+
+        setLoadedTabs(prev => new Set(prev).add('jobs'));
+      } catch (error) {
+        console.error('Error fetching jobs:', error);
+      } finally {
+        setLoadingJobs(false);
       }
-
-      if (!applicationsResult.error && applicationsResult.data) {
-        const appliedIds = new Set(applicationsResult.data.map((app: any) => app.job_position_id));
-        setAppliedJobIds(appliedIds);
-      }
-
-      setLoadedTabs(prev => new Set(prev).add('jobs'));
-      setLoadingJobs(false);
     };
 
     fetchJobsData();
@@ -473,7 +557,28 @@ const AttendeeDashboard = () => {
 
       if (existingBooking) {
         if (existingBooking.booking_status === 'cancelled') {
-          // Update existing cancelled booking to confirmed
+          // OPTIMISTIC UPDATE: Update local state immediately
+          const rebookedSession = {
+            ...sessionToBook,
+            booking_id: existingBooking.id,
+            booking_status: 'confirmed',
+            booked_at: new Date().toISOString(),
+            checked_in: false,
+            checked_in_at: null
+          };
+
+          // Update UI instantly
+          setBookedSessions(prev => [...prev, rebookedSession].sort((a, b) =>
+            new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+          ));
+          setAvailableSessions(prev => prev.filter(s => s.id !== sessionToBook.id));
+
+          setToast({ message: 'Session booked successfully!', type: 'success' });
+          setShowBookingConfirm(false);
+          setSessionToBook(null);
+          setSelectedSession(null);
+
+          // Perform actual update in background
           const { error: updateError } = await supabase
             .from('session_bookings')
             .update({
@@ -483,9 +588,12 @@ const AttendeeDashboard = () => {
             })
             .eq('id', existingBooking.id);
 
-          if (updateError) throw updateError;
+          if (updateError) {
+            // Revert on error
+            throw updateError;
+          }
 
-          // Trigger Refresh via loadedTabs invalidation
+          // Invalidate cache for next refresh (background)
           setLoadedTabs(prev => {
             const next = new Set(prev);
             next.delete('sessions');
@@ -497,13 +605,31 @@ const AttendeeDashboard = () => {
           setSessionToBook(null);
           return;
         }
+      }
+      else {
+        // OPTIMISTIC UPDATE for New Booking
+        const newBookingId = crypto.randomUUID(); // Temporary ID for UI
+        const newBookedSession = {
+          ...sessionToBook,
+          booking_id: newBookingId,
+          booking_status: 'confirmed',
+          booked_at: new Date().toISOString(),
+          checked_in: false,
+          checked_in_at: null
+        };
+
+        // Update UI instantly
+        setBookedSessions(prev => [...prev, newBookedSession].sort((a, b) =>
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+        ));
+        setAvailableSessions(prev => prev.filter(s => s.id !== sessionToBook.id));
+
         setToast({ message: 'Session booked successfully!', type: 'success' });
         setShowBookingConfirm(false);
         setSessionToBook(null);
-        return;
-      }
-      else {
-        // Insert new booking
+        setSelectedSession(null);
+
+        // Insert actual booking
         const { error: bookingError } = await supabase
           .from('session_bookings')
           .insert({
@@ -511,13 +637,21 @@ const AttendeeDashboard = () => {
             attendee_id: attendeeId,
             booking_status: 'confirmed',
             checked_in: false
-          });
+          })
+          .select('id')
+          .single();
 
         if (bookingError) throw bookingError;
-        setToast({ message: 'Session booked successfully!', type: 'success' });
+
+        // Update the temporary ID with real one if needed, or let refresh handle it
+        setLoadedTabs(prev => {
+          const next = new Set(prev);
+          next.delete('sessions');
+          return next;
+        });
       }
 
-      // 3. Update session stats
+      // 3. Update session stats (Background)
       await supabase
         .from('sessions')
         .update({
@@ -526,21 +660,15 @@ const AttendeeDashboard = () => {
         })
         .eq('id', sessionToBook.id);
 
-      // 4. Trigger Refresh via loadedTabs invalidation
+    } catch (err: any) {
+      console.error('Error booking session:', err);
+      setToast({ message: 'Failed to book session. Please try again.', type: 'error' });
+      // Revert optimistic updates if needed (simplified here by force reload on next visit)
       setLoadedTabs(prev => {
         const next = new Set(prev);
         next.delete('sessions');
         return next;
       });
-
-      setShowBookingConfirm(false);
-      setSessionToBook(null);
-      setSelectedSession(null); // Close session detail if it was open
-
-    } catch (err: any) {
-      console.error('Error booking session:', err);
-      setToast({ message: 'Failed to book session. Please try again.', type: 'error' });
-      // Close anyway as requested
       setShowBookingConfirm(false);
       setSessionToBook(null);
       setSelectedSession(null);
@@ -550,24 +678,46 @@ const AttendeeDashboard = () => {
 
   // Handler: Cancel a booking
   const handleCancelBooking = async (bookingId: string) => {
-    const { error } = await supabase
-      .from('session_bookings')
-      .update({ booking_status: 'cancelled' })
-      .eq('id', bookingId);
+    try {
+      // OPTIMISTIC UPDATE: Remove from booked, Add to available
+      const cancelledSessionIndex = bookedSessions.findIndex(s => s.booking_id === bookingId);
+      if (cancelledSessionIndex > -1) {
+        const cancelledSession = bookedSessions[cancelledSessionIndex];
 
-    if (!error) {
-      // Refresh sessions via loadedTabs invalidation
+        setBookedSessions(prev => prev.filter(s => s.booking_id !== bookingId));
+        setAvailableSessions(prev => [...prev, cancelledSession].sort(
+          (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+        ));
+
+        setToast({ message: 'Booking cancelled successfully.', type: 'info' });
+        setBookingToCancel(null);
+        setSelectedSession(null);
+
+        // Perform actual update
+        const { error } = await supabase
+          .from('session_bookings')
+          .update({ booking_status: 'cancelled' })
+          .eq('id', bookingId);
+
+        if (error) throw error;
+
+        // Invalidate cache in background
+        setLoadedTabs(prev => {
+          const next = new Set(prev);
+          next.delete('sessions');
+          return next;
+        });
+      }
+    } catch (error) {
+      console.error('Error cancelling booking:', error);
+      setToast({ message: 'Failed to cancel booking.', type: 'error' });
+      // Revert optimistic update by forcing reload
       setLoadedTabs(prev => {
         const next = new Set(prev);
         next.delete('sessions');
         return next;
       });
-      setToast({ message: 'Booking cancelled successfully.', type: 'info' });
-    } else {
-      setToast({ message: 'Failed to cancel booking.', type: 'error' });
     }
-    setBookingToCancel(null);
-    setSelectedSession(null);
   }
 
 
@@ -675,8 +825,8 @@ const AttendeeDashboard = () => {
     });
   };
 
-  // Full Loading Screen - Waits for Profile & Upcoming Events
-  if (!dashboardReady) {
+  // Full Loading Screen - Waits for Profile & Schedule (Upcoming Events)
+  if (!dashboardReady || !attendeeProfile || !loadedTabs.has('schedule')) {
     return <DashboardLoading message="Loading Your Dashboard" subMessage="Preparing your experience..." />;
   }
 
@@ -946,7 +1096,11 @@ const AttendeeDashboard = () => {
   };
 
   const renderSessionsTab = () => {
-    const filteredAvailable = filterSessions(availableSessions);
+    // RACE CONDITION FIX: Filter booked sessions at RENDER time
+    // This ensures that as soon as bookedSessions loads, they disappear from available list
+    const bookedIds = new Set(bookedSessions.map((s: any) => s.id));
+    const reallyAvailableSessions = availableSessions.filter(s => !bookedIds.has(s.id));
+    const filteredAvailable = filterSessions(reallyAvailableSessions);
 
     if (loadingSessions) {
       return (
@@ -1722,5 +1876,4 @@ const AttendeeDashboard = () => {
     </SharedNavigation>
   );
 };
-
 export default AttendeeDashboard;
