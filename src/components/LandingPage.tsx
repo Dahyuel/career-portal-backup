@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Briefcase, Users, Calendar, Award, MapPin, Clock, Target, Sparkles, Building2, GraduationCap, Handshake, ExternalLink, Ticket } from 'lucide-react';
+import { ArrowRight, Briefcase, Users, Calendar, Award, MapPin, Clock, Target, Sparkles, GraduationCap, Handshake, ExternalLink, Ticket, Settings } from 'lucide-react';
 import { Navbar } from './shared/Navbar';
 
 // Counter Animation Hook
@@ -128,8 +128,16 @@ export const LandingPage: React.FC = () => {
                             </div>
                             <div className="hidden sm:block w-px h-8 bg-red-400/50"></div>
                             <div className="flex items-center gap-3 text-white">
-                                <MapPin className="h-6 w-6 text-red-400" />
-                                <span className="text-lg md:text-xl font-bold">Dar El Deyafa, ASU Campus</span>
+                                <span className="text-lg md:text-xl font-bold">Dar El Deyafa, ASU Campus </span>
+                                <a
+                                    href="https://maps.app.goo.gl/SwGZ311XhHUGBCT68"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="hover:scale-110 transition-transform"
+                                    title="Open coordinates in Google Maps"
+                                >
+                                    <MapPin className="h-6 w-6 text-red-400 hover:text-red-300 transition-colors" />
+                                </a>
                             </div>
                         </div>
                     </div>
@@ -236,7 +244,7 @@ export const LandingPage: React.FC = () => {
                             </div>
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Network</h3>
                             <p className="text-gray-600 dark:text-gray-400">
-                                Engage with HR leaders from Top Multinationals and expand your professional network.
+                                Engage with experts from Top Leading companies and expand your professional network.
                             </p>
                         </div>
 
@@ -258,7 +266,7 @@ export const LandingPage: React.FC = () => {
                             </div>
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Get Hired</h3>
                             <p className="text-gray-600 dark:text-gray-400">
-                                Land your next role with on-spot interviews and exclusive job openings.
+                                Land your next role with many opportunities and exclusive job openings.
                             </p>
                         </div>
                     </div>
@@ -333,46 +341,90 @@ export const LandingPage: React.FC = () => {
 
                     <div className="grid md:grid-cols-2 gap-10 max-w-5xl mx-auto">
                         {/* Day 1 Card */}
-                        <div className="relative overflow-hidden bg-gradient-to-br from-red-500 to-red-600 rounded-3xl p-10 shadow-2xl transition-all duration-500 group hover:scale-[1.02] hover:shadow-red-500/30">
+                        <div className="relative overflow-hidden bg-gradient-to-br from-red-500 to-red-600 rounded-3xl p-8 sm:p-10 shadow-2xl transition-all duration-500 group hover:scale-[1.02] hover:shadow-red-500/30">
                             {/* Decorative elements */}
                             <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
                             <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full blur-xl transform -translate-x-6 translate-y-6"></div>
 
-                            <div className="relative z-10">
-                                <div className="flex items-center gap-4 mb-6">
-                                    <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                        <Target className="h-8 w-8 text-white" />
+                            <div className="relative z-10 h-full flex flex-col">
+                                <div className="flex flex-wrap items-center gap-4 mb-6">
+                                    <div className="w-14 h-14 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                        <Settings className="h-7 w-7 text-white" />
                                     </div>
-                                    <div className="inline-flex items-center justify-center px-5 py-2.5 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-bold">
-                                        April 7, 2026
+                                    <div className="flex flex-col">
+                                        <div className="inline-flex items-center justify-center px-4 py-1.5 bg-white/20 backdrop-blur-sm text-white rounded-full text-sm font-bold w-fit">
+                                            April 7, 2026
+                                        </div>
                                     </div>
                                 </div>
-                                <h3 className="text-3xl md:text-4xl font-bold text-white mb-4">Day 1</h3>
-                                <p className="text-red-100 text-lg leading-relaxed">
-                                    Engineering, Computer Science, Medicine, Science, and Pharmacy faculties.
-                                </p>
+                                <h3 className="text-2xl sm:text-3xl font-bold text-white mb-2">Day 1</h3>
+                                <div className="text-white/90 font-semibold text-lg mb-4 border-b border-white/20 pb-2">
+                                    Practical, Medical & Science Sectors
+                                </div>
+                                <ul className="text-red-50 space-y-3 text-sm sm:text-base flex-1">
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-white/60 flex-shrink-0"></div>
+                                        <span>Engineering & Computer Science</span>
+                                    </li>
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-white/60 flex-shrink-0"></div>
+                                        <span>Medicine, Pharmacy, Dentistry & Nursing</span>
+                                    </li>
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-white/60 flex-shrink-0"></div>
+                                        <span>Science & Agriculture</span>
+                                    </li>
+                                </ul>
+                                <div className="mt-6 pt-4 border-t border-white/20 flex items-center justify-center text-red-50 font-medium">
+                                    <Clock className="w-4 h-4 mr-2" />
+                                    <span>10:00 AM – 8:00 PM</span>
+                                </div>
                             </div>
                         </div>
 
                         {/* Day 2 Card */}
-                        <div className="relative overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800 rounded-3xl p-10 shadow-2xl transition-all duration-500 group hover:scale-[1.02] hover:shadow-gray-500/20">
+                        <div className="relative overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900 dark:from-gray-700 dark:to-gray-800 rounded-3xl p-8 sm:p-10 shadow-2xl transition-all duration-500 group hover:scale-[1.02] hover:shadow-gray-500/20">
                             {/* Decorative elements */}
                             <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-2xl transform translate-x-10 -translate-y-10"></div>
                             <div className="absolute bottom-0 left-0 w-24 h-24 bg-red-500/10 rounded-full blur-xl transform -translate-x-6 translate-y-6"></div>
 
-                            <div className="relative z-10">
-                                <div className="flex items-center gap-4 mb-6">
-                                    <div className="w-16 h-16 bg-red-500/20 backdrop-blur-sm rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
-                                        <Briefcase className="h-8 w-8 text-red-400" />
+                            <div className="relative z-10 h-full flex flex-col">
+                                <div className="flex flex-wrap items-center gap-4 mb-6">
+                                    <div className="w-14 h-14 bg-red-500/20 backdrop-blur-sm rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                                        <Briefcase className="h-7 w-7 text-red-400" />
                                     </div>
-                                    <div className="inline-flex items-center justify-center px-5 py-2.5 bg-red-500/20 backdrop-blur-sm text-red-300 rounded-full text-sm font-bold">
-                                        April 8, 2026
+                                    <div className="flex flex-col">
+                                        <div className="inline-flex items-center justify-center px-4 py-1.5 bg-red-500/20 backdrop-blur-sm text-red-300 rounded-full text-sm font-bold w-fit">
+                                            April 8, 2026
+                                        </div>
                                     </div>
                                 </div>
-                                <h3 className="text-3xl md:text-4xl font-bold text-white mb-4">Day 2</h3>
-                                <p className="text-gray-300 text-lg leading-relaxed">
-                                    Business, Arts, Al-Alsun, Law, Mass Communication, and related faculties.
-                                </p>
+                                <h3 className="text-2xl sm:text-3xl font-bold text-white mb-2">Day 2</h3>
+                                <div className="text-white/90 font-semibold text-lg mb-4 border-b border-gray-600 pb-2">
+                                    Business, Humanities & Social Sciences
+                                </div>
+                                <ul className="text-gray-300 space-y-3 text-sm sm:text-base flex-1">
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500/60 flex-shrink-0"></div>
+                                        <span>Business, Commerce & Management</span>
+                                    </li>
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500/60 flex-shrink-0"></div>
+                                        <span>Languages (Al-Alsun), Arts & Archaeology</span>
+                                    </li>
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500/60 flex-shrink-0"></div>
+                                        <span>Mass Communication & Law</span>
+                                    </li>
+                                    <li className="flex gap-2 items-center">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-red-500/60 flex-shrink-0"></div>
+                                        <span>Education & Human Sciences</span>
+                                    </li>
+                                </ul>
+                                <div className="mt-6 pt-4 border-t border-gray-700 flex items-center justify-center text-gray-400 font-medium">
+                                    <Clock className="w-4 h-4 mr-2" />
+                                    <span>10:00 AM – 8:00 PM</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -381,43 +433,7 @@ export const LandingPage: React.FC = () => {
                 </div>
             </section>
 
-            {/* Partner Companies Section */}
-            <section className="py-20 md:py-28 bg-white dark:bg-gray-950 transition-colors duration-300">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="text-center mb-16">
-                        <span className="inline-flex items-center gap-2 px-4 py-1.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-sm font-medium mb-4">
-                            <Building2 className="h-4 w-4" />
-                            Our Partners
-                        </span>
-                        <h2 className="text-3xl md:text-5xl font-bold text-gray-900 dark:text-white mb-6">
-                            Leading <span className="text-red-500">Companies</span> Joining Us
-                        </h2>
-                        <p className="text-lg text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
-                            Meet our sponsors, the industry giants, looking for talented individuals like you.
-                        </p>
-                    </div>
 
-                    {/* Company Logos Grid - Placeholder for user to add logos */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-6 md:gap-8">
-                        {/* Placeholder logo cards - Replace with actual company logos */}
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((i) => (
-                            <div
-                                key={i}
-                                className="bg-gray-50 dark:bg-gray-800 rounded-xl p-6 flex items-center justify-center aspect-square border border-gray-200 dark:border-gray-700 hover:shadow-lg hover:border-red-200 dark:hover:border-red-900/50 transition-all duration-300 group"
-                            >
-                                <div className="text-gray-400 dark:text-gray-500 text-center">
-                                    <Building2 className="h-10 w-10 mx-auto mb-2 group-hover:text-red-400 transition-colors" />
-                                    <span className="text-xs font-medium">Logo {i}</span>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    <p className="text-center text-gray-500 dark:text-gray-400 mt-8 text-sm">
-                        And many more companies joining us...
-                    </p>
-                </div>
-            </section>
 
             {/* Video Section - Previous Year Highlights */}
             <section className="py-20 md:py-28 bg-gray-50 dark:bg-gray-900 transition-colors duration-300">

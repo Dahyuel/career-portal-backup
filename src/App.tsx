@@ -32,7 +32,7 @@ const EmployerRegistration = React.lazy(() => import('./pages/Employer/EmployerR
 const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
 const AboutCareerCenter = React.lazy(() => import('./pages/LandingPageContent/AboutCareerCenter').then(module => ({ default: module.AboutCareerCenter })));
 const Speakers = React.lazy(() => import('./pages/LandingPageContent/Speakers').then(module => ({ default: module.Speakers })));
-const Agenda = React.lazy(() => import('./pages/LandingPageContent/Agenda').then(module => ({ default: module.Agenda })));
+const Partners = React.lazy(() => import('./pages/LandingPageContent/Partners').then(module => ({ default: module.Partners })));
 
 // Loading Screen
 import DashboardLoading from './components/DashboardLoading';
@@ -60,9 +60,9 @@ const AppRouter: React.FC = () => {
           <Speakers />
         </Suspense>
       } />
-      <Route path="/agenda" element={
+      <Route path="/partners" element={
         <Suspense fallback={<DashboardLoading message="Loading page..." />}>
-          <Agenda />
+          <Partners />
         </Suspense>
       } />
 
