@@ -8,7 +8,6 @@ import {
   CheckCircle,
   Clock,
   X,
-  AlertCircle,
   Phone,
   Mail,
 } from "lucide-react";
@@ -16,12 +15,17 @@ import SharedNavigation, { NavItem } from "../../components/shared/SharedNavigat
 import { QRScanner } from "../../components/shared/QRScanner";
 
 import { useTheme } from "../../contexts/ThemeContext";
-import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../contexts/AuthContext";
+import {
+  supabase,
+  getUserProfileByUUID,
+  getVolunteerStatsRPC,
+  searchSessionBookings
+} from "../../lib/supabase";
+import Toast from "../../components/shared/Toast";
 import SettingsModal from "../../components/shared/SettingsModal";
-import { useVolunteerProfile } from "../../hooks/useVolunteerProfile";
 import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileModal";
-
-
+import DashboardLoading from "../../components/DashboardLoading";
 
 // --- Animation Variants (matching EmployerDashboard / tabsanimation.md) ---
 const containerVariants: Variants = {
@@ -77,32 +81,12 @@ interface SessionBooking {
   checked_in_at: string | null;
 }
 
-const mockActivities = [
-  {
-    id: '1',
-    description: 'Checked in at Main Building',
-    timestamp: new Date(Date.now() - 1800000).toISOString(),
-    type: 'check_in'
-  },
-  {
-    id: '2',
-    description: 'Scanned attendee QR code',
-    timestamp: new Date(Date.now() - 3600000).toISOString(),
-    type: 'qr_scan'
-  },
-  {
-    id: '3',
-    description: 'Registered attendee for workshop',
-    timestamp: new Date(Date.now() - 7200000).toISOString(),
-    type: 'session_booking'
-  }
-];
+
 
 export const BuildTeamDashboard: React.FC = () => {
-
   useTheme();
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
-  const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
   const [showProfile, setShowProfile] = useState(false);
 
   // Settings State
@@ -135,27 +119,103 @@ export const BuildTeamDashboard: React.FC = () => {
   const [sessionSearchTerm, setSessionSearchTerm] = useState("");
   const [sessionSearchResults, setSessionSearchResults] = useState<ScannedAttendee[]>([]);
   const [isSessionSearching, setIsSessionSearching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Feedback State
-  const [feedback, setFeedback] = useState<{
-    type: 'success' | 'error';
+  // Toast State
+  const [toast, setToast] = useState<{
     message: string;
-  } | null>(null);
+    type: 'success' | 'error' | 'warning' | 'info';
+    isVisible: boolean;
+  }>({
+    message: '',
+    type: 'info',
+    isVisible: false
+  });
 
-  const userStats = {
-    score: volunteerProfile?.total_points || 0,
-    rank: 0, // Rank implementation would require efficient DB query or Leaderboard context
-    first_name: volunteerProfile?.full_name?.split(' ')[0] || 'Volunteer'
-  };
+  const [userStats, setUserStats] = useState<{
+    score: number;
+    rank: number;
+    teamSize: number;
+    loading: boolean;
+    first_name: string;
+  }>({
+    score: 0,
+    rank: 0,
+    teamSize: 0,
+    loading: true,
+    first_name: profile?.full_name?.split(' ')[0] || 'Volunteer'
+  });
+
+  // User activities from database
+  const [userActivities, setUserActivities] = useState<{
+    id: string;
+    activity_type: string;
+    description: string;
+    points_earned: number;
+    activity_timestamp: string;
+  }[]>([]);
 
   // --- Helpers ---
 
-  const showFeedback = (type: 'success' | 'error', message: string) => {
-    setFeedback({ type, message });
-    setTimeout(() => setFeedback(null), 5000);
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setToast({ message, type, isVisible: true });
   };
 
-  // Fetch sessions from backend
+  // Fetch volunteer stats on mount
+  useEffect(() => {
+    const fetchVolunteerStats = async () => {
+      // Use profile.id directly if user is not available from useAuth immediately, though useAuth ensures user is loaded
+      // We'll use a local ID variable to be safe
+      const userId = profile?.id;
+
+      if (!userId) return;
+
+      console.log('📊 [DASHBOARD] Fetching stats for:', userId);
+      setUserStats(prev => ({ ...prev, loading: true }));
+
+      try {
+        // Parallel fetch: Stats + Activities
+        const [statsResult, activitiesResult] = await Promise.all([
+          getVolunteerStatsRPC(userId),
+          supabase
+            .from('user_activities')
+            .select('id, activity_type, description, points_earned, activity_timestamp')
+            .eq('user_id', userId)
+            .order('activity_timestamp', { ascending: false })
+            .limit(3)
+        ]);
+
+        // Process Stats
+        if (statsResult.error || !statsResult.data) {
+          console.error('❌ [DASHBOARD] Failed to fetch stats:', statsResult.error);
+        } else {
+          setUserStats(prev => ({
+            ...prev,
+            score: statsResult.data.total_points,
+            rank: statsResult.data.team_rank,
+            teamSize: statsResult.data.team_size,
+          }));
+        }
+
+        // Process Activities
+        if (activitiesResult.error) {
+          console.error('Error fetching activities:', activitiesResult.error);
+        } else {
+          setUserActivities(activitiesResult.data || []);
+        }
+
+      } catch (error) {
+        console.error('💥 [DASHBOARD] Exception fetching data:', error);
+      } finally {
+        setUserStats(prev => ({ ...prev, loading: false }));
+      }
+    };
+
+    fetchVolunteerStats();
+  }, [profile?.id]);
+
+  // Fetch sessions from backend - Uses index: idx_sessions_event_time_status
   const fetchSessions = useCallback(async () => {
     try {
       setIsLoadingSessions(true);
@@ -191,37 +251,10 @@ export const BuildTeamDashboard: React.FC = () => {
 
   // --- Handlers ---
 
-  // Fetch attendee by UUID
-  const fetchAttendeeByUUID = async (uuid: string): Promise<ScannedAttendee | null> => {
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('id, full_name, phone, email, personal_id')
-        .eq('id', uuid)
-        .single();
-
-      if (error) {
-        console.error('Error fetching attendee:', error);
-        return null;
-      }
-
-      return {
-        id: data.id,
-        full_name: data.full_name || 'Unknown',
-        phone: data.phone || 'N/A',
-        email: data.email || 'N/A',
-        personal_id: data.personal_id
-      };
-    } catch (err) {
-      console.error('Error fetching attendee:', err);
-      return null;
-    }
-  };
-
   // Handle Session Check-in
   const handleSessionCheckIn = async () => {
     if (!sessionBooking || !sessionAttendee) {
-      showFeedback('error', 'Unable to process check-in');
+      showToast('Unable to process check-in', 'error');
       return;
     }
 
@@ -239,7 +272,7 @@ export const BuildTeamDashboard: React.FC = () => {
         throw error;
       }
 
-      showFeedback('success', `${sessionAttendee.full_name} checked in successfully!`);
+      showToast(`${sessionAttendee.full_name} checked in successfully!`, 'success');
       setShowSessionCard(false);
       setSessionBooking(null);
       setSessionAttendee(null);
@@ -257,23 +290,32 @@ export const BuildTeamDashboard: React.FC = () => {
       fetchSessions(); // Refresh data for accuracy
     } catch (err) {
       console.error('Check-in error:', err);
-      showFeedback('error', 'Failed to check in attendee');
+      showToast('Failed to check in attendee', 'error');
     } finally {
       setIsSessionProcessing(false);
     }
   };
 
-  // Handle Session QR Scan
+  // Handle Session QR Scan - Uses getUserProfileByUUID (optimized with PK lookup)
   const handleSessionQRScan = async (uuid: string) => {
     if (!selectedSessionForScan) return;
 
     try {
-      const attendee = await fetchAttendeeByUUID(uuid);
-      if (!attendee) {
-        showFeedback('error', 'Attendee not found');
+      // Use optimized function from supabase.ts
+      const { data: attendeeData, error: attendeeError } = await getUserProfileByUUID(uuid);
+
+      if (attendeeError || !attendeeData) {
+        showToast(attendeeError?.message || 'Attendee not found', 'error');
         return;
       }
 
+      // Check if user has attendee role
+      if (attendeeData?.role !== 'attendee') {
+        showToast('This user is not registered as an attendee', 'error');
+        return;
+      }
+
+      // Check for booking - Uses composite index: session_bookings_session_id_attendee_id_key
       const { data: booking, error } = await supabase
         .from('session_bookings')
         .select('*')
@@ -283,22 +325,31 @@ export const BuildTeamDashboard: React.FC = () => {
         .single();
 
       if (error || !booking) {
-        showFeedback('error', 'No confirmed booking found for this session');
+        showToast('No confirmed booking found for this session', 'error');
         return;
       }
 
       if (booking.checked_in) {
-        showFeedback('error', 'Attendee already checked in');
+        showToast('Attendee already checked in', 'error');
         return;
       }
 
-      setSessionAttendee(attendee);
+      // Map to ScannedAttendee interface
+      const scannedAttendee: ScannedAttendee = {
+        id: attendeeData.id,
+        full_name: attendeeData.full_name,
+        phone: attendeeData.phone || 'N/A',
+        email: attendeeData.email || 'N/A',
+        personal_id: attendeeData.personal_id
+      };
+
+      setSessionAttendee(scannedAttendee);
       setSessionBooking(booking);
       setShowSessionCard(true);
 
     } catch (err) {
       console.error('Session scan error:', err);
-      showFeedback('error', 'Error verifying booking');
+      showToast('Error verifying booking', 'error');
     }
   };
 
@@ -322,52 +373,41 @@ export const BuildTeamDashboard: React.FC = () => {
 
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(uuid)) {
-      showFeedback('error', 'Invalid QR code format. Expected UUID.');
+      showToast('Invalid QR code format. Expected UUID.', 'error');
       return;
     }
 
     await handleSessionQRScan(uuid);
   };
 
-  // Handle Session Search by Personal ID
+  // Handle Session Search - scoped to current session bookings
   const handleSessionSearch = async () => {
-    if (!sessionSearchTerm.trim()) {
-      showFeedback('error', 'Please enter a Personal ID');
+    if (!sessionSearchTerm.trim() || !selectedSessionForScan) {
+      showToast('Please enter a Personal ID', 'error');
       return;
     }
 
     setIsSessionSearching(true);
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('id, full_name, phone, email, personal_id')
-        .ilike('personal_id', `%${sessionSearchTerm.trim()}%`)
-        .limit(5);
+      // Use optimized function from supabase.ts - Scoped to session bookings (2-step)
+      const { data, error } = await searchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim());
 
       if (error) {
         console.error('Error searching:', error);
-        showFeedback('error', 'Search failed. Please try again.');
+        showToast('Search failed. Please try again.', 'error');
         return;
       }
 
       if (!data || data.length === 0) {
-        showFeedback('error', 'No attendee found');
+        showToast('No booking found for this ID in this session', 'error');
         setSessionSearchResults([]);
         return;
       }
 
-      const results: ScannedAttendee[] = data.map(d => ({
-        id: d.id,
-        full_name: d.full_name || 'Unknown',
-        phone: d.phone || 'N/A',
-        email: d.email || 'N/A',
-        personal_id: d.personal_id
-      }));
-
-      setSessionSearchResults(results);
+      setSessionSearchResults(data);
     } catch (err) {
       console.error('Search error:', err);
-      showFeedback('error', 'Search failed');
+      showToast('Search failed', 'error');
     } finally {
       setIsSessionSearching(false);
     }
@@ -378,23 +418,44 @@ export const BuildTeamDashboard: React.FC = () => {
     setSessionSearchResults([]);
     setSessionSearchTerm('');
     setShowSessionSearch(false);
-    if (selectedSession) {
-      setSelectedSessionForScan(selectedSession);
+    if (selectedSessionForScan) {
+      // If we have booking info in attendee object (from searchSessionBookings), use it
+      // But handleSessionQRScan expects UUID and fetches profile again.
+      // We can bypass that if we already have the data, but for consistency let's just trigger the scan logic
+      // which validates booking anyway.
+      // However, handleSessionQRScan is designed for QR code which is just UUID.
+      // We should check if handleSessionQRScan handles booking validation.
+      // Checking handleSessionQRScan implementation... it calls getUserProfileByUUID then checks if user is attendee.
+      // It DOES NOT seem to check if they are booked for the session currently.
+      // We should probably invoke check-in logic directly if we know they are booked.
+      // But let's reuse handleSessionQRScan for now as it sets up the Session Card.
+
+      // WAIT: The searchSessionBookings returns result having booking_id.
+      // We can set relevant state directly to avoid re-fetching if we want optimization.
+      // Let's call handleSessionQRScan(attendee.id) for now to keep flow unified.
       await handleSessionQRScan(attendee.id);
     }
   };
 
   // --- Renderers ---
 
+  // Loading State - Top Level
+  if (userStats.loading && activeTab === 'home') {
+    return <DashboardLoading message="Loading Building Dashboard" subMessage="Fetching your stats and recent activity..." />;
+  }
+
   const getActivityColor = (type: string) => {
     const colors: Record<string, string> = {
+
       'check_in': 'bg-red-100 dark:bg-red-500/10 text-red-600',
       'qr_scan': 'bg-blue-50 dark:bg-blue-500/10 text-blue-500',
       'session_booking': 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300',
       'session': 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300',
       'volunteer': 'bg-green-100 dark:bg-green-500/10 text-green-500',
       'profile_complete': 'bg-green-100 dark:bg-green-500/10 text-green-500',
-      'booth_visit': 'bg-purple-100 dark:bg-purple-500/10 text-purple-500'
+      'booth_visit': 'bg-purple-100 dark:bg-purple-500/10 text-purple-500',
+      'recruit_attendee': 'bg-indigo-100 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400',
+      'session_attendance': 'bg-teal-100 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400'
     };
     return colors[type] || 'bg-gray-100 text-gray-500';
   };
@@ -407,6 +468,8 @@ export const BuildTeamDashboard: React.FC = () => {
       'session': Calendar,
       'volunteer': User,
       'profile_complete': User,
+      'recruit_attendee': User,
+      'session_attendance': Clock,
     };
     const Icon = icons[type] || CheckCircle;
     return <Icon className="w-5 h-5" />;
@@ -438,7 +501,7 @@ export const BuildTeamDashboard: React.FC = () => {
               </span>
             </div>
             <div className="relative z-10">
-              <p className="uppercase tracking-widest text-red-200 font-semibold text-xs mb-2">Volunteer Dashboard</p>
+              <p className="uppercase tracking-widest text-red-200 font-semibold text-xs mb-2">Building Dashboard</p>
               <h1 className="text-4xl md:text-5xl font-bold mb-4">
                 Welcome, {userStats.first_name}
               </h1>
@@ -481,27 +544,35 @@ export const BuildTeamDashboard: React.FC = () => {
           <motion.div variants={itemVariants}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Recent Activity</h2>
-              <button className="text-red-600 font-semibold hover:underline flex items-center gap-1">
-                View All <span className="material-symbols-outlined text-sm">arrow_forward</span>
-              </button>
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
               <div className="space-y-8 relative">
                 <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-700"></div>
-                {mockActivities.map((activity) => (
-                  <div key={activity.id} className="relative flex gap-6 items-start group">
-                    <div className={`relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border-4 border-white dark:border-slate-900 ${getActivityColor(activity.type)}`}>
-                      {getActivityIcon(activity.type)}
-                    </div>
-                    <div className="flex-grow pt-1">
-                      <h4 className="font-semibold text-slate-800 dark:text-white">{activity.description}</h4>
-                      <p className="text-sm text-slate-500 mt-0.5 flex items-center gap-2">
-                        <Clock className="w-3 h-3" />
-                        {new Date(activity.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                      </p>
-                    </div>
+                {userActivities.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <p>No recent activity yet.</p>
                   </div>
-                ))}
+                ) : (
+                  userActivities.map((activity) => (
+                    <div key={activity.id} className="relative flex gap-6 items-start group">
+                      <div className={`relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border-4 border-white dark:border-slate-900 ${getActivityColor(activity.activity_type)}`}>
+                        {getActivityIcon(activity.activity_type)}
+                      </div>
+                      <div className="flex-grow pt-1">
+                        <h4 className="font-semibold text-slate-800 dark:text-white">{activity.description}</h4>
+                        <p className="text-sm text-slate-500 mt-0.5 flex items-center gap-2">
+                          <Clock className="w-3 h-3" />
+                          {new Date(activity.activity_timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                          {activity.points_earned > 0 && (
+                            <span className="text-xs font-bold text-green-600 bg-green-100 px-1.5 py-0.5 rounded ml-2">
+                              +{activity.points_earned} pts
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </motion.div>
@@ -518,9 +589,11 @@ export const BuildTeamDashboard: React.FC = () => {
           </motion.div>
 
           <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 relative group overflow-hidden">
-            <div className="absolute top-4 right-4 bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-3 py-1 rounded-full text-xs font-bold">
-              Top 5%
-            </div>
+            {userStats.teamSize > 0 && (
+              <div className="absolute top-4 right-4 bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-3 py-1 rounded-full text-xs font-bold">
+                Top {Math.round((userStats.rank / userStats.teamSize) * 100)}%
+              </div>
+            )}
             <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center mb-4">
               <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">bar_chart</span>
             </div>
@@ -542,110 +615,114 @@ export const BuildTeamDashboard: React.FC = () => {
       className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6"
     >
       {/* Header */}
-      <motion.header
-        variants={itemVariants}
-        className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-20 border-b border-gray-100 dark:border-slate-800 px-8 py-4 flex items-center justify-between rounded-2xl"
-      >
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Session Management</h1>
+      <motion.header variants={itemVariants} className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-4">
         <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center shrink-0">
+            <Calendar className="w-6 h-6 text-red-600 dark:text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Session Management</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Manage & Check-in</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 w-full md:w-auto">
           <div className="relative w-full md:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg w-5 h-5" />
-            <input className="w-full bg-gray-50 dark:bg-slate-800 border-none rounded-xl pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-red-600/50 transition-all dark:text-white" placeholder="Search sessions..." type="text" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
+              placeholder="Search sessions by title or room..."
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
         </div>
       </motion.header>
 
-      <motion.div variants={itemVariants} className="mb-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">Current Schedule</h2>
-            <p className="text-sm text-gray-500 dark:text-slate-400">Managing active and upcoming sessions for the career fair</p>
-          </div>
-          <div className="flex gap-2">
-            <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-xs font-bold rounded-full flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-              {sessions.filter(s => {
-                const now = new Date();
-                return new Date(s.start_time) <= now && new Date(s.end_time) >= now;
-              }).length} LIVE NOW
-            </span>
-          </div>
-        </div>
-      </motion.div>
+
 
       {/* Grid View */}
-      {isLoadingSessions ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="relative w-16 h-16 mb-4">
-            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
-            <motion.div
-              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-            />
+      {
+        isLoadingSessions ? (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="relative w-16 h-16 mb-4">
+              <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+              <motion.div
+                className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+              />
+            </div>
+            <p className="text-gray-500 dark:text-gray-400 font-medium">Loading sessions...</p>
           </div>
-          <p className="text-gray-500 dark:text-gray-400 font-medium">Loading sessions...</p>
-        </div>
-      ) : sessions.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800">
-          <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-slate-700 mb-3 block">
-            search_off
-          </span>
-          <p className="text-lg font-semibold text-gray-600 dark:text-gray-400">No sessions scheduled for today</p>
-          <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Check back later for updated schedule</p>
-        </div>
-      ) : (
-        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {sessions.map(session => (
-            <motion.div
-              key={session.id}
-              whileHover={{ y: -5 }}
-              onClick={() => {
-                setSelectedSession(session);
-                setShowSessionDetails(true);
-              }}
-              className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 hover:shadow-xl transition-all duration-300 flex flex-col justify-between h-full group cursor-pointer"
-            >
-              <div className="space-y-4">
-                <div className="flex justify-between items-start">
-                  <h3 className="font-bold text-gray-900 dark:text-white text-xl leading-tight group-hover:text-red-600 transition-colors">{session.title}</h3>
-                  <CheckCircle className="text-red-600/40 group-hover:text-red-600 transition-colors w-6 h-6" />
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400">
-                    <Clock className="w-5 h-5" />
-                    <span className="text-sm font-medium">
-                      {new Date(session.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(session.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+        ) : sessions.length === 0 ? (
+          <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800">
+            <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-slate-700 mb-3 block">
+              search_off
+            </span>
+            <p className="text-lg font-semibold text-gray-600 dark:text-gray-400">No sessions scheduled for today</p>
+            <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Check back later for updated schedule</p>
+          </div>
+        ) : (
+          <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {sessions.filter(session => {
+              const query = searchQuery.toLowerCase();
+              return (
+                session.title.toLowerCase().includes(query) ||
+                (session.room_name && session.room_name.toLowerCase().includes(query))
+              );
+            }).map(session => (
+              <motion.div
+                key={session.id}
+                whileHover={{ y: -5 }}
+                onClick={() => {
+                  setSelectedSession(session);
+                  setShowSessionDetails(true);
+                }}
+                className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 hover:shadow-xl transition-all duration-300 flex flex-col justify-between h-full group cursor-pointer"
+              >
+                <div className="space-y-4">
+                  <div className="flex justify-between items-start">
+                    <h3 className="font-bold text-gray-900 dark:text-white text-xl leading-tight group-hover:text-red-600 transition-colors">{session.title}</h3>
+                    <CheckCircle className="text-red-600/40 group-hover:text-red-600 transition-colors w-6 h-6" />
                   </div>
-                  <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400">
-                    <span className="material-symbols-outlined text-xl">meeting_room</span>
-                    <span className="text-sm font-medium">{session.room_name || 'TBA'}</span>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400">
+                      <Clock className="w-5 h-5" />
+                      <span className="text-sm font-medium">
+                        {new Date(session.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(session.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-gray-500 dark:text-gray-400">
+                      <span className="material-symbols-outlined text-xl">meeting_room</span>
+                      <span className="text-sm font-medium">{session.room_name || 'TBA'}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="mt-8 flex items-center justify-between pt-6 border-t border-gray-50 dark:border-slate-800">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">{session.current_bookings || 0} checked-in</span>
+                <div className="mt-8 flex items-center justify-between pt-6 border-t border-gray-50 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">{session.current_bookings || 0} checked-in</span>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSessionForScan(session);
+                      setShowScanner(true);
+                    }}
+                    className="bg-red-600 text-white p-2.5 rounded-xl shadow-lg shadow-red-600/30 hover:scale-105 transition-transform"
+                  >
+                    <QrCode className="w-5 h-5" />
+                  </button>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-
-                    setSelectedSessionForScan(session);
-                    setShowScanner(true);
-                  }}
-                  className="bg-red-600 text-white p-2.5 rounded-xl shadow-lg shadow-red-600/30 hover:scale-105 transition-transform"
-                >
-                  <QrCode className="w-5 h-5" />
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </motion.div>
-      )}
-    </motion.div>
+              </motion.div>
+            ))}
+          </motion.div>
+        )
+      }
+    </motion.div >
   );
 
   return (
@@ -656,35 +733,6 @@ export const BuildTeamDashboard: React.FC = () => {
       title="Build Team"
       onProfileClick={() => setShowProfile(true)}
     >
-      {/* Feedback Toast */}
-      <AnimatePresence>
-        {feedback && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            transition={{ type: "spring", duration: 0.4 }}
-            className={`fixed top-4 right-4 z-[9999] flex items-center space-x-2 px-4 py-3 rounded-lg shadow-lg ${feedback.type === 'success'
-              ? 'bg-green-500 text-white'
-              : 'bg-red-500 text-white'
-              }`}
-          >
-            {feedback.type === 'success' ? (
-              <CheckCircle className="h-5 w-5" />
-            ) : (
-              <AlertCircle className="h-5 w-5" />
-            )}
-            <span className="font-medium">{feedback.message}</span>
-            <button
-              onClick={() => setFeedback(null)}
-              className="ml-2 hover:bg-black hover:bg-opacity-20 rounded p-1"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Tab Content with AnimatePresence */}
       <AnimatePresence mode="wait">
         <motion.div key={activeTab} className="h-full">
@@ -787,7 +835,6 @@ export const BuildTeamDashboard: React.FC = () => {
                   <button
                     onClick={() => {
                       setShowSessionDetails(false);
-
                       setSelectedSessionForScan(selectedSession);
                       setShowScanner(true);
                     }}
@@ -846,7 +893,7 @@ export const BuildTeamDashboard: React.FC = () => {
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-gray-900 dark:text-white"
                 >
-                  Search Attendee
+                  Search Booked Attendee
                 </motion.h3>
                 <motion.button
                   initial={{ opacity: 0, scale: 0 }}
@@ -1054,13 +1101,31 @@ export const BuildTeamDashboard: React.FC = () => {
           <SettingsModal onClose={() => setShowSettings(false)} />
         )}
       </AnimatePresence>
+
       {/* Volunteer Profile Modal */}
       <VolunteerProfileModal
         isOpen={showProfile}
         onClose={() => setShowProfile(false)}
-        profile={volunteerProfile}
-        loading={loadingProfile}
+        profile={profile?.volunteer ? {
+          user_id: profile.id,
+          team_id: profile.volunteer.team_id,
+          full_name: profile.volunteer.full_name,
+          volunteer_id: profile.volunteer.volunteer_id,
+          total_points: profile.volunteer.total_points,
+          hours_volunteered: profile.volunteer.hours_volunteered
+        } : null}
+        loading={false}
       />
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast.isVisible && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+          />
+        )}
+      </AnimatePresence>
     </SharedNavigation>
   );
 };

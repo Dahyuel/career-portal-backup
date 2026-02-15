@@ -5,39 +5,30 @@ import { QRCodeSVG } from 'qrcode.react';
 import LeaderboardModal from '../shared/LeaderboardModal';
 import { useAuth } from '../../contexts/AuthContext';
 
-interface VolunteerProfile {
-    user_id?: string;
-    volunteer_id?: string;
-    full_name?: string;
-    email?: string;
-    phone?: string;
-    personal_id?: string;
-    total_points?: number;
-    hours_volunteered?: number;
-}
-
 interface VolunteerProfileModalProps {
     isOpen: boolean;
     onClose: () => void;
-    profile: VolunteerProfile | null;
-    loading?: boolean;
+    profile?: any; // Legacy prop - ignored
+    loading?: boolean; // Legacy prop - ignored
 }
 
 const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
     isOpen,
-    onClose,
-    profile,
-    loading = false
+    onClose
 }) => {
-    const { user } = useAuth();
+    // Get profile directly from AuthContext
+    const { profile: authProfile, user } = useAuth();
     const qrRef = useRef<HTMLDivElement>(null);
     const [activeTab, setActiveTab] = useState<'details' | 'qrcode'>('details');
     const [showLeaderboard, setShowLeaderboard] = useState(false);
 
-    // Filter roles for leaderboard button (all except attendee)
-    const showLeaderboardButton = user?.role && user.role !== 'attendee';
+    // Check if loading (no profile yet)
+    const loading = !authProfile;
 
-    if (!profile && !loading) return null;
+    // Show leaderboard button for all roles except attendee
+    const showLeaderboardButton = authProfile?.role && authProfile.role !== 'attendee';
+
+    if (!isOpen) return null;
 
     const modalVariants = {
         hidden: { opacity: 0, scale: 0.95 },
@@ -84,7 +75,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
             canvas.toBlob((blob) => {
                 if (blob) {
                     const link = document.createElement('a');
-                    link.download = `volunteer-qr-${profile?.volunteer_id || 'code'}.png`;
+                    link.download = `volunteer-qr-${authProfile?.volunteer?.volunteer_id || 'code'}.png`;
                     link.href = URL.createObjectURL(blob);
                     link.click();
                     URL.revokeObjectURL(link.href);
@@ -94,6 +85,9 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
         };
         img.src = url;
     };
+
+    // Volunteer ID display - use volunteer_id (not UUID)
+    const volunteerId = authProfile?.volunteer?.volunteer_id || 'N/A';
 
     return (
         <>
@@ -155,7 +149,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                             transition={{ delay: 0.2 }}
                                             className="text-red-100 text-sm"
                                         >
-                                            ID: {profile?.volunteer_id || 'Loading...'}
+                                            ID: {volunteerId}
                                         </motion.p>
                                     </div>
 
@@ -183,7 +177,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
                                             <p className="text-sm text-gray-500 dark:text-gray-400">Loading profile...</p>
                                         </div>
-                                    ) : profile ? (
+                                    ) : authProfile ? (
                                         <AnimatePresence mode="wait">
                                             {activeTab === 'details' ? (
                                                 <motion.div
@@ -199,7 +193,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                             <span className="material-symbols-outlined text-red-600">person</span>
                                                             <div className="flex-1">
                                                                 <p className="text-xs text-gray-500 dark:text-gray-400">Full Name</p>
-                                                                <p className="font-semibold text-gray-900 dark:text-white">{profile.full_name || 'N/A'}</p>
+                                                                <p className="font-semibold text-gray-900 dark:text-white">{authProfile.full_name || 'N/A'}</p>
                                                             </div>
                                                         </div>
 
@@ -207,7 +201,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                             <span className="material-symbols-outlined text-red-600">email</span>
                                                             <div className="flex-1">
                                                                 <p className="text-xs text-gray-500 dark:text-gray-400">Email</p>
-                                                                <p className="font-semibold text-gray-900 dark:text-white truncate">{profile.email || 'N/A'}</p>
+                                                                <p className="font-semibold text-gray-900 dark:text-white truncate">{authProfile.email || 'N/A'}</p>
                                                             </div>
                                                         </div>
 
@@ -215,7 +209,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                             <span className="material-symbols-outlined text-red-600">phone</span>
                                                             <div className="flex-1">
                                                                 <p className="text-xs text-gray-500 dark:text-gray-400">Phone</p>
-                                                                <p className="font-semibold text-gray-900 dark:text-white">{profile.phone || 'N/A'}</p>
+                                                                <p className="font-semibold text-gray-900 dark:text-white">{authProfile.phone || 'N/A'}</p>
                                                             </div>
                                                         </div>
 
@@ -223,23 +217,62 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                             <span className="material-symbols-outlined text-red-600">badge</span>
                                                             <div className="flex-1">
                                                                 <p className="text-xs text-gray-500 dark:text-gray-400">National ID</p>
-                                                                <p className="font-semibold text-gray-900 dark:text-white">{profile.personal_id || 'N/A'}</p>
+                                                                <p className="font-semibold text-gray-900 dark:text-white">{authProfile.personal_id || 'N/A'}</p>
                                                             </div>
                                                         </div>
-                                                    </div>
 
-                                                    {/* Stats */}
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="p-4 bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 rounded-xl border border-yellow-200 dark:border-yellow-800">
-                                                            <p className="text-xs text-yellow-700 dark:text-yellow-300 mb-1">Total Points</p>
-                                                            <p className="text-2xl font-bold text-yellow-800 dark:text-yellow-200">{profile.total_points || 0}</p>
+                                                        {/* Role Badge */}
+                                                        <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
+                                                            <span className="material-symbols-outlined text-red-600">work</span>
+                                                            <div className="flex-1">
+                                                                <p className="text-xs text-gray-500 dark:text-gray-400">Role</p>
+                                                                <p className="font-semibold text-gray-900 dark:text-white capitalize">
+                                                                    {authProfile.role?.replace(/_/g, ' ') || 'N/A'}
+                                                                </p>
+                                                            </div>
                                                         </div>
 
-                                                        <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                                                            <p className="text-xs text-blue-700 dark:text-blue-300 mb-1">Hours Volunteered</p>
-                                                            <p className="text-2xl font-bold text-blue-800 dark:text-blue-200">{profile.hours_volunteered || 0}</p>
-                                                        </div>
+                                                        {/* Stats - Only for volunteers */}
+                                                        {authProfile.isVolunteer && (
+                                                            <>
+                                                                <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
+                                                                    <span className="material-symbols-outlined text-red-600">emoji_events</span>
+                                                                    <div className="flex-1">
+                                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Total Points</p>
+                                                                        <p className="font-semibold text-gray-900 dark:text-white">
+                                                                            {authProfile.volunteer?.total_points || 0} pts
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
+                                                                    <span className="material-symbols-outlined text-red-600">schedule</span>
+                                                                    <div className="flex-1">
+                                                                        <p className="text-xs text-gray-500 dark:text-gray-400">Hours Volunteered</p>
+                                                                        <p className="font-semibold text-gray-900 dark:text-white">
+                                                                            {authProfile.volunteer?.hours_volunteered || 0} hrs
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        )}
                                                     </div>
+
+                                                    {/* Company Info - Only for employers */}
+                                                    {authProfile.employer && authProfile.company && (
+                                                        <div className="p-4 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
+                                                            <div className="flex items-center gap-3 mb-2">
+                                                                <span className="material-symbols-outlined text-purple-600">business</span>
+                                                                <p className="text-xs text-purple-700 dark:text-purple-300">Company</p>
+                                                            </div>
+                                                            <p className="text-lg font-bold text-purple-800 dark:text-purple-200">
+                                                                {authProfile.company.company_name}
+                                                            </p>
+                                                            <p className="text-sm text-purple-600 dark:text-purple-400 mt-1">
+                                                                {authProfile.employer.job_title}
+                                                            </p>
+                                                        </div>
+                                                    )}
 
                                                     {/* Leaderboard Button */}
                                                     {showLeaderboardButton && (
@@ -261,7 +294,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                     className="flex flex-col items-center justify-center space-y-6 py-4"
                                                 >
                                                     <div className="text-center space-y-2">
-                                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Your Volunteer ID</h3>
+                                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Your ID QR Code</h3>
                                                         <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs mx-auto">
                                                             Use this QR code for check-ins and verification.
                                                         </p>
@@ -271,7 +304,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                         ref={qrRef}
                                                         className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mx-auto"
                                                     >
-                                                        <QRCodeSVG value={profile.user_id || ''} size={200} level="H" />
+                                                        <QRCodeSVG value={authProfile.id || user?.id || ''} size={200} level="H" />
                                                     </div>
 
                                                     <motion.button
@@ -286,7 +319,12 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                 </motion.div>
                                             )}
                                         </AnimatePresence>
-                                    ) : null}
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center py-12 gap-4">
+                                            <span className="material-symbols-outlined text-5xl text-gray-400">error</span>
+                                            <p className="text-sm text-gray-500 dark:text-gray-400">Unable to load profile</p>
+                                        </div>
+                                    )}
                                 </div>
                             </motion.div>
                         </div>

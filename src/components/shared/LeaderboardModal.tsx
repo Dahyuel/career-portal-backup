@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, DEFAULT_EVENT_ID } from '../../lib/supabase';
 
 interface LeaderboardEntry {
     rank: number;
     full_name: string;
     total_points: number;
-    volunteer_id: string; // for identifying "me"
+    user_id: string;
 }
 
 interface LeaderboardModalProps {
@@ -21,7 +21,7 @@ interface Team {
 }
 
 const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) => {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const [loading, setLoading] = useState(false);
     const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
     const [userRank, setUserRank] = useState<LeaderboardEntry | null>(null);
@@ -31,125 +31,243 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
 
     useEffect(() => {
-        if (isOpen && user) {
+        if (isOpen && user && profile) {
             fetchData();
         }
-    }, [isOpen, user, selectedTeamId]);
+    }, [isOpen, user, profile, selectedTeamId]);
 
     const fetchData = async () => {
-        if (!user) return;
+        if (!user || !profile) return;
+
         setLoading(true);
         try {
-            if (['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(user.role || '')) {
-                // VOLUNTEER LOGIC
-                // 1. Get user's team
+            const userRole = profile.role;
+
+            if (['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(userRole)) {
+                // ================================================================
+                // VOLUNTEER LOGIC - Show team leaderboard
+                // ================================================================
+
+                console.log('🎯 [LEADERBOARD] Fetching for volunteer with role:', userRole);
+
+                // 1. Get user's volunteer record to find their team
                 const { data: volunteerData, error: vError } = await supabase
                     .from('volunteers')
-                    .select('team_id, volunteer_id')
+                    .select('team_id, user_id')
                     .eq('user_id', user.id)
                     .single();
 
-                if (vError || !volunteerData?.team_id) throw vError || new Error("No team found");
+                if (vError || !volunteerData?.team_id) {
+                    console.error('❌ [LEADERBOARD] Error fetching volunteer team:', vError);
+                    throw new Error("Could not find your team");
+                }
 
-                // 2. Fetch all volunteers in team to calculate ranks
-                // fetching all is safer for small teams < 1000, 
-                // if robust scaling needed, we'd use a postgres view or window function.
-                // For now, client side ranking for "My Rank" if outside top 10 is acceptable.
+                console.log('✅ [LEADERBOARD] Found team:', volunteerData.team_id);
+
+                // 2. Fetch all volunteers in the same team
                 const { data: teamMembers, error: tError } = await supabase
                     .from('volunteers')
-                    .select('volunteer_id, full_name, total_points')
+                    .select('user_id, full_name, total_points')
                     .eq('team_id', volunteerData.team_id)
                     .order('total_points', { ascending: false });
 
-                if (tError) throw tError;
+                if (tError) {
+                    console.error('❌ [LEADERBOARD] Error fetching team members:', tError);
+                    throw tError;
+                }
 
-                const processedData = (teamMembers || []).map((m, index) => ({
-                    ...m,
+                console.log('📊 [LEADERBOARD] Found team members:', teamMembers?.length || 0);
+
+                if (!teamMembers || teamMembers.length === 0) {
+                    console.warn('⚠️ [LEADERBOARD] No team members found');
+                    setLeaderboardData([]);
+                    setUserRank(null);
+                    return;
+                }
+
+                // 3. Get user_roles to verify they're actually volunteer roles
+                // This filters out any attendees or employers who might be mistakenly in the volunteers table
+                const userIds = teamMembers.map(m => m.user_id);
+
+                const { data: rolesData, error: rolesError } = await supabase
+                    .from('user_roles')
+                    .select('user_id, role')
+                    .eq('event_id', DEFAULT_EVENT_ID)
+                    .in('user_id', userIds)
+                    .in('role', ['volunteer', 'registration', 'building', 'info_desk', 'verification']);
+
+                if (rolesError) {
+                    console.error('❌ [LEADERBOARD] Error fetching roles:', rolesError);
+                    // Continue without role filtering if this fails
+                }
+
+                // Create a Set of valid volunteer user IDs
+                const validVolunteerIds = new Set(rolesData?.map(r => r.user_id) || userIds);
+
+                console.log('✅ [LEADERBOARD] Valid volunteer IDs:', validVolunteerIds.size);
+
+                // 4. Filter and process the data
+                const filteredMembers = teamMembers.filter(m => validVolunteerIds.has(m.user_id));
+
+                const processedData = filteredMembers.map((m, index) => ({
                     rank: index + 1,
                     full_name: m.full_name,
                     total_points: m.total_points || 0,
-                    volunteer_id: m.volunteer_id
+                    user_id: m.user_id
                 }));
 
-                setLeaderboardData(processedData.slice(0, 10)); // Top 10
+                console.log('✅ [LEADERBOARD] Processed data:', processedData.length, 'members');
 
-                // Find user's rank
-                const myRank = processedData.find(m => m.volunteer_id === volunteerData.volunteer_id);
+                // 5. Set top 10 for display
+                setLeaderboardData(processedData.slice(0, 10));
+
+                // 6. Find current user's rank (if outside top 10)
+                const myRank = processedData.find(m => m.user_id === user.id);
                 setUserRank(myRank || null);
 
-            } else if (user.role === 'team_leader') {
-                // TEAM LEADER LOGIC
-                // 1. Get team led by this user
+            } else if (userRole === 'team_leader') {
+                // ================================================================
+                // TEAM LEADER LOGIC - Show their team's full leaderboard
+                // ================================================================
+
+                console.log('👑 [LEADERBOARD] Fetching for team leader');
+
+                // 1. Find the team this user leads
                 const { data: teamData, error: tError } = await supabase
                     .from('volunteer_teams')
                     .select('id')
                     .eq('team_leader_id', user.id)
                     .single();
 
-                if (tError || !teamData) throw tError || new Error("No team found for leader");
+                if (tError || !teamData) {
+                    console.error('❌ [LEADERBOARD] Error fetching team for leader:', tError);
+                    throw new Error("Could not find your team");
+                }
 
-                // 2. Fetch all members
+                console.log('✅ [LEADERBOARD] Found team:', teamData.id);
+
+                // 2. Fetch all members of that team
                 const { data: teamMembers, error: mError } = await supabase
                     .from('volunteers')
-                    .select('volunteer_id, full_name, total_points')
+                    .select('user_id, full_name, total_points')
                     .eq('team_id', teamData.id)
                     .order('total_points', { ascending: false });
 
-                if (mError) throw mError;
-                const processedData = (teamMembers || []).map((m, index) => ({
-                    ...m,
+                if (mError) {
+                    console.error('❌ [LEADERBOARD] Error fetching team members:', mError);
+                    throw mError;
+                }
+
+                // 3. Verify volunteer roles
+                const userIds = teamMembers?.map(m => m.user_id) || [];
+
+                const { data: rolesData } = await supabase
+                    .from('user_roles')
+                    .select('user_id')
+                    .eq('event_id', DEFAULT_EVENT_ID)
+                    .in('user_id', userIds)
+                    .in('role', ['volunteer', 'registration', 'building', 'info_desk', 'verification']);
+
+                const validVolunteerIds = new Set(rolesData?.map(r => r.user_id) || userIds);
+
+                // 4. Filter and process
+                const filteredMembers = (teamMembers || []).filter(m => validVolunteerIds.has(m.user_id));
+
+                const processedData = filteredMembers.map((m, index) => ({
                     rank: index + 1,
                     full_name: m.full_name,
                     total_points: m.total_points || 0,
-                    volunteer_id: m.volunteer_id
+                    user_id: m.user_id
                 }));
-                setLeaderboardData(processedData); // Show all
-                setUserRank(null); // Leader isn't ranked in this list usually
 
-            } else if (['admin', 'super_admin', 'sadmin'].includes(user.role || '')) {
-                // ADMIN LOGIC
-                // 1. Fetch teams for dropdown if not loaded
+                console.log('✅ [LEADERBOARD] Processed data:', processedData.length, 'members');
+
+                // Team leaders see the full list
+                setLeaderboardData(processedData);
+                setUserRank(null);
+
+            } else if (['admin', 'super_admin', 'sadmin'].includes(userRole)) {
+                // ================================================================
+                // ADMIN LOGIC - Select any team to view
+                // ================================================================
+
+                console.log('🔐 [LEADERBOARD] Fetching for admin');
+
+                // 1. Load teams dropdown (only once)
                 if (teams.length === 0) {
                     const { data: allTeams, error: teamsError } = await supabase
                         .from('volunteer_teams')
                         .select('id, team_name')
                         .order('team_name');
 
-                    if (teamsError) throw teamsError;
+                    if (teamsError) {
+                        console.error('❌ [LEADERBOARD] Error fetching teams:', teamsError);
+                        throw teamsError;
+                    }
+
                     setTeams(allTeams || []);
-                    // Default to first team if none selected
+
+                    // Auto-select first team if none selected
                     if (!selectedTeamId && allTeams && allTeams.length > 0) {
                         setSelectedTeamId(allTeams[0].id);
-                        return; // Effect will re-run with selectedTeamId
+                        setLoading(false);
+                        return;
                     }
                 }
 
+                // 2. Fetch members of selected team
                 if (selectedTeamId) {
                     const { data: teamMembers, error: mError } = await supabase
                         .from('volunteers')
-                        .select('volunteer_id, full_name, total_points')
+                        .select('user_id, full_name, total_points')
                         .eq('team_id', selectedTeamId)
                         .order('total_points', { ascending: false });
 
-                    if (mError) throw mError;
+                    if (mError) {
+                        console.error('❌ [LEADERBOARD] Error fetching team members:', mError);
+                        throw mError;
+                    }
 
-                    const processedData = (teamMembers || []).map((m, index) => ({
-                        ...m,
+                    // 3. Verify volunteer roles
+                    const userIds = teamMembers?.map(m => m.user_id) || [];
+
+                    const { data: rolesData } = await supabase
+                        .from('user_roles')
+                        .select('user_id')
+                        .eq('event_id', DEFAULT_EVENT_ID)
+                        .in('user_id', userIds)
+                        .in('role', ['volunteer', 'registration', 'building', 'info_desk', 'verification']);
+
+                    const validVolunteerIds = new Set(rolesData?.map(r => r.user_id) || userIds);
+
+                    // 4. Filter and process
+                    const filteredMembers = (teamMembers || []).filter(m => validVolunteerIds.has(m.user_id));
+
+                    const processedData = filteredMembers.map((m, index) => ({
                         rank: index + 1,
                         full_name: m.full_name,
                         total_points: m.total_points || 0,
-                        volunteer_id: m.volunteer_id
+                        user_id: m.user_id
                     }));
+
+                    console.log('✅ [LEADERBOARD] Processed data:', processedData.length, 'members');
+
                     setLeaderboardData(processedData);
+                    setUserRank(null);
                 }
+            } else {
+                // Other roles (attendee, employer) - no leaderboard
+                console.warn('⚠️ [LEADERBOARD] Leaderboard not available for role:', userRole);
+                setLeaderboardData([]);
             }
+
         } catch (err) {
-            console.error("Error fetching leaderboard:", err);
+            console.error("❌ [LEADERBOARD] Error fetching leaderboard:", err);
+            setLeaderboardData([]);
         } finally {
             setLoading(false);
         }
     };
-
 
     const modalVariants: Variants = {
         hidden: { opacity: 0, scale: 0.95 },
@@ -193,8 +311,8 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                     <div>
                                         <h2 className="text-2xl font-bold text-white mb-1">Team Leaderboard</h2>
                                         <p className="text-amber-100 text-sm">
-                                            {user?.role === 'team_leader' ? 'Your Team Performance' :
-                                                ['admin', 'super_admin', 'sadmin'].includes(user?.role || '') ? 'Global Team Performance' :
+                                            {profile?.role === 'team_leader' ? 'Your Team Performance' :
+                                                ['admin', 'super_admin', 'sadmin'].includes(profile?.role || '') ? 'Global Team Performance' :
                                                     'Top Performers & My Rank'}
                                         </p>
                                     </div>
@@ -206,8 +324,8 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                     </button>
                                 </div>
 
-                                {/* Admin Selector */}
-                                {['admin', 'super_admin', 'sadmin'].includes(user?.role || '') && (
+                                {/* Admin Team Selector */}
+                                {['admin', 'super_admin', 'sadmin'].includes(profile?.role || '') && (
                                     <div className="mt-4">
                                         <select
                                             value={selectedTeamId}
@@ -246,10 +364,10 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                         </thead>
                                         <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
                                             {leaderboardData.map((entry) => {
-                                                const isMe = userRank?.volunteer_id === entry.volunteer_id;
+                                                const isMe = user?.id === entry.user_id;
                                                 return (
                                                     <tr
-                                                        key={entry.volunteer_id}
+                                                        key={entry.user_id}
                                                         className={`${isMe ? 'bg-amber-50 dark:bg-amber-900/20' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'} transition-colors`}
                                                     >
                                                         <td className="py-4 px-6">
@@ -266,7 +384,7 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                                         <td className="py-4 px-6">
                                                             <div className="flex items-center gap-3">
                                                                 <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300">
-                                                                    {entry.full_name.charAt(0)}
+                                                                    {entry.full_name.charAt(0).toUpperCase()}
                                                                 </div>
                                                                 <div>
                                                                     <p className={`font-medium ${isMe ? 'text-amber-700 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
@@ -287,9 +405,9 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                 )}
                             </div>
 
-                            {/* Footer for Volunteer's own rank if not in list */}
-                            {userRank && !leaderboardData.find(d => d.volunteer_id === userRank.volunteer_id) && (
-                                <div className="border-t border-gray-200 dark:border-zinc-800 bg-amber-50 dark:bg-amber-900/10 p-4">
+                            {/* Footer - Show user's rank if they're outside top 10 */}
+                            {userRank && !leaderboardData.find(d => d.user_id === userRank.user_id) && (
+                                <div className="border-t border-gray-200 dark:border-zinc-800 bg-amber-50 dark:bg-amber-900/10 p-4 flex-shrink-0">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-4">
                                             <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-800 flex items-center justify-center font-bold text-amber-700 dark:text-amber-200">

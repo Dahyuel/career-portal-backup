@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import SettingsModal from './SettingsModal';
 import LeaderboardModal from './LeaderboardModal';
+import { SmartAssistant } from './SmartAssistant';
 
 // Navigation item type
 export interface NavItem {
@@ -120,7 +121,7 @@ const MobileDockItem = memo(({ item, isActive, onItemChange }: {
         onClick={() => onItemChange(item.key)}
         whileHover={{ y: -5 }}
         whileTap={{ scale: 0.9 }}
-        className={`flex flex-col items-center gap-1 transition-colors min-w-[60px] ${isActive
+        className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${isActive
             ? 'text-primary'
             : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
@@ -501,7 +502,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                     {/* Mobile Notification Dropdown */}
                     <AnimatePresence>
                         {showNotificationDropdown && (
-                            <div ref={mobileNotificationDropdownRef}>
+                            <div ref={mobileNotificationDropdownRef} className="absolute left-0 top-0 w-full">
                                 <motion.div
                                     key="mobile-notification-dropdown"
                                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -520,7 +521,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                     {/* Mobile Profile Dropdown */}
                     <AnimatePresence>
                         {showMobileProfileDropdown && (
-                            <div ref={mobileProfileDropdownRef}>
+                            <div ref={mobileProfileDropdownRef} className="absolute left-0 top-0 w-full">
                                 <motion.div
                                     key="mobile-profile-dropdown"
                                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
@@ -562,7 +563,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                         initial={shouldAnimate ? { y: 100, opacity: 0 } : false}
                         animate={{ y: 0, opacity: 1 }}
                         transition={{ duration: 0.5, type: "spring" }}
-                        className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 px-4 py-3 rounded-[28px] shadow-2xl flex justify-between items-center overflow-x-auto"
+                        className="bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 px-4 py-3 rounded-[28px] shadow-2xl flex items-center"
                     >
                         {navItems.map((item) => (
                             <MobileDockItem
@@ -575,6 +576,8 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                     </motion.nav>
                 </div>
             )}
+            {/* Smart Assistant */}
+            <SmartAssistant />
         </div>
     );
 });

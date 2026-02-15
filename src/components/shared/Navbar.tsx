@@ -31,7 +31,7 @@ export const Navbar: React.FC = () => {
 
                     {/* Center - Navigation / Title (Desktop) */}
                     <div className="hidden md:flex items-center space-x-8">
-                        <button onClick={() => navigate('/partners')} className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">Partners</button>
+                        <button onClick={() => navigate('/agenda')} className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">Agenda</button>
                         <button onClick={() => navigate('/speakers')} className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">Speakers</button>
                         <button onClick={() => navigate('/about')} className="text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors">About</button>
                     </div>
@@ -93,12 +93,12 @@ export const Navbar: React.FC = () => {
                         <div className="flex flex-col space-y-3">
                             <button
                                 onClick={() => {
-                                    navigate('/partners');
+                                    navigate('/agenda');
                                     setIsMenuOpen(false);
                                 }}
                                 className="text-left text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 font-semibold transition-colors px-2 py-2 rounded-lg hover:bg-red-50 dark:hover:bg-gray-800 w-full"
                             >
-                                Partners
+                                Agenda
                             </button>
                             <button
                                 onClick={() => {

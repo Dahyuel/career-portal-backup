@@ -15,7 +15,6 @@ import { ForgotPasswordForm } from './components/ForgotPasswordForm';
 import { UnifiedAttendeeRegistration } from './components/UnifiedAttendeeRegistration';
 import { UnifiedVolunteerRegistration } from './components/UnifiedVolunteerRegistration';
 import { LandingPage } from './components/LandingPage';
-import { SmartAssistant } from './components/shared/SmartAssistant';
 import { Footer } from './components/shared/Footer';
 
 // Lazy load dashboards
@@ -32,7 +31,7 @@ const EmployerRegistration = React.lazy(() => import('./pages/Employer/EmployerR
 const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
 const AboutCareerCenter = React.lazy(() => import('./pages/LandingPageContent/AboutCareerCenter').then(module => ({ default: module.AboutCareerCenter })));
 const Speakers = React.lazy(() => import('./pages/LandingPageContent/Speakers').then(module => ({ default: module.Speakers })));
-const Partners = React.lazy(() => import('./pages/LandingPageContent/Partners').then(module => ({ default: module.Partners })));
+const Agenda = React.lazy(() => import('./pages/LandingPageContent/Agenda').then(module => ({ default: module.Agenda })));
 
 // Loading Screen
 import DashboardLoading from './components/DashboardLoading';
@@ -60,9 +59,9 @@ const AppRouter: React.FC = () => {
           <Speakers />
         </Suspense>
       } />
-      <Route path="/partners" element={
+      <Route path="/agenda" element={
         <Suspense fallback={<DashboardLoading message="Loading page..." />}>
-          <Partners />
+          <Agenda />
         </Suspense>
       } />
 
@@ -207,7 +206,6 @@ function App() {
         <AuthProvider>
           <AppRouter />
           <LogoutPopup />
-          <SmartAssistant />
           <Footer />
         </AuthProvider>
       </Router>

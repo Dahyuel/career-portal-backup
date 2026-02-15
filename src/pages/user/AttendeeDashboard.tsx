@@ -408,17 +408,22 @@ const AttendeeDashboard = () => {
             id,
             title,
             job_type,
+            experience_level,
+            employment_mode,
             location,
+            description,
             posted_at,
+            no_of_applicants,
             companies!inner (
               company_name,
-              logo_url
+              logo_url,
+              industry
             )
-          `, { count: 'exact' }) // Get total count for pagination later
-            .eq('event_id', EVENT_ID) // Important for index usage: (event_id, is_active, posted_at)
+          `, { count: 'exact' })
+            .eq('event_id', EVENT_ID)
             .eq('is_active', true)
             .order('posted_at', { ascending: false })
-            .limit(50), // Pagination - first 50 jobs
+            .limit(50),
           attendeeId ? supabase
             .from('job_applications')
             .select('job_position_id')
@@ -502,26 +507,41 @@ const AttendeeDashboard = () => {
   //Helper: Get type badge color
   const getTypeBadgeColor = (type: string): string => {
     const colors: Record<string, string> = {
+      // Job Types
+      'full-time': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+      'part-time': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+      'internship': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+      'contract': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+      'freelance': 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300',
+
+      // Experience Levels (for consistency)
+      'entry': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+      'junior': 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300',
+      'mid': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+      'senior': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+      'lead': 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+      'executive': 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300',
+
+      // Employment Modes
+      'remote': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+      'hybrid': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+      'on-site': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+
+      // Session Types (existing)
       'Fair': 'bg-blue-100 text-blue-800',
       'Workshop': 'bg-purple-100 text-purple-800',
       'Seminar': 'bg-amber-100 text-amber-800',
       'Networking': 'bg-emerald-100 text-emerald-800',
       'Break': 'bg-slate-100 text-slate-600',
-      'Full-Time': 'bg-blue-100 text-blue-800',
-      'Internship': 'bg-amber-100 text-amber-800',
-      'Part-Time': 'bg-emerald-100 text-emerald-800',
-      'Co-op': 'bg-purple-100 text-purple-800',
-      'Remote': 'bg-slate-100 text-slate-800',
       'keynote': 'bg-purple-100 text-purple-800',
       'workshop': 'bg-blue-100 text-blue-800',
       'panel': 'bg-green-100 text-green-800',
       'networking': 'bg-amber-100 text-amber-800',
       'competition': 'bg-red-100 text-red-800'
     };
-    return colors[type] || 'bg-gray-100 text-gray-800';
+    return colors[type.toLowerCase()] || 'bg-gray-100 text-gray-800';
   };
 
-  // Handler: Book a session
   const handleBookSession = async () => {
     if (!attendeeId || !sessionToBook) return;
 
@@ -588,6 +608,8 @@ const AttendeeDashboard = () => {
             })
             .eq('id', existingBooking.id);
 
+          // ✅ TRIGGER HANDLES: current_bookings increment & is_full update automatically
+
           if (updateError) {
             // Revert on error
             throw updateError;
@@ -641,6 +663,8 @@ const AttendeeDashboard = () => {
           .select('id')
           .single();
 
+        // ✅ TRIGGER HANDLES: current_bookings increment & is_full update automatically
+
         if (bookingError) throw bookingError;
 
         // Update the temporary ID with real one if needed, or let refresh handle it
@@ -651,14 +675,8 @@ const AttendeeDashboard = () => {
         });
       }
 
-      // 3. Update session stats (Background)
-      await supabase
-        .from('sessions')
-        .update({
-          current_bookings: currentBookings + 1,
-          is_full: (maxAttendees && currentBookings + 1 >= maxAttendees) ? true : false
-        })
-        .eq('id', sessionToBook.id);
+      // ❌ REMOVED: Manual session statistics update
+      // The database trigger now handles this automatically when we insert/update session_bookings
 
     } catch (err: any) {
       console.error('Error booking session:', err);
@@ -676,7 +694,6 @@ const AttendeeDashboard = () => {
   }
 
 
-  // Handler: Cancel a booking
   const handleCancelBooking = async (bookingId: string) => {
     try {
       // OPTIMISTIC UPDATE: Remove from booked, Add to available
@@ -699,6 +716,8 @@ const AttendeeDashboard = () => {
           .update({ booking_status: 'cancelled' })
           .eq('id', bookingId);
 
+        // ✅ TRIGGER HANDLES: current_bookings decrement & is_full update automatically
+
         if (error) throw error;
 
         // Invalidate cache in background
@@ -708,6 +727,10 @@ const AttendeeDashboard = () => {
           return next;
         });
       }
+
+      // ❌ REMOVED: Manual session statistics decrement
+      // The database trigger now handles this automatically when we update booking_status
+
     } catch (error) {
       console.error('Error cancelling booking:', error);
       setToast({ message: 'Failed to cancel booking.', type: 'error' });
@@ -1422,7 +1445,6 @@ const AttendeeDashboard = () => {
           <span className="text-sm text-gray-500 dark:text-gray-400">{filteredJobs.length} Jobs Found</span>
         </div>
 
-        {/* Filters */}
         {/* Search and Filters */}
         <div className="flex flex-col md:flex-row gap-3">
           <div className="flex-1 relative">
@@ -1464,8 +1486,6 @@ const AttendeeDashboard = () => {
                   onClick={() => setSelectedJob(job)}
                   className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-xl transition-all duration-300 cursor-pointer flex flex-col h-full group relative overflow-hidden"
                 >
-
-
                   <div className="flex items-start gap-4 mb-4">
                     {/* Company Logo - Left Aligned */}
                     <div className="w-16 h-16 rounded-xl bg-white dark:bg-white p-2 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center flex-shrink-0 group-hover:border-red-100 dark:group-hover:border-red-500 transition-colors">
@@ -1484,25 +1504,71 @@ const AttendeeDashboard = () => {
                       <h3 className="font-bold text-lg text-slate-900 dark:text-white truncate group-hover:text-red-600 transition-colors">
                         {job.title}
                       </h3>
-                      <p className="text-sm font-medium text-slate-500 dark:text-slate-400 truncate">
-                        {job.companies?.company_name}
-                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400 truncate">
+                          {job.companies?.company_name}
+                        </p>
+                        {job.companies?.industry && (
+                          <>
+                            <span className="text-slate-300 dark:text-slate-600">•</span>
+                            <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                              {job.companies.industry}
+                            </p>
+                          </>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Applied Status Badge - Top Right */}
+                    {hasApplied && (
+                      <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-xs font-bold bg-green-50 dark:bg-green-900/20 px-2.5 py-1 rounded-md border border-green-200 dark:border-green-900/50">
+                        <span className="material-symbols-outlined text-sm">check_circle</span>
+                        Applied
+                      </span>
+                    )}
                   </div>
 
-                  <div className="space-y-3 flex-1">
+                  {/* Enhanced Badge Row - Now includes Experience + Employment Mode */}
+                  <div className="space-y-3 flex-1 mb-4">
                     <div className="flex flex-wrap gap-2">
+                      {/* Job Type Badge */}
                       <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${getTypeBadgeColor(job.job_type)}`}>
                         {job.job_type}
                       </span>
+
+                      {/* Experience Level Badge - NEW */}
+                      {job.experience_level && (
+                        <span className="px-2.5 py-1 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">workspace_premium</span>
+                          {job.experience_level}
+                        </span>
+                      )}
+
+                      {/* Employment Mode Badge - NEW */}
+                      {job.employment_mode && (
+                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${job.employment_mode === 'remote'
+                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                          : job.employment_mode === 'hybrid'
+                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                            : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                          }`}>
+                          <span className="material-symbols-outlined text-[12px]">
+                            {job.employment_mode === 'remote' ? 'home' : job.employment_mode === 'hybrid' ? 'autorenew' : 'apartment'}
+                          </span>
+                          {job.employment_mode}
+                        </span>
+                      )}
+
+                      {/* Location Badge */}
                       {job.location && (
                         <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[10px]">location_on</span>
+                          <span className="material-symbols-outlined text-[12px]">location_on</span>
                           {job.location}
                         </span>
                       )}
                     </div>
 
+                    {/* Description Snippet */}
                     {job.description && (
                       <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
                         {job.description}
@@ -1510,17 +1576,29 @@ const AttendeeDashboard = () => {
                     )}
                   </div>
 
-                  <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
-                      Posted {new Date(job.posted_at).toLocaleDateString()}
-                    </span>
-
-                    {hasApplied ? (
-                      <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-xs font-bold bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded-md">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        Applied
+                  {/* Footer - Enhanced with Applicant Count */}
+                  <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                    <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
+                      {/* Posted Date */}
+                      <span className="flex items-center gap-1 font-medium">
+                        <span className="material-symbols-outlined text-sm">schedule</span>
+                        Posted {new Date(job.posted_at).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric'
+                        })}
                       </span>
-                    ) : (
+
+                      {/* Applicant Count - NEW with Social Proof */}
+                      {job.no_of_applicants !== null && job.no_of_applicants !== undefined && (
+                        <span className="flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
+                          <span className="material-symbols-outlined text-sm">group</span>
+                          {job.no_of_applicants} {job.no_of_applicants === 1 ? 'applicant' : 'applicants'}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* View Details Arrow */}
+                    {!hasApplied && (
                       <span className="text-red-600 dark:text-red-400 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
                         View Details
                         <span className="material-symbols-outlined text-sm">arrow_forward</span>
