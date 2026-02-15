@@ -113,7 +113,7 @@ export const SmartAssistant: React.FC = () => {
     };
 
     return (
-        <div className="fixed bottom-4 right-4 z-50">
+        <div className="fixed bottom-24 md:bottom-4 right-4 z-50">
             {/* Chat Window */}
             {isOpen && !isMinimized && (
                 <div className={`mb-4 w-80 sm:w-96 rounded-2xl shadow-2xl overflow-hidden transition-all duration-300 ${isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'
