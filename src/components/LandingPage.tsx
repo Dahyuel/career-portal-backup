@@ -87,13 +87,15 @@ export const LandingPage: React.FC = () => {
             <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16 md:pt-20">
                 {/* Video Background */}
                 <div className="absolute inset-0 z-0 overflow-hidden bg-gray-900">
-                    <iframe
-                        className="absolute top-1/2 left-1/2 min-w-full min-h-full w-auto h-auto -translate-x-1/2 -translate-y-1/2 pointer-events-none aspect-video"
-                        style={{ width: 'max(100%, 177.78vh)', height: 'max(100%, 56.25vw)', border: 'none' }}
-                        src="https://www.youtube.com/embed/l6LLgP62te0?autoplay=1&mute=1&loop=1&playlist=l6LLgP62te0&start=0&end=14&controls=0&showinfo=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&fs=0&playsinline=1"
-                        title="Hero Background Video"
-                        allow="autoplay; encrypted-media"
-                    ></iframe>
+                    <video
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                        className="absolute top-1/2 left-1/2 min-w-full min-h-full w-auto h-auto -translate-x-1/2 -translate-y-1/2 object-cover"
+                    >
+                        <source src="/images/EF25.mp4" type="video/mp4" />
+                    </video>
                     <div className="absolute inset-0 bg-gradient-to-br from-gray-900/70 via-gray-800/60 to-gray-900/70 dark:from-gray-950/85 dark:via-gray-900/75 dark:to-red-950/50"></div>
                 </div>
 
@@ -107,11 +109,11 @@ export const LandingPage: React.FC = () => {
                 {/* Hero Content */}
                 <div className="relative z-10 text-center px-4 py-12 max-w-5xl mx-auto">
                     <div className="fade-in-up-blur">
-                        <div className="mx-auto w-28 h-28 md:w-36 md:h-36 bg-white rounded-full flex items-center justify-center mb-6 shadow-2xl ring-4 ring-red-400/30 transform hover:scale-105 transition-transform duration-300">
+                        <div className="mx-auto w-40 h-40 md:w-52 md:h-52 bg-[#b01116] rounded-full flex items-center justify-center mb-8 shadow-2xl ring-4 ring-red-400/50 border-4 border-white transform hover:scale-105 transition-transform duration-300 p-1">
                             <img
-                                src="/images/logo.png"
+                                src="/images/career_expo_logo.png"
                                 alt="ASU Career Expo Logo"
-                                className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover"
+                                className="w-[90%] h-[90%] rounded-full object-contain"
                             />
                         </div>
                         <h1 className="text-4xl sm:text-5xl md:text-7xl font-bold text-white mb-4 tracking-tight drop-shadow-lg">
