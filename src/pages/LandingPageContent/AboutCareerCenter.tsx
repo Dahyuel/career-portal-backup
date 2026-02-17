@@ -212,7 +212,7 @@ export const AboutCareerCenter: React.FC = () => {
                     <div className="relative pt-[56.25%] rounded-3xl overflow-hidden shadow-2xl border border-gray-100 dark:border-gray-800 group">
                         <iframe
                             className="absolute top-0 left-0 w-full h-full"
-                            src="https://www.youtube.com/embed/VIDEO_ID_HERE"
+                            src="https://www.youtube.com/embed/LIVsHC1P9z4"
                             title="ASU Career Center Video"
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                             allowFullScreen
