@@ -1,15 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import {
   Search,
   QrCode,
-  CheckCircle,
   Camera,
-  Calendar,
-  Clock,
-  User,
-  X,
-  LogOut
+  User
 } from "lucide-react";
 
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
@@ -18,7 +13,6 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import {
   recordAttendeeAttendance,
-  getRegTeamDashboardData,
   searchAttendeesByPersonalId,
   getAttendeeByPersonalIdOptimized,
   getUserProfileByUUID,  // ✅ ADD THIS
@@ -28,6 +22,9 @@ import {
 import Toast from "../../components/shared/Toast";
 import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
 import DashboardLoading from "../../components/DashboardLoading";
+import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
+import { RegTeamAttendeeCard } from "../../components/team/RegTeamAttendeeCard";
+import NotificationModal from "../../components/NotificationModal";
 
 // ============================================================================
 // ANIMATION VARIANTS
@@ -111,9 +108,10 @@ const debounce = <T extends (...args: any[]) => any>(
 // COMPONENT
 // ============================================================================
 export const RegTeamDashboard: React.FC = () => {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   useTheme();
   const [activeTab, setActiveTab] = useState('home');
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for background refreshes
 
   const navItems: NavItem[] = [
     { key: 'home', label: 'Home', icon: 'home' },
@@ -140,11 +138,15 @@ export const RegTeamDashboard: React.FC = () => {
   // Dynamic search state
   const [searchResults, setSearchResults] = useState<Attendee[]>([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
 
   // Attendee card state
   const [selectedAttendee, setSelectedAttendee] = useState<Attendee | null>(null);
   const [showAttendeeCard, setShowAttendeeCard] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [cardLoading, setCardLoading] = useState(false); // New state for card loading
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
+  const mobileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Toast State
   const [toast, setToast] = useState<{
@@ -156,6 +158,40 @@ export const RegTeamDashboard: React.FC = () => {
     type: 'info',
     isVisible: false
   });
+
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [selectedNotification, setSelectedNotification] = useState<any>(null);
+
+  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+
+  const fetchNotifications = useCallback(async () => {
+    if (!user?.id || !profile?.roles) return;
+    try {
+      const { data: volunteerData } = await supabase
+        .from('volunteers')
+        .select('team_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      const teamId = volunteerData?.team_id;
+
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
+        .eq('event_id', EVENT_ID)
+        .contains('target_roles', profile.roles)
+        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
+        .order('publish_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      if (data) setNotifications(data);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  }, [user?.id, profile?.roles]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
 
 
   // Volunteer profile from AuthContext
@@ -175,17 +211,8 @@ export const RegTeamDashboard: React.FC = () => {
   const [showProfile, setShowProfile] = useState(false);
 
 
-  // Dashboard data
-  const [totalEntryCount, setTotalEntryCount] = useState<number>(0);
-  const [recentScans, setRecentScans] = useState<{
-    id: string;
-    name: string;
-    personalId: string;
-    time: string;
-    check_in_time?: string;
-    check_out_time?: string;
-    type: string;
-  }[]>([]);
+  // Dashboard data - Lazy loaded for check-in tab
+  const [myScanCount, setMyScanCount] = useState<number>(0); // Changed from totalEntryCount
 
   // User activities from database
   const [userActivities, setUserActivities] = useState<{
@@ -230,17 +257,36 @@ export const RegTeamDashboard: React.FC = () => {
   );
 
   useEffect(() => {
-    debouncedSearch(searchTerm.trim());
+    const term = searchTerm.trim();
+    if (term.length >= 2) {
+      setSearchLoading(true);
+      setShowSearchResults(true);
+    } else {
+      setShowSearchResults(false);
+    }
+    debouncedSearch(term);
     return () => debouncedSearch.cancel();
   }, [searchTerm, debouncedSearch]);
+
+  // Focus mobile search when opened
+  useEffect(() => {
+    if (showMobileSearch && mobileInputRef.current) {
+      mobileInputRef.current.focus();
+    }
+  }, [showMobileSearch]);
 
   // Fetch volunteer stats on mount
   useEffect(() => {
     const fetchVolunteerStats = async () => {
       if (!user?.id) return;
 
-      console.log('📊 [DASHBOARD] Fetching volunteer stats...');
-      setUserStats(prev => ({ ...prev, loading: true }));
+      // Only show loading on initial load (score 0 acts as proxy for "needs first load" or use a separate flag if needed)
+      // We don't want to show full loading screen on background refreshes
+      if (userStats.loading && userStats.score === 0 && userStats.rank === 0) {
+        console.log('📊 [DASHBOARD] Fetching volunteer stats (Initial)...');
+      } else {
+        console.log('📊 [DASHBOARD] Refreshing volunteer stats (Background)...');
+      }
 
       try {
         const { data, error } = await getVolunteerStatsRPC(user.id);
@@ -275,35 +321,14 @@ export const RegTeamDashboard: React.FC = () => {
     };
 
     fetchVolunteerStats();
-  }, [user?.id, volunteerProfile?.total_points]);
+  }, [user?.id, volunteerProfile?.total_points, refreshTrigger]);
   // ============================================================================
   // OPTIMIZED: Parallel Data Fetch on Mount
   // ============================================================================
   useEffect(() => {
-    const fetchAttendanceData = async () => {
+    const fetchActivities = async () => {
       if (!user?.id) return;
-
       try {
-        // Single function call fetches both in parallel
-        const { data, error } = await getRegTeamDashboardData(user.id);
-
-        if (error) {
-          console.error('Error fetching dashboard data:', error);
-          return;
-        }
-
-        setTotalEntryCount(data.totalEntryCount);
-        setRecentScans(data.recentScans.map((scan: any) => ({
-          id: scan.id,
-          name: scan.attendee?.name || 'Unknown',
-          personalId: scan.attendee?.personalId || '',
-          time: formatRelativeTime(scan.time),
-          check_in_time: scan.check_in_time,
-          check_out_time: scan.check_out_time,
-          type: scan.type
-        })));
-
-        // Fetch user activities
         const { data: activities, error: activitiesError } = await supabase
           .from('user_activities')
           .select('id, activity_type, description, points_earned, activity_timestamp')
@@ -317,28 +342,39 @@ export const RegTeamDashboard: React.FC = () => {
           setUserActivities(activities || []);
         }
       } catch (error) {
-        console.error('Error in fetchAttendanceData:', error);
+        console.error('Error fetching activities:', error);
       }
     };
+    fetchActivities();
+  }, [user?.id, refreshTrigger]);
 
-    fetchAttendanceData();
-  }, [user?.id]);
+  // Lazy load check-in stats (My Scans Count)
+  useEffect(() => {
+    if (user?.id) {
+      const fetchCheckInStats = async () => {
+        try {
+          const { count, error } = await supabase
+            .from('attendee_attendance')
+            .select('*', { count: 'exact', head: true })
+            .or(`checked_in_by.eq.${user.id},checked_out_by.eq.${user.id}`);
+
+          if (error) {
+            console.error("Error loading check-in stats:", error);
+          } else {
+            setMyScanCount(count || 0);
+          }
+        } catch (err) {
+          console.error("Error loading check-in stats", err);
+        }
+      };
+      fetchCheckInStats();
+    }
+  }, [user?.id, refreshTrigger]);
 
   // ============================================================================
   // HELPERS
   // ============================================================================
-  const formatRelativeTime = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
 
   const getActivityIcon = (activityType: string): string => {
     const iconMap: Record<string, string> = {
@@ -414,21 +450,35 @@ export const RegTeamDashboard: React.FC = () => {
   // ============================================================================
   // OPTIMIZED: Select Search Result
   // ============================================================================
+  // ============================================================================
+  // OPTIMIZED: Select Search Result
+  // ============================================================================
   const handleSelectSearchResult = async (attendee: Attendee) => {
     try {
-      setSearchLoading(true);
+      // 1. Show card immediately with partial data + loading state
+      setSelectedAttendee(attendee); // Use the partial attendee from search
+      setShowAttendeeCard(true);
+      setCardLoading(true); // Start loading
 
-      // Use inline function
+      // 2. Clear search UI
+      setSearchTerm("");
+      setShowSearchResults(false);
+      setSearchResults([]);
+
+      // 3. Fetch full data
       const { data, error } = await getUserProfileByUUID(attendee.id);
 
       if (error || !data) {
         showToast('Failed to load attendee details', 'error');
+        // Close card if fetch fails completely
+        setShowAttendeeCard(false);
         return;
       }
 
       // Validate role
       if (data.role !== 'attendee') {
         showToast(`Only attendees can be checked in. This user is a ${data.role || 'unknown role'}`, 'error');
+        setShowAttendeeCard(false);
         return;
       }
 
@@ -437,19 +487,18 @@ export const RegTeamDashboard: React.FC = () => {
       const validation = validateAttendee(fullAttendee);
       if (!validation.isValid) {
         showToast(validation.error || 'Validation failed', 'error');
+        setShowAttendeeCard(false);
         return;
       }
 
+      // 4. Update with full data and stop loading
       setSelectedAttendee(fullAttendee);
-      setShowAttendeeCard(true);
-      setSearchTerm("");
-      setShowSearchResults(false);
-      setSearchResults([]);
     } catch (error) {
       console.error("Error selecting attendee:", error);
       showToast('Failed to select attendee', 'error');
+      setShowAttendeeCard(false);
     } finally {
-      setSearchLoading(false);
+      setCardLoading(false);
     }
   };
 
@@ -523,7 +572,7 @@ export const RegTeamDashboard: React.FC = () => {
       setActionLoading(true);
 
       const type = action === 'enter' ? 'entry' : 'exit';
-      const { data, error } = await recordAttendeeAttendance({
+      const { error } = await recordAttendeeAttendance({
         attendeeId: selectedAttendee.id,
         checkedInBy: user.id,
         type: type
@@ -546,50 +595,18 @@ export const RegTeamDashboard: React.FC = () => {
         last_scan: new Date().toISOString()
       } : null);
 
-      // Update recent scans
-      setRecentScans(prev => {
-        const now = new Date().toISOString();
-        let newScans = [...prev];
-
-        if (action === 'exit') {
-          const index = newScans.findIndex(s => s.personalId === selectedAttendee.personal_id && !s.check_out_time);
-
-          if (index !== -1) {
-            newScans[index] = {
-              ...newScans[index],
-              check_out_time: now,
-              type: 'visit'
-            };
-            const updatedItem = newScans.splice(index, 1)[0];
-            newScans.unshift(updatedItem);
-          } else {
-            newScans.unshift({
-              id: data?.id || crypto.randomUUID(),
-              name: `${selectedAttendee.first_name} ${selectedAttendee.last_name}`,
-              personalId: selectedAttendee.personal_id,
-              time: 'Just now',
-              check_in_time: undefined,
-              check_out_time: now,
-              type: 'visit'
-            });
-          }
-        } else {
-          newScans.unshift({
-            id: data?.id || crypto.randomUUID(),
-            name: `${selectedAttendee.first_name} ${selectedAttendee.last_name}`,
-            personalId: selectedAttendee.personal_id,
-            time: 'Just now',
-            check_in_time: now,
-            type: 'entry'
-          });
+      // Update total count
+      if (action === 'enter' || action === 'exit') {
+        setMyScanCount(prev => prev + 1);
+        // Trigger background refresh for Home tab stats
+        setRefreshTrigger(prev => prev + 1);
+        // Refresh Auth Profile (Global Score)
+        if (profile?.event_id && profile?.id) {
+          refreshProfile(profile.event_id, profile.id, undefined, true);
         }
-
-        return newScans.slice(0, 3);
-      });
-
-      if (action === 'enter') {
-        setTotalEntryCount(prev => prev + 1);
       }
+
+
 
       setTimeout(() => {
         setShowAttendeeCard(false);
@@ -639,21 +656,29 @@ export const RegTeamDashboard: React.FC = () => {
                 background: "linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)"
               }}
             >
+              <div className="absolute top-0 right-0 p-8 opacity-10">
+                <span className="material-symbols-outlined text-9xl text-white transform rotate-12">
+                  how_to_reg
+                </span>
+              </div>
               <div className="relative z-10">
                 <p className="uppercase tracking-widest text-red-100 font-semibold text-xs mb-2">Registration Dashboard</p>
                 <h1 className="text-4xl md:text-5xl font-bold mb-4">
                   Welcome, {volunteerProfile?.full_name?.split(' ')[0] || user?.user_metadata?.full_name?.split(' ')[0] || 'Volunteer'}
                 </h1>
-                <p className="text-lg text-red-50 opacity-90 max-w-md mb-8">
+                <p className="text-lg text-red-100 opacity-90 max-w-md mb-8">
                   Your support makes this event possible. Thank you for your dedication!
                 </p>
-                <button
-                  onClick={() => setShowProfile(true)}
-                  className="bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit"
-                >
-                  <User className="w-5 h-5" />
-                  Show Profile
-                </button>
+                <div className="flex items-center gap-6">
+                  <button
+                    onClick={() => setShowProfile(true)}
+                    className="bg-white text-red-600 hover:bg-red-50 px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit shadow-lg active:scale-95"
+                  >
+                    <User className="w-5 h-5" />
+                    Show Profile
+                  </button>
+
+                </div>
               </div>
               <div className="absolute bottom-0 right-0 w-64 h-64 bg-white/20 rounded-full -mb-32 -mr-32 blur-3xl"></div>
             </motion.div>
@@ -687,9 +712,16 @@ export const RegTeamDashboard: React.FC = () => {
             </motion.div>
 
             {/* Recent Activity */}
+            {/* Recent Activity */}
             <motion.div variants={itemVariants}>
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Recent Activity</h2>
+                <button
+                  onClick={() => setShowAllActivitiesModal(true)}
+                  className="text-sm font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                >
+                  View All
+                </button>
               </div>
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
                 {userActivities.length === 0 ? (
@@ -710,11 +742,6 @@ export const RegTeamDashboard: React.FC = () => {
                         <div className="flex-grow pt-1">
                           <div className="flex items-center justify-between mb-1">
                             <h4 className="font-semibold text-slate-800 dark:text-white">{activity.description}</h4>
-                            {activity.points_earned > 0 && (
-                              <span className="ml-2 bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded-full text-xs font-bold">
-                                +{activity.points_earned} pts
-                              </span>
-                            )}
                           </div>
                           <p className="text-sm text-slate-500 flex items-center gap-2">
                             <span className="material-symbols-outlined text-xs">schedule</span>
@@ -747,11 +774,7 @@ export const RegTeamDashboard: React.FC = () => {
             </motion.div>
 
             <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 relative group overflow-hidden">
-              {userStats.teamSize > 0 && (
-                <div className="absolute top-4 right-4 bg-amber-100 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 px-3 py-1 rounded-full text-xs font-bold">
-                  Top {Math.round((userStats.rank / userStats.teamSize) * 100)}%
-                </div>
-              )}
+              {/* Removed top badge as requested */}
               <div className="w-12 h-12 rounded-xl bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center mb-4">
                 <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">bar_chart</span>
               </div>
@@ -778,59 +801,155 @@ export const RegTeamDashboard: React.FC = () => {
       exit="exit"
       className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 h-full flex flex-col"
     >
-      <motion.header variants={itemVariants} className="mb-8 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Attendee Check-In</h2>
-          <div className="hidden md:block h-6 w-px bg-gray-200 dark:bg-slate-700"></div>
-          <div className="hidden md:flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-            <Calendar className="w-4 h-4" />
-            <span>Spring Career Fair 2024</span>
+      <motion.header variants={itemVariants} className="mb-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-red-100 dark:bg-red-500/10 rounded-2xl">
+              <QrCode className="w-8 h-8 text-red-600 dark:text-red-500" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Check-In System</h2>
+              <p className="text-slate-500 dark:text-slate-400">Scan QR codes or search manually</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="relative hidden md:block">
-            {searchLoading ? (
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 border-2 border-slate-200 border-t-primary rounded-full animate-spin" />
-            ) : (
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-            )}
-            <input
-              className="w-80 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
-              placeholder="Search by Personal ID"
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearchByPersonalId()}
-              onBlur={handleSearchInputBlur}
-              onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
-            />
-            {/* Desktop Search Results Dropdown */}
-            {showSearchResults && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-                {searchResults.map((attendee) => (
-                  <button
-                    key={attendee.id}
-                    onClick={() => handleSelectSearchResult(attendee)}
-                    className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-b-0"
-                  >
-                    <div className="font-medium text-gray-900 dark:text-white">{attendee.first_name} {attendee.last_name}</div>
-                    <div className="text-xs text-gray-500 dark:text-slate-400">{attendee.personal_id}</div>
-                  </button>
-                ))}
-              </div>
-            )}
+
+          {/* Desktop Actions */}
+          <div className="hidden md:flex items-center gap-4">
+            <div className="relative">
+              {searchLoading ? (
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 border-2 border-slate-200 border-t-primary rounded-full animate-spin" />
+              ) : (
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+              )}
+              <input
+                className="w-80 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white transition-all focus:w-96"
+                placeholder="Search by Personal ID..."
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchByPersonalId()}
+                onBlur={handleSearchInputBlur}
+                onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
+              />
+              {/* Desktop Search Results Dropdown */}
+              {showSearchResults && (searchResults.length > 0 || searchLoading) && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                  {searchLoading && (
+                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                      <div className="w-5 h-5 border-2 border-slate-200 border-t-red-600 rounded-full animate-spin mx-auto mb-2" />
+                      Searching...
+                    </div>
+                  )}
+                  {!searchLoading && searchResults.map((attendee) => (
+                    <button
+                      key={attendee.id}
+                      onClick={() => handleSelectSearchResult(attendee)}
+                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-b-0"
+                    >
+                      <div className="font-medium text-gray-900 dark:text-white">{attendee.first_name} {attendee.last_name}</div>
+                      <div className="text-xs text-gray-500 dark:text-slate-400">{attendee.personal_id}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setShowScanner(true)}
+              className="bg-red-600 hover:bg-red-700 text-white px-6 py-2.5 rounded-xl font-bold transition-all flex items-center gap-2 shadow-lg shadow-red-500/20 active:scale-95"
+            >
+              <QrCode className="w-5 h-5" />
+              Scan QR
+            </button>
           </div>
         </div>
       </motion.header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 gap-6">
+
+        {/* Mobile Action Buttons */}
+        <div className="md:hidden grid grid-cols-2 gap-4 mb-4">
+          <button
+            onClick={() => setShowScanner(true)}
+            className="bg-red-600 active:bg-red-700 text-white p-6 rounded-2xl shadow-lg shadow-red-500/20 flex flex-col items-center justify-center gap-3 transition-transform active:scale-95"
+          >
+            <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center">
+              <QrCode className="w-6 h-6" />
+            </div>
+            <span className="font-bold text-lg">Scan QR</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowMobileSearch(prev => !prev);
+            }}
+            className={`bg-white dark:bg-slate-800 active:bg-gray-50 dark:active:bg-slate-700 text-slate-800 dark:text-white p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center gap-3 transition-transform active:scale-95 ${showMobileSearch ? 'ring-2 ring-primary border-transparent' : ''}`}
+          >
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${showMobileSearch ? 'bg-primary text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
+              <Search className="w-6 h-6" />
+            </div>
+            <span className="font-bold text-lg">{showMobileSearch ? 'Close' : 'Search'}</span>
+          </button>
+        </div>
+
+        {/* Mobile Search Input (Visible always on mobile for now to keep it simple, or toggleable) */}
+        <AnimatePresence>
+          {showMobileSearch && (
+            <motion.div
+              initial={{ height: 0, opacity: 0, marginBottom: 0 }}
+              animate={{ height: 'auto', opacity: 1, marginBottom: 16 }}
+              exit={{ height: 0, opacity: 0, marginBottom: 0 }}
+              className="md:hidden relative overflow-hidden"
+            >
+              {searchLoading ? (
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 border-2 border-slate-200 border-t-primary rounded-full animate-spin z-10" />
+              ) : (
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 z-10" />
+              )}
+              <input
+                ref={mobileInputRef}
+                id="mobile-search-input"
+                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
+                placeholder="Search by Personal ID"
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearchByPersonalId()}
+                onBlur={handleSearchInputBlur}
+                onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
+              />
+              {/* Mobile Search Results Dropdown */}
+              {showSearchResults && (searchResults.length > 0 || searchLoading) && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                  {searchLoading && (
+                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                      <div className="w-5 h-5 border-2 border-slate-200 border-t-red-600 rounded-full animate-spin mx-auto mb-2" />
+                      Searching...
+                    </div>
+                  )}
+                  {!searchLoading && searchResults.map((attendee) => (
+                    <button
+                      key={attendee.id}
+                      onClick={() => handleSelectSearchResult(attendee)}
+                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-b-0"
+                    >
+                      <div className="font-medium text-gray-900 dark:text-white">{attendee.first_name} {attendee.last_name}</div>
+                      <div className="text-xs text-gray-500 dark:text-slate-400">{attendee.personal_id}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+
         <motion.div
           variants={itemVariants}
-          onClick={() => setShowScanner(true)}
-          className="lg:col-span-2 relative overflow-hidden rounded-[32px] shadow-xl shadow-primary/20 flex flex-col md:flex-row items-center gap-8 group cursor-pointer hover:scale-[1.01] transition-transform p-10"
+          className="hidden md:flex lg:col-span-2 relative overflow-hidden rounded-[32px] shadow-xl shadow-primary/20 flex-col md:flex-row items-center gap-8 group cursor-pointer hover:scale-[1.01] transition-transform p-10"
           style={{
             background: "linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)"
           }}
+          onClick={() => setShowScanner(true)}
         >
           <div className="w-32 h-32 bg-white/20 backdrop-blur-md rounded-3xl flex items-center justify-center border border-white/30 shrink-0">
             <QrCode className="text-white w-16 h-16 group-hover:scale-110 transition-transform" />
@@ -845,40 +964,6 @@ export const RegTeamDashboard: React.FC = () => {
           </div>
         </motion.div>
 
-        {/* Mobile Search - Visible only on mobile */}
-        <div className="md:hidden relative col-span-1 z-30">
-          {searchLoading ? (
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 border-2 border-slate-200 border-t-primary rounded-full animate-spin" />
-          ) : (
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
-          )}
-          <input
-            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
-            placeholder="Search by Personal ID"
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearchByPersonalId()}
-            onBlur={handleSearchInputBlur}
-            onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
-          />
-          {/* Mobile Search Results Dropdown */}
-          {showSearchResults && searchResults.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-              {searchResults.map((attendee) => (
-                <button
-                  key={attendee.id}
-                  onClick={() => handleSelectSearchResult(attendee)}
-                  className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-b-0"
-                >
-                  <div className="font-medium text-gray-900 dark:text-white">{attendee.first_name} {attendee.last_name}</div>
-                  <div className="text-xs text-gray-500 dark:text-slate-400">{attendee.personal_id}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
         <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-[32px] p-8 shadow-sm border border-gray-100 dark:border-slate-800 flex flex-col">
           <div>
             <div className="flex justify-between items-start mb-6">
@@ -888,73 +973,15 @@ export const RegTeamDashboard: React.FC = () => {
                 LIVE
               </div>
             </div>
-            <p className="text-[11px] font-bold text-slate-400 tracking-widest uppercase mb-2">Total Scanned In</p>
+            <p className="text-[11px] font-bold text-slate-400 tracking-widest uppercase mb-2">My Scans (Processed)</p>
             <div className="flex items-baseline gap-3">
-              <span className="text-6xl font-black text-slate-900 dark:text-white">{totalEntryCount.toLocaleString()}</span>
+              <span className="text-6xl font-black text-slate-900 dark:text-white">{myScanCount.toLocaleString()}</span>
             </div>
           </div>
         </motion.div>
       </div>
 
-      <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-[32px] p-8 shadow-sm border border-slate-100 dark:border-slate-800 mt-8 flex-1">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white">Recent Scans</h3>
-            <span className="bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-gray-400 px-3 py-1 rounded-full text-xs font-bold">Today</span>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {recentScans.length === 0 ? (
-            <div className="col-span-full text-center py-8 text-slate-400">
-              No recent scans. Start scanning to see activity here.
-            </div>
-          ) : (
-            recentScans.map((scan) => {
-              const isVisit = scan.type === 'visit' || (scan.check_in_time && scan.check_out_time);
-              let duration = '';
-              if (isVisit && scan.check_in_time && scan.check_out_time) {
-                const diff = new Date(scan.check_out_time).getTime() - new Date(scan.check_in_time).getTime();
-                const mins = Math.floor(diff / 60000);
-                duration = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
-              }
 
-              return (
-                <div key={scan.id} className="flex items-center gap-5 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 ${isVisit ? 'bg-blue-100 dark:bg-blue-500/10' : 'bg-emerald-100 dark:bg-emerald-500/10'}`}>
-                    {isVisit ? (
-                      <span className="material-symbols-outlined text-blue-600 text-2xl">history</span>
-                    ) : (
-                      <CheckCircle className="text-emerald-500 w-8 h-8" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-slate-900 dark:text-white truncate">{scan.name}</h4>
-                    <p className="text-sm text-slate-500 dark:text-gray-400">ID: #{scan.personalId}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-
-                      {isVisit && scan.check_in_time && scan.check_out_time ? (
-                        <div className="flex flex-col">
-                          <span className="text-[12px] text-slate-500 font-medium">
-                            {new Date(scan.check_in_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(scan.check_out_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          {duration && <span className="text-[10px] text-slate-400">Duration: {duration}</span>}
-                        </div>
-                      ) : (
-                        <span className="text-[12px] text-slate-400 font-medium">{scan.time}</span>
-                      )}
-
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isVisit ? 'bg-blue-100 dark:bg-blue-500/10 text-blue-600' : 'bg-emerald-100 dark:bg-emerald-500/10 text-emerald-600'}`}>
-                        {isVisit ? 'VISIT' : 'IN'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </motion.div>
     </motion.div>
   );
 
@@ -968,6 +995,8 @@ export const RegTeamDashboard: React.FC = () => {
       onItemChange={setActiveTab}
       title="Registration Team"
       onProfileClick={() => setShowProfile(true)}
+      notifications={notifications}
+      onNotificationClick={(notification) => setSelectedNotification(notification)}
     >
       {/* Toast Notification */}
       <AnimatePresence>
@@ -997,182 +1026,26 @@ export const RegTeamDashboard: React.FC = () => {
         description="Point your camera at the attendee's QR code"
       />
 
+      {/* View All Activities Modal */}
+      <AnimatePresence>
+        {showAllActivitiesModal && (
+          <ViewAllActivitiesModal onClose={() => setShowAllActivitiesModal(false)} />
+        )}
+      </AnimatePresence>
+
       {/* Attendee Card Modal */}
       <AnimatePresence>
-        {showAttendeeCard && selectedAttendee && (
-          <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => {
-                setShowAttendeeCard(false);
-                setSelectedAttendee(null);
-              }}
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", duration: 0.5 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <motion.h3
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-2xl font-bold text-gray-900 dark:text-white"
-                >
-                  Attendee Details
-                </motion.h3>
-                <motion.button
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 }}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => {
-                    setShowAttendeeCard(false);
-                    setSelectedAttendee(null);
-                  }}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </motion.button>
-              </div>
-
-              {/* Attendee Info */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 mb-6"
-              >
-                <div className="flex items-center gap-4 mb-6">
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ delay: 0.2, type: "spring" }}
-                    className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-500/10 flex items-center justify-center shrink-0"
-                  >
-                    <User className="w-8 h-8 text-red-600 dark:text-red-500" />
-                  </motion.div>
-                  <div className="min-w-0">
-                    <h4 className="text-xl font-bold text-gray-900 dark:text-white truncate">
-                      {selectedAttendee?.full_name}
-                    </h4>
-                    <p className={`text-sm font-medium mt-1 ${selectedAttendee?.current_status === 'inside' ? "text-green-600" : "text-orange-600"
-                      }`}>
-                      {selectedAttendee?.current_status === 'inside' ? "Currently Inside" : "Currently Outside"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  {/* University & Faculty */}
-                  {(selectedAttendee?.university || selectedAttendee?.faculty) && (
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      {selectedAttendee?.university && (
-                        <div className="bg-white dark:bg-slate-700/50 p-3 rounded-xl">
-                          <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">University</p>
-                          <p className="font-semibold text-slate-800 dark:text-white text-xs truncate" title={selectedAttendee?.university}>
-                            {selectedAttendee?.university}
-                          </p>
-                        </div>
-                      )}
-                      {selectedAttendee?.faculty && (
-                        <div className="bg-white dark:bg-slate-700/50 p-3 rounded-xl">
-                          <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Faculty</p>
-                          <p className="font-semibold text-slate-800 dark:text-white text-xs truncate" title={selectedAttendee?.faculty}>
-                            {selectedAttendee?.faculty}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Personal ID */}
-                  <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-700/50 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <QrCode className="w-5 h-5 text-red-500" />
-                      <div>
-                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Personal ID</p>
-                        <p className="font-mono font-bold text-slate-700 dark:text-slate-200">{selectedAttendee?.personal_id}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Email */}
-                  {selectedAttendee?.email && (
-                    <div className="p-3 bg-white dark:bg-slate-700/50 rounded-xl overflow-hidden">
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Email</p>
-                      <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate" title={selectedAttendee?.email}>
-                        {selectedAttendee?.email}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Phone */}
-                  {selectedAttendee?.phone && (
-                    <div className="p-3 bg-white dark:bg-slate-700/50 rounded-xl overflow-hidden">
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Phone</p>
-                      <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
-                        {selectedAttendee?.phone}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-
-              {/* Action Buttons */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-                className="grid grid-cols-2 gap-4"
-              >
-                <button
-                  onClick={() => handleAttendanceAction('enter')}
-                  disabled={actionLoading || selectedAttendee?.current_status === 'inside'}
-                  className={`flex items-center justify-center py-4 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${selectedAttendee?.current_status === 'inside'
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
-                    : 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/30'
-                    }`}
-                >
-                  {actionLoading ? (
-                    <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <CheckCircle className="w-5 h-5 mr-2" />
-                      Check In
-                    </>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => handleAttendanceAction('exit')}
-                  disabled={actionLoading || selectedAttendee?.current_status !== 'inside'}
-                  className={`flex items-center justify-center py-4 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${selectedAttendee?.current_status !== 'inside'
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
-                    : 'bg-red-600 text-white hover:bg-red-700 shadow-red-600/30'
-                    }`}
-                >
-                  {actionLoading ? (
-                    <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <>
-                      <LogOut className="w-5 h-5 mr-2" />
-                      Check Out
-                    </>
-                  )}
-                </button>
-              </motion.div>
-            </motion.div>
-          </div>
+        {showAttendeeCard && (
+          <RegTeamAttendeeCard
+            attendee={selectedAttendee}
+            onClose={() => {
+              setShowAttendeeCard(false);
+              setSelectedAttendee(null);
+            }}
+            onAction={(action) => handleAttendanceAction(action)}
+            isLoading={cardLoading}
+            actionLoading={actionLoading}
+          />
         )}
       </AnimatePresence>
 
@@ -1183,6 +1056,16 @@ export const RegTeamDashboard: React.FC = () => {
         profile={volunteerProfile}
         loading={!profile}
       />
-    </SharedNavigation>
+
+      {/* Notification Modal */}
+      <AnimatePresence>
+        {selectedNotification && (
+          <NotificationModal
+            notification={selectedNotification}
+            onClose={() => setSelectedNotification(null)}
+          />
+        )}
+      </AnimatePresence>
+    </SharedNavigation >
   );
 };

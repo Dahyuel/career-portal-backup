@@ -11,6 +11,7 @@ import JobDetailModal from '../../components/attendee/JobDetailModal';
 import ApplyJobModal from '../../components/attendee/ApplyJobModal';
 import WithdrawJobModal from '../../components/attendee/WithdrawJobModal';
 import CancelBookingModal from '../../components/attendee/CancelBookingModal';
+import ViewAllActivitiesModal from '../../components/attendee/ViewAllActivitiesModal';
 import DashboardLoading from '../../components/DashboardLoading';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -47,6 +48,7 @@ const AttendeeDashboard = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
   const [userActivities, setUserActivities] = useState<any[]>([]);
+  const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
 
@@ -147,6 +149,23 @@ const AttendeeDashboard = () => {
       }
     }
   }, [profile, attendeeProfile]);
+
+  // Helper to fetch user activities independently
+  const fetchUserActivities = async () => {
+    if (!user?.id) return;
+    try {
+      const { data } = await supabase
+        .from('user_activities')
+        .select('id, activity_type, description, activity_timestamp, points_earned')
+        .eq('user_id', user.id)
+        .order('activity_timestamp', { ascending: false })
+        .limit(5); // Only need top 5 for dashboard view
+
+      if (data) setUserActivities(data);
+    } catch (err) {
+      console.error('Error fetching user activities:', err);
+    }
+  };
 
   // COMPREHENSIVE INITIAL DATA LOAD: Parallelize all critical home-tab dependencies
   const fetchInitialDashboardData = useCallback(async () => {
@@ -785,6 +804,7 @@ const AttendeeDashboard = () => {
       setJobToApply(null);
       setSelectedJob(null); // Close detail modal too
       setToast({ message: 'Application submitted successfully!', type: 'success' });
+      fetchUserActivities(); // Refresh activities
 
     } catch (err: any) {
       console.error('Error applying for job:', err);
@@ -821,6 +841,7 @@ const AttendeeDashboard = () => {
       setToast({ message: 'Application withdrawn successfully.', type: 'success' });
       setJobToWithdraw(null);
       setSelectedJob(null); // Close detail modal too
+      fetchUserActivities(); // Refresh activities
     } catch (err: any) {
       console.error('Error withdrawing application:', err);
       setToast({ message: 'Failed to withdraw application.', type: 'error' });
@@ -895,10 +916,18 @@ const AttendeeDashboard = () => {
         variants={itemVariants}
         className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
       >
-        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-          <span className="material-symbols-outlined text-red-600">history</span>
-          Recent Activity
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <span className="material-symbols-outlined text-red-600">history</span>
+            Recent Activity
+          </h3>
+          <button
+            onClick={() => setShowAllActivitiesModal(true)}
+            className="text-sm font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+          >
+            View All
+          </button>
+        </div>
         <div className="space-y-4">
           {userActivities.length > 0 ? (
             userActivities.slice(0, 5).map((activity: any, idx: number) => (
@@ -918,11 +947,6 @@ const AttendeeDashboard = () => {
                     <p className="text-xs text-gray-400">
                       {new Date(activity.activity_timestamp).toLocaleString()}
                     </p>
-                    {activity.points_earned && activity.points_earned > 0 && (
-                      <span className="text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
-                        +{activity.points_earned} pts
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1939,6 +1963,13 @@ const AttendeeDashboard = () => {
             onClose={() => setBookingToCancel(null)}
             onConfirm={() => handleCancelBooking(bookingToCancel.id)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* View All Activities Modal */}
+      <AnimatePresence>
+        {showAllActivitiesModal && (
+          <ViewAllActivitiesModal onClose={() => setShowAllActivitiesModal(false)} />
         )}
       </AnimatePresence>
 

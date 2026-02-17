@@ -10,6 +10,7 @@ import DashboardLoading from '../../components/DashboardLoading';
 import { Variants } from 'framer-motion';
 import JobManagementModal from '../../components/employer/JobManagementModal';
 import Toast from '../../components/shared/Toast';
+import NotificationModal from '../../components/NotificationModal';
 
 const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -90,6 +91,7 @@ export const EmployerDashboard: React.FC = () => {
     const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['home']));
     const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
     const [isInitializing, setIsInitializing] = useState(true);
+    const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
     const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
@@ -603,6 +605,7 @@ export const EmployerDashboard: React.FC = () => {
             onItemChange={setActiveTab}
             title="ASU Employment Fair"
             notifications={notifications}
+            onNotificationClick={(notification) => setSelectedNotification(notification)}
             onProfileClick={() => setShowProfile(true)}
             hideDock={showProfile}
         >
@@ -718,6 +721,16 @@ export const EmployerDashboard: React.FC = () => {
                             </div>
                         </motion.div>
                     </div>
+                )}
+            </AnimatePresence>
+
+            {/* Notification Modal */}
+            <AnimatePresence>
+                {selectedNotification && (
+                    <NotificationModal
+                        notification={selectedNotification}
+                        onClose={() => setSelectedNotification(null)}
+                    />
                 )}
             </AnimatePresence>
         </SharedNavigation>

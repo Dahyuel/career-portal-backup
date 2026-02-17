@@ -24,10 +24,10 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', onClose, duration
     };
 
     const styles = {
-        success: 'bg-green-50/90 border-green-200 text-green-800 dark:bg-green-900/40 dark:border-green-800 dark:text-green-300',
-        error: 'bg-red-50/90 border-red-200 text-red-800 dark:bg-red-900/40 dark:border-red-800 dark:text-red-300',
-        info: 'bg-blue-50/90 border-blue-200 text-blue-800 dark:bg-blue-900/40 dark:border-blue-800 dark:text-blue-300',
-        warning: 'bg-amber-50/90 border-amber-200 text-amber-800 dark:bg-amber-900/40 dark:border-amber-800 dark:text-amber-300'
+        success: 'bg-green-500 dark:bg-green-600 text-white',
+        error: 'bg-red-500 dark:bg-red-600 text-white',
+        info: 'bg-blue-500 dark:bg-blue-600 text-white',
+        warning: 'bg-amber-500 dark:bg-amber-600 text-white'
     };
 
     const icons = {
@@ -45,17 +45,17 @@ const Toast: React.FC<ToastProps> = ({ message, type = 'info', onClose, duration
                 animate="animate"
                 exit="exit"
                 transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                className={`pointer-events-auto flex items-center gap-3 px-5 py-4 rounded-2xl border shadow-xl backdrop-blur-md max-w-sm w-full md:w-auto ${styles[type]}`}
+                className={`pointer-events-auto flex items-center gap-3 px-5 py-4 rounded-2xl shadow-xl max-w-sm w-full md:w-auto ${styles[type]}`}
             >
-                <div className={`p-1.5 rounded-full shrink-0 ${type === 'success' ? 'bg-green-100 dark:bg-green-800' : type === 'error' ? 'bg-red-100 dark:bg-red-800' : type === 'warning' ? 'bg-amber-100 dark:bg-amber-800' : 'bg-blue-100 dark:bg-blue-800'}`}>
-                    <span className="material-symbols-outlined text-lg">{icons[type]}</span>
+                <div className="shrink-0">
+                    <span className="material-symbols-outlined text-2xl text-white">{icons[type]}</span>
                 </div>
-                <p className="font-semibold text-sm leading-tight flex-1">{message}</p>
+                <p className="font-semibold text-sm leading-tight flex-1 text-white">{message}</p>
                 <button
                     onClick={onClose}
-                    className="p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors shrink-0"
+                    className="p-1 hover:bg-white/20 rounded-full transition-colors shrink-0"
                 >
-                    <span className="material-symbols-outlined text-lg opacity-60">close</span>
+                    <span className="material-symbols-outlined text-lg text-white opacity-80">close</span>
                 </button>
             </motion.div>
         </div>

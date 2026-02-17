@@ -1,20 +1,21 @@
 // src/pages/team/InfoDeskDashboard.tsx
+// OPTIMIZED VERSION with improved queries and event filtering
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import {
-  Calendar, QrCode, Search, Clock, User, AlertCircle, X,
-  CheckCircle, BookOpen, BookX, Phone, Mail, GraduationCap, Building2,
+  Calendar, QrCode, Search, Clock, User, X,
+  CheckCircle, BookOpen, BookX, Phone, Mail, GraduationCap, Building2, UserCircle,
 } from "lucide-react";
 import SharedNavigation, { NavItem } from "../../components/shared/SharedNavigation";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
-import { supabase } from "../../lib/supabase";
+import { supabase, searchAttendeesByPersonalId, getAttendeeByUUID } from "../../lib/supabase";
 import { QRScanner } from "../../components/shared/QRScanner";
-import { useAttendeeProfile } from "../../hooks/useAttendeeProfile";
-import AttendeeProfileCard from "../../components/AttendeeProfileCard";
-import { useVolunteerProfile } from "../../hooks/useVolunteerProfile";
 import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileModal";
-
+import Toast from "../../components/shared/Toast";
+import DashboardLoading from "../../components/DashboardLoading";
+import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
+import NotificationModal from "../../components/NotificationModal";
 // --- Animation Variants (matching BuildTeamDashboard) ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -54,7 +55,7 @@ interface ScannedAttendee {
 
 // --- Component ---
 export const InfoDeskDashboard: React.FC = () => {
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   useTheme();
 
   const navItems: NavItem[] = [
@@ -66,10 +67,21 @@ export const InfoDeskDashboard: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
 
+  // Dashboard Stats
+  const [stats, setStats] = useState({
+    totalSessions: 0,
+    totalBookings: 0,
+    actionsToday: 0
+  });
+
+  // Refresh Trigger
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
   // Session selection
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [showSessionDetails, setShowSessionDetails] = useState(false);
   const [selectedSessionForScan, setSelectedSessionForScan] = useState<Session | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Scanner & Search
   const [showScanner, setShowScanner] = useState(false);
@@ -84,29 +96,71 @@ export const InfoDeskDashboard: React.FC = () => {
   const [hasBooking, setHasBooking] = useState(false);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isCardLoading, setIsCardLoading] = useState(false);
 
-  // Profile Modal State
-  const [showProfileModal, setShowProfileModal] = useState(false);
-  const [profileAttendeeId, setProfileAttendeeId] = useState<string | null>(null);
+  // Volunteer Profile Modal State
+  const [showVolunteerProfile, setShowVolunteerProfile] = useState(false);
 
-  // Hook for fetching full profile details
-  const { attendeeProfile, loading: profileLoading } = useAttendeeProfile(profileAttendeeId || undefined, !!profileAttendeeId);
+  // Loading State
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // Feedback
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  // Toast State
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    isVisible: boolean;
+  }>({
+    message: '',
+    type: 'info',
+    isVisible: false
+  });
 
   // Activity
   const [recentActivity, setRecentActivity] = useState<{ id: string; description: string; timestamp: string; type: string }[]>([]);
+  const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const { profile: volunteerProfile, loading: loadingProfile } = useVolunteerProfile();
-  const [showVolunteerProfile, setShowVolunteerProfile] = useState(false);
+  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
-  const firstName = volunteerProfile?.full_name?.split(" ")[0] || profile?.full_name?.split(" ")[0] || "Volunteer";
+  const fetchNotifications = useCallback(async () => {
+    if (!profile?.id || !profile?.roles) return;
+    try {
+      const { data: volunteerData } = await supabase
+        .from('volunteers')
+        .select('team_id')
+        .eq('user_id', profile.id)
+        .maybeSingle();
+      const teamId = volunteerData?.team_id;
+
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
+        .eq('event_id', EVENT_ID)
+        .contains('target_roles', profile.roles)
+        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
+        .order('publish_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      if (data) setNotifications(data);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  }, [profile?.id, profile?.roles]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  // Get current event ID from profile (assuming it's cached there)
+  const currentEventId = profile?.event_id;
+
+  // Get volunteer name from AuthContext profile
+  const firstName = profile?.volunteer?.full_name?.split(" ")[0] || profile?.full_name?.split(" ")[0] || "Volunteer";
 
   // --- Helpers ---
-  const showFeedback = (type: "success" | "error", message: string) => {
-    setFeedback({ type, message });
-    setTimeout(() => setFeedback(null), 5000);
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') => {
+    setToast({ message, type, isVisible: true });
   };
 
   const addActivity = (description: string, type: string) => {
@@ -116,28 +170,165 @@ export const InfoDeskDashboard: React.FC = () => {
     ]);
   };
 
-  // --- Fetch sessions ---
+  const logUserActivity = async (
+    activityType: string,
+    description: string,
+    points: number = 1
+  ) => {
+    try {
+      if (!profile?.id || !currentEventId) return;
+
+      const { error } = await supabase
+        .from("user_activities")
+        .insert({
+          user_id: profile.id,
+          event_id: currentEventId,
+          activity_type: activityType,
+          description: description,
+          points_earned: points,
+          activity_timestamp: new Date().toISOString()
+        });
+
+      if (error) throw error;
+
+      // Also add to local recent activity state
+      addActivity(description, activityType);
+
+    } catch (err) {
+      console.error("Error logging activity:", err);
+    }
+  };
+
+  const incrementVolunteerPoints = async (points: number) => {
+    try {
+      if (!profile?.id) return;
+
+      // First get current points
+      const { data: volunteerData, error: fetchError } = await supabase
+        .from('volunteers')
+        .select('points, id')
+        .eq('user_id', profile.id)
+        .single();
+
+      if (fetchError || !volunteerData) return;
+
+      // Update points
+      const { error: updateError } = await supabase
+        .from('volunteers')
+        .update({ points: (volunteerData.points || 0) + points })
+        .eq('id', volunteerData.id);
+
+      if (updateError) {
+        console.error('Error updating points:', updateError);
+      }
+    } catch (err) {
+      console.error('Error in incrementVolunteerPoints:', err);
+    }
+  };
+
+  // --- Initial Data Load ---
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        if (!currentEventId) return;
+
+        // 1. Get Sessions Count
+        const { count: sessionsCount } = await supabase
+          .from("sessions")
+          .select("*", { count: "exact", head: true })
+          .eq("event_id", currentEventId);
+
+        // 2. Get Bookings Count (Valid confirmed bookings for this event)
+        // First get session IDs for this event to filter bookings
+        const { data: eventSessions } = await supabase
+          .from("sessions")
+          .select("id")
+          .eq("event_id", currentEventId);
+
+        let bookingsCount = 0;
+        if (eventSessions && eventSessions.length > 0) {
+          const sessionIds = eventSessions.map(s => s.id);
+          const { count } = await supabase
+            .from("session_bookings")
+            .select("*", { count: "exact", head: true })
+            .in("session_id", sessionIds)
+            .eq("booking_status", "confirmed");
+          bookingsCount = count || 0;
+        }
+
+        // 3. Get Actions Today Count
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const { count: actionsCount } = await supabase
+          .from("user_activities")
+          .select("*", { count: "exact", head: true })
+          .gte("activity_timestamp", today.toISOString())
+          .eq("user_id", profile?.id);
+
+        setStats({
+          totalSessions: sessionsCount || 0,
+          totalBookings: bookingsCount,
+          actionsToday: actionsCount || 0
+        });
+
+        // 4. Fetch Recent Activity for display (Last 3)
+        const { data: activityData } = await supabase.from("user_activities")
+          .select("id, description, activity_timestamp, activity_type")
+          .eq("user_id", profile?.id)
+          .order("activity_timestamp", { ascending: false })
+          .limit(3);
+
+        if (activityData) {
+          setRecentActivity(activityData.map((a: any) => ({
+            id: a.id,
+            description: a.description,
+            timestamp: a.activity_timestamp,
+            type: a.activity_type
+          })));
+        }
+      } catch (e) {
+        console.error("Initial load error", e);
+        showToast("Failed to load dashboard statistics", "error");
+      } finally {
+        setIsInitialLoading(false);
+      }
+    }
+    loadInitialData();
+  }, [currentEventId, refreshTrigger]);
+  // --- OPTIMIZED: Fetch sessions with event filter ---
   const fetchSessions = useCallback(async () => {
+    if (!currentEventId) {
+      console.warn("No event ID available");
+      return;
+    }
+
     setIsLoadingSessions(true);
     try {
       const { data, error } = await supabase
         .from("sessions")
-        .select(`id, title, description, session_type, start_time, end_time, room_name,
+        .select(`
+          id, title, description, session_type, start_time, end_time, room_name,
           max_attendees, current_bookings, is_full, status,
-          speaker:speaker_id (id, first_name, last_name, title)`)
+          speaker:speaker_id (id, first_name, last_name, title)
+        `)
+        .eq("event_id", currentEventId) // CRITICAL: Filter by event
         .order("start_time", { ascending: true });
+
       if (error) throw error;
+
       const normalised = (data || []).map((s: any) => ({
         ...s,
         speaker: Array.isArray(s.speaker) ? s.speaker[0] : s.speaker,
       }));
+
       setSessions(normalised);
     } catch (err) {
       console.error("Error fetching sessions:", err);
+      showToast("Failed to load sessions", "error");
     } finally {
       setIsLoadingSessions(false);
     }
-  }, []);
+  }, [currentEventId]);
 
   useEffect(() => {
     if (activeTab === "sessions") fetchSessions();
@@ -145,114 +336,143 @@ export const InfoDeskDashboard: React.FC = () => {
 
   useEffect(() => { window.scrollTo(0, 0); }, [activeTab]);
 
-  // --- Fetch attendee by UUID ---
+  // --- OPTIMIZED: Fetch attendee by UUID with helper ---
   const fetchAttendeeByUUID = async (uuid: string): Promise<ScannedAttendee | null> => {
     try {
-      // 1. Fetch Profile
-      const { data: profileData, error: profileError } = await supabase
-        .from("user_profiles")
-        .select("id, full_name, phone, email, personal_id")
-        .eq("id", uuid)
-        .single();
+      const { data, error } = await getAttendeeByUUID(uuid);
 
-      if (profileError || !profileData) return null;
+      if (error || !data) {
+        console.error("Error fetching attendee:", error);
+        return null;
+      }
 
-      // 2. Fetch Education Info (University/Faculty) from attendees table
-      const { data: attendeeData } = await supabase
-        .from("attendees")
-        .select("university, faculty")
-        .eq("user_id", uuid)
-        .maybeSingle();
+      // Debug log confirmed data has user_id, not id
+      console.log("fetchAttendeeByUUID data:", data);
 
       return {
-        id: profileData.id,
-        full_name: profileData.full_name || "Unknown",
-        phone: profileData.phone || "N/A",
-        email: profileData.email || "N/A",
-        personal_id: profileData.personal_id,
-        university: attendeeData?.university || undefined,
-        faculty: attendeeData?.faculty || undefined
+        id: data.id || data.user_id, // Fix: Use user_id if id is missing
+        full_name: data.full_name || "Unknown",
+        phone: data.phone || "N/A",
+        email: data.email || "N/A",
+        personal_id: data.personal_id,
+        university: data.university,
+        faculty: data.faculty
       };
-    } catch { return null; }
+    } catch (err) {
+      console.error("Exception fetching attendee:", err);
+      return null;
+    }
   };
 
-  // --- Live search as user types (attendees only) ---
+  // --- OPTIMIZED: Live search with better query approach ---
   useEffect(() => {
     if (!sessionSearchTerm.trim()) {
       setSessionSearchResults([]);
       return;
     }
+
     const timeout = setTimeout(async () => {
       setIsSessionSearching(true);
       try {
-        // First get attendee user_ids from user_roles
-        const { data: roleData } = await supabase
-          .from("user_roles")
-          .select("user_id")
-          .eq("role", "attendee");
-        const attendeeIds = (roleData || []).map((r: any) => r.user_id);
+        const { data, error } = await searchAttendeesByPersonalId(sessionSearchTerm.trim());
 
-        if (attendeeIds.length === 0) {
+        if (error) {
+          console.error("Search error:", error);
           setSessionSearchResults([]);
-          setIsSessionSearching(false);
-          return;
-        }
-
-        const { data } = await supabase
-          .from("user_profiles")
-          .select("id, full_name, phone, email, personal_id")
-          .in("id", attendeeIds)
-          .ilike("personal_id", `%${sessionSearchTerm.trim()}%`)
-          .limit(5);
-        if (data) {
+        } else if (data) {
+          // Helper returns data in correct format, but we need to map to local state shape if strictly needed.
+          // The helper returns: id, full_name, etc.
+          // Local state expects: id, full_name, phone, email, personal_id
           setSessionSearchResults(data.map((d: any) => ({
-            id: d.id, full_name: d.full_name || "Unknown", phone: d.phone || "N/A", email: d.email || "N/A", personal_id: d.personal_id,
+            id: d.id,
+            full_name: d.full_name || "Unknown",
+            phone: d.phone || "N/A",
+            email: d.email || "N/A",
+            personal_id: d.personal_id,
           })));
         }
-      } catch { /* ignore */ }
-      finally { setIsSessionSearching(false); }
+      } catch (err) {
+        console.error("Search exception:", err);
+        setSessionSearchResults([]);
+      } finally {
+        setIsSessionSearching(false);
+      }
     }, 300);
+
     return () => clearTimeout(timeout);
   }, [sessionSearchTerm]);
 
-  // --- Check booking & show attendee card ---
+  // --- OPTIMIZED: Check booking & show attendee card ---
   const lookupAndShowCard = async (uuid: string) => {
-    if (!selectedSessionForScan) return;
-    const attendee = await fetchAttendeeByUUID(uuid);
-    if (!attendee) { showFeedback("error", "Attendee not found"); return; }
+    if (!selectedSessionForScan || !currentEventId) return;
 
-    // Check role
-    const { data: roleData } = await supabase.from("user_roles").select("role").eq("user_id", uuid).order("assigned_at", { ascending: false }).limit(1).single();
-    if (roleData?.role !== "attendee") { showFeedback("error", "Only attendees can be booked"); return; }
-
-    // Check booking - Robust check for duplicates
-    const { data: bookings } = await supabase
-      .from("session_bookings")
-      .select("id, booking_status")
-      .eq("attendee_id", uuid)
-      .eq("session_id", selectedSessionForScan.id)
-      .eq("booking_status", "confirmed")
-      .limit(1);
-
-    const booking = bookings && bookings.length > 0 ? bookings[0] : null;
-
-    setSessionAttendee(attendee);
-    setHasBooking(!!booking);
-    setBookingId(booking?.id || null);
-    setShowSessionSearch(false);
-    setShowSessionDetails(false);
+    // 1. Show card immediately in loading state
+    setIsCardLoading(true);
     setShowSessionCard(true);
+    setShowSessionSearch(false);
+    setShowScanner(false);
+    // Reset previous data
+    setSessionAttendee(null);
+    setHasBooking(false);
+    setBookingId(null);
+
+    try {
+      // 2. Parallelize fetches: Attendee details + Booking status
+      // getAttendeeByUUID already validates the user exists and has 'attendee' role
+      const [attendee, { data: bookings }] = await Promise.all([
+        fetchAttendeeByUUID(uuid),
+        supabase
+          .from("session_bookings")
+          .select("id")
+          .eq("session_id", selectedSessionForScan.id)
+          .eq("attendee_id", uuid)
+          .eq("booking_status", "confirmed")
+          .maybeSingle()
+      ]);
+
+      if (!attendee) {
+        showToast("Attendee not found", "error");
+        setShowSessionCard(false); // Hide if not found
+        return;
+      }
+
+      setSessionAttendee(attendee);
+      setHasBooking(!!bookings);
+      setBookingId(bookings?.id || null);
+    } catch (err) {
+      console.error("Error looking up attendee:", err);
+      showToast("Failed to load attendee details", "error");
+      setShowSessionCard(false);
+    } finally {
+      setIsCardLoading(false);
+    }
   };
 
   // --- QR Scan handler ---
   const handleQRScan = async (qrData: string) => {
     setShowScanner(false);
     let uuid = qrData.trim();
-    if (qrData.includes("/")) { const parts = qrData.split("/"); uuid = parts[parts.length - 1]; }
-    else if (qrData.startsWith("{")) { try { const p = JSON.parse(qrData); uuid = p.id || p.uuid || qrData; } catch { /* raw */ } }
+
+    // Parse QR data
+    if (qrData.includes("/")) {
+      const parts = qrData.split("/");
+      uuid = parts[parts.length - 1];
+    } else if (qrData.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(qrData);
+        uuid = parsed.id || parsed.uuid || qrData;
+      } catch {
+        // Use raw data
+      }
+    }
+
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(uuid)) { showFeedback("error", "Invalid QR code format"); return; }
-    addActivity("Scanned QR code", "qr_scan");
+    if (!uuidRegex.test(uuid)) {
+      showToast("Invalid QR code format", "error");
+      return;
+    }
+
+    // addActivity("Scanned QR code", "qr_scan"); // Removed local-only activity
     await lookupAndShowCard(uuid);
   };
 
@@ -260,79 +480,189 @@ export const InfoDeskDashboard: React.FC = () => {
   const handleSearchResultClick = async (attendee: ScannedAttendee) => {
     setSessionSearchResults([]);
     setSessionSearchTerm("");
-    addActivity(`Searched: ${attendee.personal_id || attendee.full_name}`, "search");
+    // addActivity(`Searched: ${attendee.personal_id || attendee.full_name}`, "search"); // Removed local-only activity
     await lookupAndShowCard(attendee.id);
   };
 
-  // --- Book / Unbook ---
   const handleBook = async () => {
     if (!sessionAttendee || !selectedSessionForScan) return;
+
     setIsProcessing(true);
     try {
-      // 1. Check for existing booking (cancelled or not) - Robust check
-      const { data: existingBookings, error: checkError } = await supabase
+      // 1. Verify capacity
+      const { data: sessionData, error: sessionError } = await supabase
+        .from("sessions")
+        .select("current_bookings, max_attendees, title")
+        .eq("id", selectedSessionForScan.id)
+        .single();
+
+      if (sessionError) throw sessionError;
+
+      const currentBookings = sessionData.current_bookings || 0;
+      const maxAttendees = sessionData.max_attendees;
+
+      if (maxAttendees && currentBookings >= maxAttendees) {
+        showToast("This session is full", "error");
+        setIsProcessing(false);
+        return;
+      }
+
+      // 2. Check for existing booking (cancelled or not)
+      const { data: existingBooking, error: checkError } = await supabase
         .from("session_bookings")
         .select("id, booking_status")
         .eq("session_id", selectedSessionForScan.id)
         .eq("attendee_id", sessionAttendee.id)
-        .limit(1);
+        .maybeSingle();
 
       if (checkError) throw checkError;
 
-      const existingBooking = existingBookings && existingBookings.length > 0 ? existingBookings[0] : null;
+      let bookingSuccess = false;
 
       if (existingBooking) {
-        // Update existing booking
+        if (existingBooking.booking_status === "confirmed") {
+          showToast("Already booked", "error");
+          setIsProcessing(false);
+          return;
+        }
+
+        // Reactivate cancelled booking
         const { error: updateError } = await supabase
           .from("session_bookings")
-          .update({ booking_status: "confirmed" })
+          .update({
+            booking_status: "confirmed",
+            booked_at: new Date().toISOString()
+          })
           .eq("id", existingBooking.id);
 
         if (updateError) throw updateError;
+        bookingSuccess = true;
       } else {
-        // Insert new booking
-        const { error: insertError } = await supabase.from("session_bookings").insert({
-          session_id: selectedSessionForScan.id, attendee_id: sessionAttendee.id, booking_status: "confirmed",
-        });
+        // Create new booking
+        const { error: insertError } = await supabase
+          .from("session_bookings")
+          .insert({
+            session_id: selectedSessionForScan.id,
+            attendee_id: sessionAttendee.id,
+            booking_status: "confirmed",
+            checked_in: false
+          });
+
         if (insertError) throw insertError;
+        bookingSuccess = true;
       }
 
-      await supabase.from("sessions").update({ current_bookings: (selectedSessionForScan.current_bookings || 0) + 1 }).eq("id", selectedSessionForScan.id);
-      showFeedback("success", `${sessionAttendee.full_name} booked successfully!`);
-      addActivity(`Booked ${sessionAttendee.full_name} for "${selectedSessionForScan.title}"`, "booking");
-      setShowSessionCard(false);
-      fetchSessions();
-    } catch { showFeedback("error", "Failed to book attendee"); }
-    finally { setIsProcessing(false); }
+      if (bookingSuccess) {
+        // Log the activity with 1 point
+        await logUserActivity(
+          "booking",
+          `Booked ${sessionAttendee.full_name} for session: ${selectedSessionForScan.title}`,
+          1
+        );
+
+        // Optional: Update volunteer points if you want to track points for volunteer profiles
+        await incrementVolunteerPoints(1);
+
+        // Refresh Auth Profile (Global Score)
+        // Refresh Auth Profile (Global Score)
+        if (profile?.event_id && profile?.id) {
+          await refreshProfile(profile.event_id, profile.id, undefined, true);
+        }
+
+        showToast(`${sessionAttendee.full_name} booked successfully!`, "success");
+        setShowSessionCard(false);
+        setSelectedSessionForScan(null);
+        setSessionAttendee(null);
+        // Refresh sessions to update counts
+        fetchSessions();
+        // Refresh Home stats
+        setRefreshTrigger(prev => prev + 1);
+      }
+    } catch (err) {
+      console.error("Booking error:", err);
+      showToast("Failed to book attendee", "error");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleUnbook = async () => {
     if (!sessionAttendee || !selectedSessionForScan || !bookingId) return;
+
     setIsProcessing(true);
     try {
-      const { error } = await supabase.from("session_bookings").update({ booking_status: "cancelled" }).eq("id", bookingId);
-      if (error) throw error;
-      await supabase.from("sessions").update({ current_bookings: Math.max((selectedSessionForScan.current_bookings || 1) - 1, 0) }).eq("id", selectedSessionForScan.id);
-      showFeedback("success", `${sessionAttendee.full_name} unbooked successfully!`);
-      addActivity(`Unbooked ${sessionAttendee.full_name} from "${selectedSessionForScan.title}"`, "unbooking");
+      // 1. Check if user is checked in
+      const { data: bookingData, error: checkError } = await supabase
+        .from("session_bookings")
+        .select("checked_in")
+        .eq("id", bookingId)
+        .single();
+
+      if (checkError) throw checkError;
+
+      if (bookingData.checked_in) {
+        showToast("Cannot cancel: User is already checked in!", "error");
+        setIsProcessing(false);
+        return;
+      }
+
+      // 2. Cancel booking
+      const { error: updateError } = await supabase
+        .from("session_bookings")
+        .update({ booking_status: "cancelled" })
+        .eq("id", bookingId);
+
+      if (updateError) throw updateError;
+
+      // Log the activity with 1 point
+      await logUserActivity(
+        "unbooking",
+        `Cancelled booking for ${sessionAttendee.full_name} from session: ${selectedSessionForScan.title}`,
+        1
+      );
+
+      // Optional: Update volunteer points (you might want different point values for cancellation)
+      await incrementVolunteerPoints(1);
+
+      // Refresh Auth Profile (Global Score)
+      // Refresh Auth Profile (Global Score)
+      if (profile?.event_id && profile?.id) {
+        await refreshProfile(profile.event_id, profile.id, undefined, true);
+      }
+
+      showToast("Booking cancelled", "success");
       setShowSessionCard(false);
+      setSelectedSessionForScan(null);
+      setSessionAttendee(null);
       fetchSessions();
-    } catch { showFeedback("error", "Failed to unbook attendee"); }
-    finally { setIsProcessing(false); }
+      // Refresh Home stats
+      setRefreshTrigger(prev => prev + 1);
+    } catch (err) {
+      console.error("Cancellation error:", err);
+      showToast("Failed to cancel booking", "error");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // --- Activity helpers ---
   const getActivityColor = (type: string) => {
-    const c: Record<string, string> = {
+    const colors: Record<string, string> = {
       booking: "bg-green-100 dark:bg-green-500/10 text-green-600",
       unbooking: "bg-red-100 dark:bg-red-500/10 text-red-600",
       qr_scan: "bg-blue-50 dark:bg-blue-500/10 text-blue-500",
       search: "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300",
     };
-    return c[type] || "bg-gray-100 dark:bg-gray-800 text-gray-500";
+    return colors[type] || "bg-gray-100 dark:bg-gray-800 text-gray-500";
   };
+
   const getActivityIcon = (type: string) => {
-    const icons: Record<string, any> = { booking: BookOpen, unbooking: BookX, qr_scan: QrCode, search: Search };
+    const icons: Record<string, any> = {
+      booking: BookOpen,
+      unbooking: BookX,
+      qr_scan: QrCode,
+      search: Search
+    };
     const Icon = icons[type] || CheckCircle;
     return <Icon className="w-5 h-5" />;
   };
@@ -345,34 +675,82 @@ export const InfoDeskDashboard: React.FC = () => {
       <div className="space-y-6 lg:space-y-0 lg:grid lg:grid-cols-12 lg:gap-8">
         <div className="lg:col-span-8 space-y-6 lg:space-y-8">
           {/* Welcome Banner */}
-          <motion.div variants={itemVariants} className="relative rounded-2xl overflow-hidden shadow-xl shadow-red-500/10 p-8 md:p-12 min-h-[300px] flex flex-col justify-center text-white" style={{ background: "linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)" }}>
+          <motion.div
+            variants={itemVariants}
+            className="relative rounded-2xl overflow-hidden shadow-xl shadow-red-500/10 p-8 md:p-12 min-h-[300px] flex flex-col justify-center text-white"
+            style={{
+              background: "linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)"
+            }}
+          >
+            <div className="absolute top-0 right-0 p-8 opacity-10">
+              <span className="material-symbols-outlined text-9xl text-white transform rotate-12">
+                support_agent
+              </span>
+            </div>
             <div className="relative z-10">
               <p className="uppercase tracking-widest text-red-100 font-semibold text-xs mb-2">Info Desk Dashboard</p>
-              <h1 className="text-4xl md:text-5xl font-bold mb-4">Welcome, {firstName}</h1>
-              <p className="text-lg text-red-50 opacity-90 max-w-md mb-8">Your support makes this event possible. Thank you for your dedication!</p>
+              <h1 className="text-4xl md:text-5xl font-bold mb-4">
+                Welcome, {firstName}
+              </h1>
+              <p className="text-lg text-red-50 opacity-90 max-w-md mb-8">
+                Your support makes this event possible. Thank you for your dedication!
+              </p>
+              <button
+                onClick={() => setShowVolunteerProfile(true)}
+                className="bg-white text-red-600 hover:bg-red-50 px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 w-fit shadow-lg active:scale-95"
+              >
+                <UserCircle className="w-5 h-5" />
+                Show Profile
+              </button>
             </div>
-            <div className="absolute bottom-0 right-0 w-64 h-64 bg-white/10 rounded-full -mb-32 -mr-32 blur-3xl" />
+            <div className="absolute bottom-0 right-0 w-64 h-64 bg-white/20 rounded-full -mb-32 -mr-32 blur-3xl"></div>
+          </motion.div>
+
+          {/* Quick Stats - Mobile */}
+          <motion.div variants={itemVariants} className="grid grid-cols-2 gap-4 lg:hidden">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-800">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center mb-3">
+                <Calendar className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Sessions</p>
+              <p className="text-2xl font-bold text-slate-800 dark:text-white mt-1">{stats.totalSessions}</p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-800">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center mb-3">
+                <span className="material-symbols-outlined text-amber-500 text-[20px]">history</span>
+              </div>
+              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</p>
+              <p className="text-2xl font-bold text-slate-800 dark:text-white mt-1">{stats.actionsToday}</p>
+            </div>
           </motion.div>
 
           {/* Recent Activity */}
           <motion.div variants={itemVariants}>
-            <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">Recent Activity</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Recent Activity</h2>
+              <button
+                onClick={() => setShowAllActivitiesModal(true)}
+                className="text-sm font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+              >
+                View All
+              </button>
+            </div>
             <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
               {recentActivity.length === 0 ? (
                 <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-8">No recent activity yet. Select a session to get started.</p>
               ) : (
                 <div className="space-y-8 relative">
                   <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-700" />
-                  {recentActivity.map((a) => (
-                    <motion.div key={a.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="relative flex gap-6 items-start">
-                      <div className={`relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border-4 border-white dark:border-slate-900 ${getActivityColor(a.type)}`}>
-                        {getActivityIcon(a.type)}
+                  {recentActivity.map((activity) => (
+                    <motion.div key={activity.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="relative flex gap-6 items-start">
+                      <div className={`relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border-4 border-white dark:border-slate-900 ${getActivityColor(activity.type)}`}>
+                        {getActivityIcon(activity.type)}
                       </div>
                       <div className="flex-grow pt-1">
-                        <h4 className="font-semibold text-slate-800 dark:text-white">{a.description}</h4>
+                        <h4 className="font-semibold text-slate-800 dark:text-white">{activity.description}</h4>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2">
                           <Clock className="w-3 h-3" />
-                          {new Date(a.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                          {new Date(activity.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                         </p>
                       </div>
                     </motion.div>
@@ -390,39 +768,51 @@ export const InfoDeskDashboard: React.FC = () => {
               <Calendar className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
             <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Sessions</p>
-            <p className="text-4xl font-bold text-slate-800 dark:text-white mt-1">{sessions.length}</p>
+            <p className="text-4xl font-bold text-slate-800 dark:text-white mt-1">{stats.totalSessions}</p>
           </motion.div>
-          <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
-            <div className="w-12 h-12 rounded-xl bg-green-100 dark:bg-green-900/20 flex items-center justify-center mb-4">
-              <BookOpen className="w-6 h-6 text-green-600 dark:text-green-400" />
-            </div>
-            <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Bookings</p>
-            <p className="text-4xl font-bold text-slate-800 dark:text-white mt-1">{sessions.reduce((s, x) => s + (x.current_bookings || 0), 0)}</p>
-          </motion.div>
+          {/* Total Bookings Removed as requested */}
+
           <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
             <div className="w-12 h-12 rounded-xl bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center mb-4">
               <span className="material-symbols-outlined text-amber-500">history</span>
             </div>
             <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions Today</p>
-            <p className="text-4xl font-bold text-slate-800 dark:text-white mt-1">{recentActivity.length}</p>
+            <p className="text-4xl font-bold text-slate-800 dark:text-white mt-1">{stats.actionsToday}</p>
           </motion.div>
         </div>
       </div>
-    </motion.div>
+    </motion.div >
   );
 
   // ===================================================================
-  // RENDER: Sessions tab (matching BuildTeamDashboard grid style)
+  // RENDER: Sessions tab
   // ===================================================================
   const renderSessionsTab = () => (
     <motion.div key="sessions" variants={containerVariants} initial="hidden" animate="visible" exit="exit" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      <motion.header variants={itemVariants} className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-20 border-b border-gray-100 dark:border-slate-800 px-8 py-4 flex items-center justify-between rounded-2xl">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Session Management</h1>
-        <div className="flex items-center gap-2">
-          <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 text-xs font-bold rounded-full flex items-center gap-1">
-            <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-            {sessions.filter(s => { const n = new Date(); return new Date(s.start_time) <= n && new Date(s.end_time) >= n; }).length} LIVE
-          </span>
+      {/* Header */}
+      <motion.header variants={itemVariants} className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center shrink-0">
+            <Calendar className="w-6 h-6 text-red-600 dark:text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Session Management</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Manage & Check-in</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-4 w-full md:w-auto">
+          <div className="relative w-full md:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
+              placeholder="Search sessions by title or room..."
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
         </div>
       </motion.header>
 
@@ -434,16 +824,34 @@ export const InfoDeskDashboard: React.FC = () => {
           </div>
           <p className="text-gray-500 dark:text-gray-400 font-medium">Loading sessions...</p>
         </div>
-      ) : sessions.length === 0 ? (
+      ) : sessions.filter(session => {
+        const query = searchQuery.toLowerCase();
+        return (
+          session.title.toLowerCase().includes(query) ||
+          (session.room_name && session.room_name.toLowerCase().includes(query))
+        );
+      }).length === 0 ? (
         <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800">
           <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300 dark:text-slate-700" />
-          <p className="text-lg font-semibold text-gray-600 dark:text-gray-400">No sessions scheduled</p>
+          <p className="text-lg font-semibold text-gray-600 dark:text-gray-400">No sessions found</p>
+          <p className="text-sm text-gray-500 dark:text-slate-500 mt-1">Try adjusting your search terms</p>
         </div>
       ) : (
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          {sessions.map((session) => (
-            <motion.div key={session.id} whileHover={{ y: -5 }}
-              onClick={() => { setSelectedSession(session); setShowSessionDetails(true); }}
+          {sessions.filter(session => {
+            const query = searchQuery.toLowerCase();
+            return (
+              session.title.toLowerCase().includes(query) ||
+              (session.room_name && session.room_name.toLowerCase().includes(query))
+            );
+          }).map((session) => (
+            <motion.div
+              key={session.id}
+              whileHover={{ y: -5 }}
+              onClick={() => {
+                setSelectedSession(session);
+                setShowSessionDetails(true);
+              }}
               className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-slate-800 hover:shadow-xl transition-all duration-300 flex flex-col justify-between h-full group cursor-pointer"
             >
               <div className="space-y-4">
@@ -468,8 +876,14 @@ export const InfoDeskDashboard: React.FC = () => {
               </div>
               <div className="mt-8 flex items-center justify-between pt-6 border-t border-gray-50 dark:border-slate-800">
                 <span className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">{session.current_bookings || 0}/{session.max_attendees || "∞"} booked</span>
-                <button onClick={(e) => { e.stopPropagation(); setSelectedSessionForScan(session); setShowScanner(true); }}
-                  className="bg-red-600 text-white p-2.5 rounded-xl shadow-lg shadow-red-600/30 hover:bg-red-700 hover:scale-105 transition-all">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSessionForScan(session);
+                    setShowScanner(true);
+                  }}
+                  className="bg-red-600 text-white p-2.5 rounded-xl shadow-lg shadow-red-600/30 hover:bg-red-700 hover:scale-105 transition-all"
+                >
                   <QrCode className="w-5 h-5" />
                 </button>
               </div>
@@ -483,6 +897,11 @@ export const InfoDeskDashboard: React.FC = () => {
   // ===================================================================
   // MAIN RETURN
   // ===================================================================
+
+  if (isInitialLoading) {
+    return <DashboardLoading message="Loading Info Desk" subMessage="Preparing your dashboard..." />;
+  }
+
   return (
     <SharedNavigation
       navItems={navItems}
@@ -490,52 +909,90 @@ export const InfoDeskDashboard: React.FC = () => {
       onItemChange={setActiveTab}
       title="Info Desk"
       onProfileClick={() => setShowVolunteerProfile(true)}
+      notifications={notifications}
+      onNotificationClick={(notification) => setSelectedNotification(notification)}
     >
-      {/* Feedback Toast */}
-      <AnimatePresence>
-        {feedback && (
-          <motion.div initial={{ opacity: 0, y: -20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            transition={{ type: "spring", duration: 0.4 }}
-            className={`fixed top-4 right-4 z-[9999] flex items-center space-x-2 px-4 py-3 rounded-lg shadow-lg ${feedback.type === "success" ? "bg-green-500 text-white" : "bg-red-500 text-white"}`}>
-            {feedback.type === "success" ? <CheckCircle className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
-            <span className="font-medium">{feedback.message}</span>
-            <button onClick={() => setFeedback(null)} className="ml-2 hover:bg-black hover:bg-opacity-20 rounded p-1"><X className="h-4 w-4" /></button>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
+        {/* Toast Notification */}
+        <AnimatePresence>
+          {toast.isVisible && (
+            <Toast
+              message={toast.message}
+              type={toast.type}
+              onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Tab Content */}
+        <AnimatePresence mode="wait">
+          <motion.div key={activeTab} className="h-full">
+            {activeTab === "home" && renderHomeTab()}
+            {activeTab === "sessions" && renderSessionsTab()}
           </motion.div>
-        )}
-      </AnimatePresence>
+        </AnimatePresence>
 
-      {/* Tab Content */}
-      <AnimatePresence mode="wait">
-        <motion.div key={activeTab} className="h-full">
-          {activeTab === "home" && renderHomeTab()}
-          {activeTab === "sessions" && renderSessionsTab()}
-        </motion.div>
-      </AnimatePresence>
+        <QRScanner
+          isOpen={showScanner}
+          onClose={() => setShowScanner(false)}
+          onScan={handleQRScan}
+          title={`Scan for ${selectedSessionForScan?.title || "Session"}`}
+          description="Position the QR code within the frame"
+        />
+      </div>
 
-      {/* QR Scanner */}
-      <QRScanner isOpen={showScanner} onClose={() => setShowScanner(false)} onScan={handleQRScan}
-        title={`Scan for ${selectedSessionForScan?.title || "Session"}`} description="Position the QR code within the frame" />
-
-      {/* Session Details Modal (matching BuildTeamDashboard) */}
+      {/* Session Details Modal */}
       <AnimatePresence>
         {showSessionDetails && selectedSession && (
           <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSessionDetails(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowSessionDetails(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", duration: 0.5 }}
               className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-2xl w-full shadow-2xl overflow-y-auto max-h-[90vh] relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}>
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between mb-6">
-                <motion.h3 initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="text-2xl font-bold text-gray-900 dark:text-white">{selectedSession.title}</motion.h3>
-                <motion.button initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
-                  onClick={() => setShowSessionDetails(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <motion.h3
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-2xl font-bold text-gray-900 dark:text-white"
+                >
+                  {selectedSession.title}
+                </motion.h3>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.2 }}
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setShowSessionDetails(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
                   <X className="w-6 h-6" />
                 </motion.button>
               </div>
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-300 mb-6">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-300 mb-6"
+              >
                 <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
                   <Clock className="w-4 h-4" />
-                  <span>{new Date(selectedSession.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - {new Date(selectedSession.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                  <span>
+                    {new Date(selectedSession.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} -{" "}
+                    {new Date(selectedSession.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
                   <span className="material-symbols-outlined text-base">meeting_room</span>
@@ -547,17 +1004,38 @@ export const InfoDeskDashboard: React.FC = () => {
                 </div>
               </motion.div>
               {selectedSession.description && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl mb-6">
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                  className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl mb-6"
+                >
                   <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{selectedSession.description}</p>
                 </motion.div>
               )}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <button onClick={() => { setShowSessionDetails(false); setSelectedSessionForScan(selectedSession); setShowScanner(true); }}
-                  className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-red-600/30">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.5 }}
+                className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+              >
+                <button
+                  onClick={() => {
+                    setShowSessionDetails(false);
+                    setSelectedSessionForScan(selectedSession);
+                    setShowScanner(true);
+                  }}
+                  className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-red-600/30"
+                >
                   <QrCode className="w-5 h-5" /> Scan QR Code
                 </button>
-                <button onClick={() => { setSelectedSessionForScan(selectedSession); setShowSessionSearch(true); }}
-                  className="flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-slate-800/30">
+                <button
+                  onClick={() => {
+                    setSelectedSessionForScan(selectedSession);
+                    setShowSessionSearch(true);
+                  }}
+                  className="flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-green-600/30"
+                >
                   <Search className="w-5 h-5" /> Search Attendee
                 </button>
               </motion.div>
@@ -566,39 +1044,88 @@ export const InfoDeskDashboard: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Session Search Modal (matching BuildTeamDashboard with live dropdown) */}
+      {/* Session Search Modal */}
       <AnimatePresence>
         {showSessionSearch && (
           <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000]">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => { setShowSessionSearch(false); setSessionSearchResults([]); setSessionSearchTerm(""); }} />
-            <motion.div initial={{ opacity: 0, scale: 0.9, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 20 }}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={() => {
+                setShowSessionSearch(false);
+                setSessionSearchResults([]);
+                setSessionSearchTerm("");
+              }}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
               transition={{ type: "spring", duration: 0.5 }}
               className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}>
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between mb-6">
-                <motion.h3 initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="text-xl font-bold text-gray-900 dark:text-white">Search Attendee</motion.h3>
-                <motion.button initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
-                  onClick={() => { setShowSessionSearch(false); setSessionSearchResults([]); setSessionSearchTerm(""); }}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <motion.h3
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-xl font-bold text-gray-900 dark:text-white"
+                >
+                  Search Attendee
+                </motion.h3>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.2 }}
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => {
+                    setShowSessionSearch(false);
+                    setSessionSearchResults([]);
+                    setSessionSearchTerm("");
+                  }}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
                   <X className="w-6 h-6" />
                 </motion.button>
               </div>
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="relative mb-6">
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="relative mb-6"
+              >
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-orange-500 shadow-sm dark:text-white placeholder:text-slate-400"
-                  placeholder="Enter Personal ID" value={sessionSearchTerm} onChange={(e) => setSessionSearchTerm(e.target.value)} autoFocus />
+                <input
+                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-orange-500 shadow-sm dark:text-white placeholder:text-slate-400"
+                  placeholder="Enter Personal ID"
+                  value={sessionSearchTerm}
+                  onChange={(e) => setSessionSearchTerm(e.target.value)}
+                  autoFocus
+                />
                 {isSessionSearching && (
                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="rounded-full h-5 w-5 border-b-2 border-orange-500" />
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="rounded-full h-5 w-5 border-b-2 border-orange-500"
+                    />
                   </div>
                 )}
               </motion.div>
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {sessionSearchResults.map((result, index) => (
-                  <motion.button key={result.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + index * 0.1 }}
+                  <motion.button
+                    key={result.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.1 + index * 0.1 }}
                     onClick={() => handleSearchResultClick(result)}
-                    className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors text-left">
+                    className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors text-left"
+                  >
                     <div className="w-10 h-10 rounded-full bg-orange-500/10 flex items-center justify-center shrink-0">
                       <User className="w-5 h-5 text-orange-500" />
                     </div>
@@ -617,142 +1144,226 @@ export const InfoDeskDashboard: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Attendee Card Modal (matching BuildTeamDashboard style with Book/Unbook) */}
+      {/* Attendee Card Modal */}
       <AnimatePresence>
-        {showSessionCard && sessionAttendee && (
+        {showSessionCard && (
           <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowSessionCard(false)} />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowSessionCard(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", duration: 0.5 }}
               className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}>
+              onClick={(e) => e.stopPropagation()}
+            >
               {/* Header */}
               <div className="flex items-center justify-between mb-6">
-                <motion.h3 initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }} className="text-2xl font-bold text-gray-900 dark:text-white">Session Booking</motion.h3>
-                <motion.button initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }} whileHover={{ scale: 1.1, rotate: 90 }} whileTap={{ scale: 0.9 }}
-                  onClick={() => setShowSessionCard(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <motion.h3
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-2xl font-bold text-gray-900 dark:text-white"
+                >
+                  Session Booking
+                </motion.h3>
+                <motion.button
+                  initial={{ opacity: 0, scale: 0 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.2 }}
+                  whileHover={{ scale: 1.1, rotate: 90 }}
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => setShowSessionCard(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
                   <X className="w-6 h-6" />
                 </motion.button>
               </div>
 
-              {/* Attendee Info (matching BuildTeamDashboard pattern) */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 mb-6">
-                <div className="flex items-center gap-4 mb-6">
-                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: "spring" }}
-                    className="w-16 h-16 rounded-full bg-orange-500/10 flex items-center justify-center">
-                    <User className="w-8 h-8 text-orange-500" />
-                  </motion.div>
-                  <div>
-                    <h4 className="text-xl font-bold text-gray-900 dark:text-white">{sessionAttendee.full_name}</h4>
-                    <p className={`text-sm font-medium mt-1 ${hasBooking ? "text-green-600" : "text-slate-500 dark:text-slate-400"}`}>
-                      {hasBooking ? "Booking Confirmed" : "Not Booked"}
-                    </p>
+              {isCardLoading ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="relative w-16 h-16 mb-4">
+                    <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+                    <motion.div
+                      className="absolute inset-0 border-4 border-transparent border-t-orange-500 rounded-full"
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    />
                   </div>
+                  <p className="text-gray-500 dark:text-gray-400 font-medium">Loading attendee details...</p>
                 </div>
-                <div className="space-y-4">
-                  {(sessionAttendee.university || sessionAttendee.faculty) && (
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      {sessionAttendee.university && (
-                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }} className="bg-white dark:bg-slate-700/50 p-3 rounded-xl">
-                          <div className="flex items-center gap-2 mb-1">
-                            <GraduationCap className="w-4 h-4 text-red-500" />
-                            <span className="text-[10px] text-slate-500 uppercase tracking-wider">University</span>
-                          </div>
-                          <p className="font-semibold text-slate-800 dark:text-white text-xs truncate" title={sessionAttendee.university}>{sessionAttendee.university}</p>
-                        </motion.div>
-                      )}
-                      {sessionAttendee.faculty && (
-                        <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 }} className="bg-white dark:bg-slate-700/50 p-3 rounded-xl">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Building2 className="w-4 h-4 text-purple-500" />
-                            <span className="text-[10px] text-slate-500 uppercase tracking-wider">Faculty</span>
-                          </div>
-                          <p className="font-semibold text-slate-800 dark:text-white text-xs truncate" title={sessionAttendee.faculty}>{sessionAttendee.faculty}</p>
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
-
-                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }} className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center">
-                      <Phone className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Phone</p>
-                      <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.phone}</p>
-                    </div>
-                  </motion.div>
-                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 }} className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-500/10 flex items-center justify-center">
-                      <Mail className="w-5 h-5 text-purple-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Email</p>
-                      <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.email}</p>
-                    </div>
-                  </motion.div>
-                  {sessionAttendee.personal_id && (
-                    <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }} className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/10 flex items-center justify-center">
-                        <span className="material-symbols-outlined text-amber-600 text-xl">badge</span>
-                      </div>
+              ) : sessionAttendee ? (
+                <>
+                  {/* Attendee Info */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 mb-6"
+                  >
+                    <div className="flex items-center gap-4 mb-6">
+                      <motion.div
+                        initial={{ scale: 0 }}
+                        animate={{ scale: 1 }}
+                        transition={{ delay: 0.2, type: "spring" }}
+                        className="w-16 h-16 rounded-full bg-orange-500/10 flex items-center justify-center"
+                      >
+                        <User className="w-8 h-8 text-orange-500" />
+                      </motion.div>
                       <div>
-                        <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Personal ID</p>
-                        <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.personal_id}</p>
+                        <h4 className="text-xl font-bold text-gray-900 dark:text-white">{sessionAttendee.full_name}</h4>
+                        <p className={`text-sm font-medium mt-1 ${hasBooking ? "text-green-600" : "text-slate-500 dark:text-slate-400"}`}>
+                          {hasBooking ? "Booking Confirmed" : "Not Booked"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      {(sessionAttendee.university || sessionAttendee.faculty) && (
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          {sessionAttendee.university && (
+                            <motion.div
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.4 }}
+                              className="bg-white dark:bg-slate-700/50 p-3 rounded-xl"
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <GraduationCap className="w-4 h-4 text-red-500" />
+                                <span className="text-[10px] text-slate-500 uppercase tracking-wider">University</span>
+                              </div>
+                              <p className="font-semibold text-slate-800 dark:text-white text-xs truncate" title={sessionAttendee.university}>
+                                {sessionAttendee.university}
+                              </p>
+                            </motion.div>
+                          )}
+                          {sessionAttendee.faculty && (
+                            <motion.div
+                              initial={{ opacity: 0, x: -10 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              transition={{ delay: 0.5 }}
+                              className="bg-white dark:bg-slate-700/50 p-3 rounded-xl"
+                            >
+                              <div className="flex items-center gap-2 mb-1">
+                                <Building2 className="w-4 h-4 text-purple-500" />
+                                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Faculty</span>
+                              </div>
+                              <p className="font-semibold text-slate-800 dark:text-white text-xs truncate" title={sessionAttendee.faculty}>
+                                {sessionAttendee.faculty}
+                              </p>
+                            </motion.div>
+                          )}
+                        </div>
+                      )}
+
+                      <motion.div
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.4 }}
+                        className="flex items-center gap-3"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center">
+                          <Phone className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Phone</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.phone}</p>
+                        </div>
+                      </motion.div>
+                      <motion.div
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.5 }}
+                        className="flex items-center gap-3"
+                      >
+                        <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-500/10 flex items-center justify-center">
+                          <Mail className="w-5 h-5 text-purple-600" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Email</p>
+                          <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.email}</p>
+                        </div>
+                      </motion.div>
+                      {sessionAttendee.personal_id && (
+                        <motion.div
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: 0.6 }}
+                          className="flex items-center gap-3"
+                        >
+                          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-500/10 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-amber-600 text-xl">badge</span>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Personal ID</p>
+                            <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.personal_id}</p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </div>
+                  </motion.div>
+
+                  {/* Session context */}
+                  {selectedSessionForScan && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.5 }}
+                      className="bg-orange-500/5 dark:bg-orange-500/10 rounded-xl p-4 mb-6 flex items-center gap-3"
+                    >
+                      <Calendar className="w-5 h-5 text-orange-500" />
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Session</p>
+                        <p className="font-bold text-gray-900 dark:text-white text-sm">{selectedSessionForScan.title}</p>
                       </div>
                     </motion.div>
                   )}
-                </div>
-              </motion.div>
 
-              {/* Session context */}
-              {selectedSessionForScan && (
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-                  className="bg-orange-500/5 dark:bg-orange-500/10 rounded-xl p-4 mb-6 flex items-center gap-3">
-                  <Calendar className="w-5 h-5 text-orange-500" />
-                  <div>
-                    <p className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wider">Session</p>
-                    <p className="font-bold text-gray-900 dark:text-white text-sm">{selectedSessionForScan.title}</p>
-                  </div>
-                </motion.div>
-              )}
+                  {/* Actions */}
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.7 }}
+                    className="grid grid-cols-2 gap-4"
+                  >
+                    <button
+                      onClick={() => setShowSessionCard(false)}
+                      className="py-4 rounded-xl font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    {hasBooking ? (
+                      <button
+                        disabled={isProcessing}
+                        onClick={handleUnbook}
+                        className="bg-red-100 hover:bg-red-200 text-red-600 py-4 rounded-xl font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {isProcessing ? "Processing..." : (
+                          "Cancel Booking"
+                        )}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isProcessing}
+                        onClick={handleBook}
+                        className="bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold transition-colors shadow-lg shadow-green-600/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        {isProcessing ? "Processing..." : (
+                          "Confirm Booking"
+                        )}
+                      </button>
+                    )}
+                  </motion.div>
+                </>
+              ) : null}
 
-
-
-              {/* Book / Unbook buttons */}
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }} className="grid grid-cols-2 gap-4">
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                  onClick={handleBook} disabled={hasBooking || isProcessing}
-                  className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 dark:disabled:bg-emerald-800/40 disabled:cursor-not-allowed text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-emerald-500/30">
-                  {isProcessing && !hasBooking ? (
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="rounded-full h-5 w-5 border-b-2 border-white" />
-                  ) : (<><BookOpen className="w-5 h-5" /> Book</>)}
-                </motion.button>
-                <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                  onClick={handleUnbook} disabled={!hasBooking || isProcessing}
-                  className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 disabled:bg-red-300 dark:disabled:bg-red-800/40 disabled:cursor-not-allowed text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-red-500/30">
-                  {isProcessing && hasBooking ? (
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} className="rounded-full h-5 w-5 border-b-2 border-white" />
-                  ) : (<><BookX className="w-5 h-5" /> Unbook</>)}
-                </motion.button>
-              </motion.div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
-
-      {/* Attendee Profile Modal */}
-      <AnimatePresence>
-        {showProfileModal && (
-          <AttendeeProfileCard
-            profile={attendeeProfile}
-            hasActiveApplications={false} // Not relevant for Info Desk view
-            loading={profileLoading}
-            onClose={() => {
-              setShowProfileModal(false);
-              setProfileAttendeeId(null);
-            }}
-          />
         )}
       </AnimatePresence>
 
@@ -760,9 +1371,26 @@ export const InfoDeskDashboard: React.FC = () => {
       <VolunteerProfileModal
         isOpen={showVolunteerProfile}
         onClose={() => setShowVolunteerProfile(false)}
-        profile={volunteerProfile}
-        loading={loadingProfile}
+        profile={profile?.volunteer || null}
+        loading={false}
       />
-    </SharedNavigation>
+
+      {/* View All Activities Modal */}
+      {showAllActivitiesModal && (
+        <ViewAllActivitiesModal
+          onClose={() => setShowAllActivitiesModal(false)}
+        />
+      )}
+
+      {/* Notification Modal */}
+      <AnimatePresence>
+        {selectedNotification && (
+          <NotificationModal
+            notification={selectedNotification}
+            onClose={() => setSelectedNotification(null)}
+          />
+        )}
+      </AnimatePresence>
+    </SharedNavigation >
   );
 };

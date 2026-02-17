@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase';
 import { QRScanner } from '../../components/shared/QRScanner';
 import VolunteerInfoModal from '../../components/teamleader/VolunteerInfoModal';
 import Toast from '../../components/shared/Toast';
+import DashboardLoading from '../../components/DashboardLoading';
 
 // Animation variants
 const containerVariants = {
@@ -31,6 +32,13 @@ const itemVariants = {
 // Define the dashboard tabs
 type TabKey = 'home' | 'team' | 'announcements';
 
+interface TeamInfo {
+  team_id: string;
+  team_name: string;
+  team_leader_id: string;
+  event_id: string;
+}
+
 interface TeamMember {
   user_id: string;
   volunteer_id: string;
@@ -43,18 +51,14 @@ interface TeamMember {
   team_id?: string;
 }
 
-interface TeamInfo {
-  team_id: string;
-  team_name: string;
-  team_leader_id: string;
-}
-
 export const TeamLeaderDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [loading, setLoading] = useState(true);
   const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [filteredMembers, setFilteredMembers] = useState<TeamMember[]>([]);
+  const [isTeamListLoaded, setIsTeamListLoaded] = useState(false);
+  const [loadingTeamList, setLoadingTeamList] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [leaderName, setLeaderName] = useState('');
@@ -91,6 +95,29 @@ export const TeamLeaderDashboard: React.FC = () => {
           return;
         }
 
+        // Fetch volunteer record with team info in one query
+        const { data: volunteerWithTeam, error: volError } = await supabase
+          .from('volunteers')
+          .select(`
+        team_id,
+        volunteer_teams!inner (
+          id,
+          team_name,
+          team_leader_id,
+          event_id
+        )
+      `)
+          .eq('user_id', user.id)
+          .single();
+
+        if (volError || !volunteerWithTeam?.team_id) {
+          console.error('No team assigned to leader:', volError);
+          return;
+        }
+
+        const teamDataArr = volunteerWithTeam.volunteer_teams as any;
+        const teamRecord = Array.isArray(teamDataArr) ? teamDataArr[0] : teamDataArr;
+
         // Get user profile for name
         const { data: profile } = await supabase
           .from('user_profiles')
@@ -103,38 +130,19 @@ export const TeamLeaderDashboard: React.FC = () => {
           setLeaderName(firstName);
         }
 
-        // Get volunteer record to find team
-        const { data: volunteer } = await supabase
-          .from('volunteers')
-          .select('team_id')
-          .eq('user_id', user.id)
-          .single();
+        // Set team info
+        setTeamInfo({
+          team_id: teamRecord.id,
+          team_name: teamRecord.team_name,
+          team_leader_id: teamRecord.team_leader_id,
+          event_id: teamRecord.event_id
+        });
 
-        if (!volunteer?.team_id) {
-          console.error('No team assigned to leader');
-          return;
-        }
-
-        // Get team info
-        const { data: team } = await supabase
-          .from('volunteer_teams')
-          .select('id, team_name, team_leader_id')
-          .eq('id', volunteer.team_id)
-          .single();
-
-        if (team) {
-          setTeamInfo({
-            team_id: team.id,
-            team_name: team.team_name,
-            team_leader_id: team.team_leader_id
-          });
-
-          // Fetch team members
-          await fetchTeamMembers(team.id);
-
-          // Fetch event entries count
-          await fetchEventEntriesCount(team.id);
-        }
+        // Fetch team data in parallel
+        await Promise.all([
+          fetchInitialTeamStats(teamRecord.id, teamRecord.team_leader_id),
+          fetchEventEntriesCount(teamRecord.id, teamRecord.event_id)
+        ]);
 
       } catch (error) {
         console.error('Error fetching team leader data:', error);
@@ -146,45 +154,73 @@ export const TeamLeaderDashboard: React.FC = () => {
     fetchTeamLeaderData();
   }, []);
 
-  const fetchTeamMembers = async (teamId: string) => {
+  const fetchInitialTeamStats = async (teamId: string, teamLeaderId?: string) => {
     try {
-      const { data, error } = await supabase
+      const { count, error } = await supabase
+        .from('volunteers')
+        .select('*', { count: 'exact', head: true })
+        .eq('team_id', teamId)
+        .neq('user_id', teamLeaderId || '');
+
+      if (error) throw error;
+      setTeamMembersCount(count || 0);
+    } catch (error) {
+      console.error('Error fetching team stats:', error);
+    }
+  };
+
+  const fetchTeamMembers = async (teamId: string, teamLeaderId?: string) => {
+    if (isTeamListLoaded) return;
+
+    setLoadingTeamList(true);
+    try {
+      // This query will use idx_volunteers_team_id_name index
+      let query = supabase
         .from('volunteers')
         .select('user_id, volunteer_id, full_name, total_points, hours_volunteered')
-        .eq('team_id', teamId)
-        .order('full_name', { ascending: true });
+        .eq('team_id', teamId);
+
+      // Exclude the team leader from the list
+      if (teamLeaderId) {
+        query = query.neq('user_id', teamLeaderId);
+      }
+
+      const { data, error } = await query.order('full_name', { ascending: true });
 
       if (error) throw error;
 
       setTeamMembers(data || []);
       setFilteredMembers(data || []);
       setTeamMembersCount(data?.length || 0);
+      setIsTeamListLoaded(true);
     } catch (error) {
       console.error('Error fetching team members:', error);
+    } finally {
+      setLoadingTeamList(false);
     }
   };
 
-  const fetchEventEntriesCount = async (teamId: string) => {
+  const fetchEventEntriesCount = async (teamId: string, eventId: string) => {
     try {
-      // Get all volunteers in the team
-      const { data: volunteers } = await supabase
-        .from('volunteers')
-        .select('user_id')
-        .eq('team_id', teamId);
+      // Get today's date range (start and end of day)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStart = today.toISOString();
 
-      if (!volunteers) return;
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const todayEnd = tomorrow.toISOString();
 
-      const userIds = volunteers.map(v => v.user_id);
-
-      // Count users with event_entry = true
-      const { count, error } = await supabase
-        .from('user_roles')
+      const { data, error, count } = await supabase
+        .from('attendee_attendance')
         .select('*', { count: 'exact', head: true })
-        .in('user_id', userIds)
-        .eq('event_entry', true);
+        .eq('event_id', eventId)
+        .gte('check_in_time', todayStart)
+        .lt('check_in_time', todayEnd)
+        .not('check_in_time', 'is', null)
+        .is('check_out_time', null);
 
       if (error) throw error;
-
       setEventEntriesCount(count || 0);
     } catch (error) {
       console.error('Error fetching event entries count:', error);
@@ -204,36 +240,47 @@ export const TeamLeaderDashboard: React.FC = () => {
     setCurrentPage(1); // Reset to first page when search changes
   }, [searchQuery, teamMembers]);
 
-  // Fetch full volunteer data including user profile - using two queries for reliability
+  // Load team members when tab changes
+  useEffect(() => {
+    if (activeTab === 'team' && !isTeamListLoaded && teamInfo) {
+      fetchTeamMembers(teamInfo.team_id, teamInfo.team_leader_id);
+    }
+  }, [activeTab, isTeamListLoaded, teamInfo]);
+
   const fetchFullVolunteer = async (volunteerId: string): Promise<TeamMember | null> => {
     setLoadingVolunteerDetails(true);
     try {
-      // First, get the volunteer data
-      const { data: volunteerData, error: volunteerError } = await supabase
+      let volunteerData = null;
+
+      // Try volunteer_id first (most common from QR scan)
+      const { data: byVolId } = await supabase
         .from('volunteers')
         .select('user_id, volunteer_id, full_name, total_points, hours_volunteered, team_id')
-        .or(`volunteer_id.eq.${volunteerId},user_id.eq.${volunteerId}`)
+        .eq('volunteer_id', volunteerId)
         .maybeSingle();
 
-      if (volunteerError) {
-        console.error('Error fetching volunteer:', volunteerError);
-        return null;
+      if (byVolId) {
+        volunteerData = byVolId;
+      } else {
+        // Fallback to user_id
+        const { data: byUserId } = await supabase
+          .from('volunteers')
+          .select('user_id, volunteer_id, full_name, total_points, hours_volunteered, team_id')
+          .eq('user_id', volunteerId)
+          .maybeSingle();
+
+        if (!byUserId) {
+          return null;
+        }
+        volunteerData = byUserId;
       }
 
-      if (!volunteerData) {
-        return null;
-      }
-
-      // Then, get the user profile data using the user_id
-      const { data: profileData, error: profileError } = await supabase
+      // Fetch user profile with email, phone, personal_id
+      const { data: profileData } = await supabase
         .from('user_profiles')
         .select('email, phone, personal_id')
         .eq('id', volunteerData.user_id)
         .maybeSingle();
-
-      if (profileError) {
-        console.error('Error fetching user profile:', profileError);
-      }
 
       // Combine the data
       return {
@@ -370,7 +417,7 @@ export const TeamLeaderDashboard: React.FC = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <motion.div variants={itemVariants} className="bg-white dark:bg-zinc-900 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-zinc-800">
+        <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center">
               <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-xl">group</span>
@@ -380,7 +427,7 @@ export const TeamLeaderDashboard: React.FC = () => {
           <p className="text-4xl font-bold text-blue-600">{teamMembersCount}</p>
         </motion.div>
 
-        <motion.div variants={itemVariants} className="bg-white dark:bg-zinc-900 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-zinc-800">
+        <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3 mb-3">
             <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-500/10 flex items-center justify-center">
               <span className="material-symbols-outlined text-green-600 dark:text-green-400 text-xl">event_available</span>
@@ -403,15 +450,22 @@ export const TeamLeaderDashboard: React.FC = () => {
       className="space-y-6"
     >
       {/* Team Management Header */}
-      <motion.div variants={itemVariants} className="flex items-center gap-3">
-        <div className="w-14 h-14 rounded-2xl bg-red-100 dark:bg-red-500/10 flex items-center justify-center">
-          <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-3xl">groups</span>
+      <motion.header variants={itemVariants} className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center shrink-0">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-2xl">groups</span>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Team Management</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Manage your team members and view their performance</span>
+            </div>
+          </div>
         </div>
-        <h2 className="text-3xl font-bold text-gray-900 dark:text-white">Team Management</h2>
-      </motion.div>
+      </motion.header>
 
       {/* Search Bar */}
-      <motion.div variants={itemVariants} className="bg-white dark:bg-zinc-900 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-zinc-800">
+      <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">search</span>
@@ -420,7 +474,7 @@ export const TeamLeaderDashboard: React.FC = () => {
               placeholder="Search by Volunteer ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
+              className="w-full pl-12 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
             />
           </div>
           <motion.button
@@ -436,46 +490,52 @@ export const TeamLeaderDashboard: React.FC = () => {
       </motion.div>
 
       {/* Team Members Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {paginatedMembers.map((member) => (
-          <motion.div
-            key={member.user_id}
-            variants={itemVariants}
-            onClick={async () => {
-              setShowVolunteerModal(true); // Open modal immediately
-              setSelectedVolunteer(null); // Clear previous data
-              const fullData = await fetchFullVolunteer(member.user_id);
-              if (fullData) {
-                setSelectedVolunteer(fullData);
-              } else {
-                setShowVolunteerModal(false);
-                setToast({ show: true, message: 'Failed to load volunteer details', type: 'error' });
-              }
-            }}
-            className="bg-white dark:bg-zinc-900 rounded-2xl p-6 shadow-lg border border-gray-200 dark:border-zinc-800 cursor-pointer hover:shadow-xl transition-shadow"
-          >
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
-                <span className="material-symbols-outlined text-red-600 dark:text-red-400">person</span>
+      {loadingTeamList ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {paginatedMembers.map((member) => (
+            <motion.div
+              key={member.user_id}
+              variants={itemVariants}
+              onClick={async () => {
+                setShowVolunteerModal(true); // Open modal immediately
+                setSelectedVolunteer(null); // Clear previous data
+                const fullData = await fetchFullVolunteer(member.user_id);
+                if (fullData) {
+                  setSelectedVolunteer(fullData);
+                } else {
+                  setShowVolunteerModal(false);
+                  setToast({ show: true, message: 'Failed to load volunteer details', type: 'error' });
+                }
+              }}
+              className="bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-800 cursor-pointer hover:shadow-xl transition-shadow"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center">
+                  <span className="material-symbols-outlined text-red-600 dark:text-red-400">person</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold text-gray-900 dark:text-white truncate">{member.full_name}</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">ID: {member.volunteer_id || 'N/A'}</p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-gray-900 dark:text-white truncate">{member.full_name}</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-400">ID: {member.volunteer_id || 'N/A'}</p>
+              <div className="flex justify-between text-sm">
+                <div>
+                  <p className="text-gray-600 dark:text-gray-400">Points</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{member.total_points || 0}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600 dark:text-gray-400">Hours</p>
+                  <p className="font-semibold text-gray-900 dark:text-white">{member.hours_volunteered || 0}</p>
+                </div>
               </div>
-            </div>
-            <div className="flex justify-between text-sm">
-              <div>
-                <p className="text-gray-600 dark:text-gray-400">Points</p>
-                <p className="font-semibold text-gray-900 dark:text-white">{member.total_points || 0}</p>
-              </div>
-              <div>
-                <p className="text-gray-600 dark:text-gray-400">Hours</p>
-                <p className="font-semibold text-gray-900 dark:text-white">{member.hours_volunteered || 0}</p>
-              </div>
-            </div>
-          </motion.div>
-        ))}
-      </div>
+            </motion.div>
+          ))}
+        </div>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -483,7 +543,7 @@ export const TeamLeaderDashboard: React.FC = () => {
           <button
             onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
             disabled={currentPage === 1}
-            className="px-4 py-2 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors"
+            className="px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             Previous
           </button>
@@ -493,7 +553,7 @@ export const TeamLeaderDashboard: React.FC = () => {
           <button
             onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
             disabled={currentPage === totalPages}
-            className="px-4 py-2 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors"
+            className="px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
             Next
           </button>
@@ -511,12 +571,17 @@ export const TeamLeaderDashboard: React.FC = () => {
       exit="exit"
       className="space-y-6"
     >
-      <motion.div variants={itemVariants} className="bg-white dark:bg-zinc-900 rounded-2xl p-8 shadow-lg border border-gray-200 dark:border-zinc-800">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-500/10 flex items-center justify-center">
+      <motion.div variants={itemVariants} className="bg-white dark:bg-slate-900 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-2xl">campaign</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Send Announcement</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Send Announcement</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Broadcast important messages to your team</span>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -529,7 +594,7 @@ export const TeamLeaderDashboard: React.FC = () => {
               value={announcementTitle}
               onChange={(e) => setAnnouncementTitle(e.target.value)}
               placeholder="Enter announcement title"
-              className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
             />
           </div>
 
@@ -542,7 +607,7 @@ export const TeamLeaderDashboard: React.FC = () => {
               onChange={(e) => setAnnouncementContent(e.target.value)}
               placeholder="Enter announcement content"
               rows={6}
-              className="w-full px-4 py-3 bg-gray-50 dark:bg-zinc-800 border border-gray-300 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all resize-none"
+              className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all resize-none"
             />
           </div>
 
@@ -572,9 +637,7 @@ export const TeamLeaderDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-600"></div>
-      </div>
+      <DashboardLoading message="Loading Team Dashboard" subMessage="Fetching your team stats..." />
     );
   }
 
@@ -617,7 +680,7 @@ export const TeamLeaderDashboard: React.FC = () => {
         onSuccess={async () => {
           // Refresh team members data
           if (teamInfo) {
-            await fetchTeamMembers(teamInfo.team_id);
+            await fetchTeamMembers(teamInfo.team_id, teamInfo.team_leader_id);
 
             // Also refresh the selected volunteer's data so the card updates
             if (selectedVolunteer) {

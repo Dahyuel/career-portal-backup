@@ -26,6 +26,8 @@ import Toast from "../../components/shared/Toast";
 import SettingsModal from "../../components/shared/SettingsModal";
 import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileModal";
 import DashboardLoading from "../../components/DashboardLoading";
+import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
+import NotificationModal from "../../components/NotificationModal";
 
 // --- Animation Variants (matching EmployerDashboard / tabsanimation.md) ---
 const containerVariants: Variants = {
@@ -85,7 +87,7 @@ interface SessionBooking {
 
 export const BuildTeamDashboard: React.FC = () => {
   useTheme();
-  const { profile } = useAuth();
+  const { profile, refreshProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
   const [showProfile, setShowProfile] = useState(false);
 
@@ -146,6 +148,44 @@ export const BuildTeamDashboard: React.FC = () => {
     loading: true,
     first_name: profile?.full_name?.split(' ')[0] || 'Volunteer'
   });
+
+  // Refresh Trigger
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [selectedNotification, setSelectedNotification] = useState<any>(null);
+
+  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+
+  const fetchNotifications = useCallback(async () => {
+    if (!profile?.id || !profile?.roles) return;
+    try {
+      const { data: volunteerData } = await supabase
+        .from('volunteers')
+        .select('team_id')
+        .eq('user_id', profile.id)
+        .maybeSingle();
+      const teamId = volunteerData?.team_id;
+
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
+        .eq('event_id', EVENT_ID)
+        .contains('target_roles', profile.roles)
+        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
+        .order('publish_at', { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      if (data) setNotifications(data);
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  }, [profile?.id, profile?.roles]);
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
 
   // User activities from database
   const [userActivities, setUserActivities] = useState<{
@@ -213,7 +253,7 @@ export const BuildTeamDashboard: React.FC = () => {
     };
 
     fetchVolunteerStats();
-  }, [profile?.id]);
+  }, [profile?.id, refreshTrigger]);
 
   // Fetch sessions from backend - Uses index: idx_sessions_event_time_status
   const fetchSessions = useCallback(async () => {
@@ -264,7 +304,8 @@ export const BuildTeamDashboard: React.FC = () => {
         .from('session_bookings')
         .update({
           checked_in: true,
-          checked_in_at: new Date().toISOString()
+          checked_in_at: new Date().toISOString(),
+          checked_in_by: profile?.id
         })
         .eq('id', sessionBooking.id);
 
@@ -288,6 +329,14 @@ export const BuildTeamDashboard: React.FC = () => {
         return s;
       }));
       fetchSessions(); // Refresh data for accuracy
+
+      // Trigger Home tab refresh (Activities & Stats)
+      setRefreshTrigger(prev => prev + 1);
+
+      // Refresh Auth Profile (Global Score)
+      if (profile?.event_id && profile?.id) {
+        refreshProfile(profile.event_id, profile.id, undefined, true);
+      }
     } catch (err) {
       console.error('Check-in error:', err);
       showToast('Failed to check in attendee', 'error');
@@ -444,37 +493,6 @@ export const BuildTeamDashboard: React.FC = () => {
     return <DashboardLoading message="Loading Building Dashboard" subMessage="Fetching your stats and recent activity..." />;
   }
 
-  const getActivityColor = (type: string) => {
-    const colors: Record<string, string> = {
-
-      'check_in': 'bg-red-100 dark:bg-red-500/10 text-red-600',
-      'qr_scan': 'bg-blue-50 dark:bg-blue-500/10 text-blue-500',
-      'session_booking': 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300',
-      'session': 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300',
-      'volunteer': 'bg-green-100 dark:bg-green-500/10 text-green-500',
-      'profile_complete': 'bg-green-100 dark:bg-green-500/10 text-green-500',
-      'booth_visit': 'bg-purple-100 dark:bg-purple-500/10 text-purple-500',
-      'recruit_attendee': 'bg-indigo-100 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400',
-      'session_attendance': 'bg-teal-100 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400'
-    };
-    return colors[type] || 'bg-gray-100 text-gray-500';
-  };
-
-  const getActivityIcon = (type: string) => {
-    const icons: Record<string, any> = {
-      'check_in': CheckCircle,
-      'qr_scan': QrCode,
-      'session_booking': Calendar,
-      'session': Calendar,
-      'volunteer': User,
-      'profile_complete': User,
-      'recruit_attendee': User,
-      'session_attendance': Clock,
-    };
-    const Icon = icons[type] || CheckCircle;
-    return <Icon className="w-5 h-5" />;
-  };
-
   const renderHomeTab = () => (
     <motion.div
       key="home"
@@ -544,36 +562,48 @@ export const BuildTeamDashboard: React.FC = () => {
           <motion.div variants={itemVariants}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Recent Activity</h2>
+              <button
+                onClick={() => setShowAllActivitiesModal(true)}
+                className="text-sm font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+              >
+                View All
+              </button>
             </div>
             <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
-              <div className="space-y-8 relative">
-                <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-700"></div>
-                {userActivities.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    <p>No recent activity yet.</p>
-                  </div>
-                ) : (
-                  userActivities.map((activity) => (
+              {userActivities.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">
+                  <span className="material-symbols-outlined text-5xl mb-2">inbox</span>
+                  <p>No recent activities</p>
+                </div>
+              ) : (
+                <div className="space-y-8 relative">
+                  <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-700"></div>
+                  {userActivities.map((activity) => (
                     <div key={activity.id} className="relative flex gap-6 items-start group">
-                      <div className={`relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl border-4 border-white dark:border-slate-900 ${getActivityColor(activity.activity_type)}`}>
-                        {getActivityIcon(activity.activity_type)}
+                      <div className="relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-500/10 border-4 border-white dark:border-slate-900">
+                        <span className="material-symbols-outlined text-primary text-xl">
+                          {/* Simple icon mapping */}
+                          {activity.activity_type.includes('scan') ? 'qr_code_scanner' : 'verified'}
+                        </span>
                       </div>
                       <div className="flex-grow pt-1">
-                        <h4 className="font-semibold text-slate-800 dark:text-white">{activity.description}</h4>
-                        <p className="text-sm text-slate-500 mt-0.5 flex items-center gap-2">
-                          <Clock className="w-3 h-3" />
-                          {new Date(activity.activity_timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                          {activity.points_earned > 0 && (
-                            <span className="text-xs font-bold text-green-600 bg-green-100 px-1.5 py-0.5 rounded ml-2">
-                              +{activity.points_earned} pts
-                            </span>
-                          )}
+                        <div className="flex items-center justify-between mb-1">
+                          <h4 className="font-semibold text-slate-800 dark:text-white">{activity.description}</h4>
+                        </div>
+                        <p className="text-sm text-slate-500 flex items-center gap-2">
+                          <span className="material-symbols-outlined text-xs">schedule</span>
+                          {new Date(activity.activity_timestamp).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit'
+                          })}
                         </p>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </motion.div>
         </div>
@@ -732,17 +762,19 @@ export const BuildTeamDashboard: React.FC = () => {
       onItemChange={setActiveTab}
       title="Build Team"
       onProfileClick={() => setShowProfile(true)}
+      notifications={notifications}
+      onNotificationClick={(notification) => setSelectedNotification(notification)}
     >
       {/* Tab Content with AnimatePresence */}
-      <AnimatePresence mode="wait">
+      < AnimatePresence mode="wait" >
         <motion.div key={activeTab} className="h-full">
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'sessions' && renderSessionsTab()}
         </motion.div>
-      </AnimatePresence>
+      </AnimatePresence >
 
       {/* QR Scanner Modal */}
-      <QRScanner
+      < QRScanner
         isOpen={showScanner}
         onClose={() => setShowScanner(false)}
         onScan={handleQRScan}
@@ -752,358 +784,366 @@ export const BuildTeamDashboard: React.FC = () => {
 
       {/* Session Details Modal (cardanimation.md pattern) */}
       <AnimatePresence>
-        {showSessionDetails && selectedSession && (
-          <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
-            {/* Animated Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowSessionDetails(false)}
-            />
+        {
+          showSessionDetails && selectedSession && (
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+              {/* Animated Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setShowSessionDetails(false)}
+              />
 
-            {/* Animated Card */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", duration: 0.5 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-2xl w-full shadow-2xl overflow-y-auto max-h-[90vh] relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <motion.h3
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-2xl font-bold text-gray-900 dark:text-white"
-                >
-                  {selectedSession.title}
-                </motion.h3>
-                <motion.button
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 }}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => setShowSessionDetails(false)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </motion.button>
-              </div>
+              {/* Animated Card */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                transition={{ type: "spring", duration: 0.5 }}
+                className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-2xl w-full shadow-2xl overflow-y-auto max-h-[90vh] relative z-10 border border-slate-200 dark:border-slate-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <motion.h3
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-2xl font-bold text-gray-900 dark:text-white"
+                  >
+                    {selectedSession.title}
+                  </motion.h3>
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.2 }}
+                    whileHover={{ scale: 1.1, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setShowSessionDetails(false)}
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </motion.button>
+                </div>
 
-              <div className="space-y-6">
+                <div className="space-y-6">
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-300"
+                  >
+                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
+                      <Clock className="w-4 h-4" />
+                      <span>{new Date(selectedSession.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(selectedSession.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
+                      <span className="material-symbols-outlined text-base">meeting_room</span>
+                      <span>{selectedSession.room_name || 'TBA'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
+                      <User className="w-4 h-4" />
+                      <span>{selectedSession.current_bookings || 0} / {selectedSession.max_attendees || '-'}</span>
+                    </div>
+                  </motion.div>
+
+                  {selectedSession.description && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.4 }}
+                      className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl"
+                    >
+                      <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{selectedSession.description}</p>
+                    </motion.div>
+                  )}
+
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 }}
+                    className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8"
+                  >
+                    <button
+                      onClick={() => {
+                        setShowSessionDetails(false);
+                        setSelectedSessionForScan(selectedSession);
+                        setShowScanner(true);
+                      }}
+                      className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-red-600/30"
+                    >
+                      <QrCode className="w-5 h-5" />
+                      Scan QR Code
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowSessionSearch(true);
+                        setSelectedSessionForScan(selectedSession);
+                      }}
+                      className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-blue-500/30"
+                    >
+                      <Search className="w-5 h-5" />
+                      Search Attendee
+                    </button>
+                  </motion.div>
+                </div>
+              </motion.div>
+            </div>
+          )
+        }
+      </AnimatePresence >
+
+      {/* Session Search Modal (cardanimation.md pattern) */}
+      <AnimatePresence>
+        {
+          showSessionSearch && (
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000]">
+              {/* Animated Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+                onClick={() => {
+                  setShowSessionSearch(false);
+                  setSessionSearchResults([]);
+                  setSessionSearchTerm('');
+                }}
+              />
+
+              {/* Animated Card */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                transition={{ type: "spring", duration: 0.5 }}
+                className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <motion.h3
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-xl font-bold text-gray-900 dark:text-white"
+                  >
+                    Search Booked Attendee
+                  </motion.h3>
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.2 }}
+                    whileHover={{ scale: 1.1, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => {
+                      setShowSessionSearch(false);
+                      setSessionSearchResults([]);
+                      setSessionSearchTerm('');
+                    }}
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </motion.button>
+                </div>
+
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3 }}
-                  className="flex flex-wrap gap-4 text-sm text-gray-600 dark:text-gray-300"
+                  className="relative mb-6"
                 >
-                  <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
-                    <Clock className="w-4 h-4" />
-                    <span>{new Date(selectedSession.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {new Date(selectedSession.end_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
-                    <span className="material-symbols-outlined text-base">meeting_room</span>
-                    <span>{selectedSession.room_name || 'TBA'}</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg">
-                    <User className="w-4 h-4" />
-                    <span>{selectedSession.current_bookings || 0} / {selectedSession.max_attendees || '-'}</span>
-                  </div>
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-red-600 shadow-sm dark:text-white"
+                    placeholder="Enter Personal ID"
+                    value={sessionSearchTerm}
+                    onChange={(e) => setSessionSearchTerm(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSessionSearch()}
+                    autoFocus
+                  />
+                  {isSessionSearching && (
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="rounded-full h-5 w-5 border-b-2 border-red-600"
+                      />
+                    </div>
+                  )}
                 </motion.div>
 
-                {selectedSession.description && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 }}
-                    className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl"
-                  >
-                    <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{selectedSession.description}</p>
-                  </motion.div>
-                )}
-
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5 }}
-                  className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8"
-                >
-                  <button
-                    onClick={() => {
-                      setShowSessionDetails(false);
-                      setSelectedSessionForScan(selectedSession);
-                      setShowScanner(true);
-                    }}
-                    className="flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-red-600/30"
-                  >
-                    <QrCode className="w-5 h-5" />
-                    Scan QR Code
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowSessionSearch(true);
-                      setSelectedSessionForScan(selectedSession);
-                    }}
-                    className="flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-blue-500/30"
-                  >
-                    <Search className="w-5 h-5" />
-                    Search Attendee
-                  </button>
-                </motion.div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Session Search Modal (cardanimation.md pattern) */}
-      <AnimatePresence>
-        {showSessionSearch && (
-          <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000]">
-            {/* Animated Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-              onClick={() => {
-                setShowSessionSearch(false);
-                setSessionSearchResults([]);
-                setSessionSearchTerm('');
-              }}
-            />
-
-            {/* Animated Card */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              transition={{ type: "spring", duration: 0.5 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-lg w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-6">
-                <motion.h3
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-xl font-bold text-gray-900 dark:text-white"
-                >
-                  Search Booked Attendee
-                </motion.h3>
-                <motion.button
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 }}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => {
-                    setShowSessionSearch(false);
-                    setSessionSearchResults([]);
-                    setSessionSearchTerm('');
-                  }}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </motion.button>
-              </div>
-
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="relative mb-6"
-              >
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-red-600 shadow-sm dark:text-white"
-                  placeholder="Enter Personal ID"
-                  value={sessionSearchTerm}
-                  onChange={(e) => setSessionSearchTerm(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSessionSearch()}
-                  autoFocus
-                />
-                {isSessionSearching && (
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      className="rounded-full h-5 w-5 border-b-2 border-red-600"
-                    />
-                  </div>
-                )}
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {sessionSearchResults.map((result, index) => (
+                    <motion.button
+                      key={result.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.1 + index * 0.1 }}
+                      onClick={() => handleSessionSearchResultClick(result)}
+                      className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors text-left"
+                    >
+                      <div className="w-10 h-10 rounded-full bg-red-600/10 flex items-center justify-center shrink-0">
+                        <User className="w-5 h-5 text-red-600" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900 dark:text-white">{result.full_name}</p>
+                        <p className="text-sm text-gray-500 dark:text-slate-400">{result.personal_id || result.email}</p>
+                      </div>
+                    </motion.button>
+                  ))}
+                  {sessionSearchResults.length === 0 && sessionSearchTerm && !isSessionSearching && (
+                    <p className="text-center text-gray-500 dark:text-slate-400 py-4">No results found</p>
+                  )}
+                </div>
               </motion.div>
-
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {sessionSearchResults.map((result, index) => (
-                  <motion.button
-                    key={result.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 + index * 0.1 }}
-                    onClick={() => handleSessionSearchResultClick(result)}
-                    className="w-full flex items-center gap-4 p-4 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors text-left"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-red-600/10 flex items-center justify-center shrink-0">
-                      <User className="w-5 h-5 text-red-600" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-gray-900 dark:text-white">{result.full_name}</p>
-                      <p className="text-sm text-gray-500 dark:text-slate-400">{result.personal_id || result.email}</p>
-                    </div>
-                  </motion.button>
-                ))}
-                {sessionSearchResults.length === 0 && sessionSearchTerm && !isSessionSearching && (
-                  <p className="text-center text-gray-500 dark:text-slate-400 py-4">No results found</p>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+          )
+        }
+      </AnimatePresence >
 
       {/* Session Attendee Card Modal (cardanimation.md pattern) */}
       <AnimatePresence>
-        {showSessionCard && sessionAttendee && (
-          <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
-            {/* Animated Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-              onClick={() => setShowSessionCard(false)}
-            />
-
-            {/* Animated Card */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              transition={{ type: "spring", duration: 0.5 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <motion.h3
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className="text-2xl font-bold text-gray-900 dark:text-white"
-                >
-                  Session Check-in
-                </motion.h3>
-                <motion.button
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.2 }}
-                  whileHover={{ scale: 1.1, rotate: 90 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => setShowSessionCard(false)}
-                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </motion.button>
-              </div>
-
-              {/* Attendee Info */}
+        {
+          showSessionCard && sessionAttendee && (
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+              {/* Animated Backdrop */}
               <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-                className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 mb-6"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setShowSessionCard(false)}
+              />
+
+              {/* Animated Card */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                transition={{ type: "spring", duration: 0.5 }}
+                className="bg-white dark:bg-slate-900 rounded-3xl p-8 max-w-md w-full shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center gap-4 mb-6">
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    transition={{ delay: 0.2, type: "spring" }}
-                    className="w-16 h-16 rounded-full bg-red-600/10 flex items-center justify-center"
+                {/* Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <motion.h3
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-2xl font-bold text-gray-900 dark:text-white"
                   >
-                    <User className="w-8 h-8 text-red-600" />
-                  </motion.div>
-                  <div>
-                    <h4 className="text-xl font-bold text-gray-900 dark:text-white">{sessionAttendee.full_name}</h4>
-                    <p className="text-sm text-green-600 font-medium mt-1">Booking Confirmed</p>
+                    Session Check-in
+                  </motion.h3>
+                  <motion.button
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.2 }}
+                    whileHover={{ scale: 1.1, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={() => setShowSessionCard(false)}
+                    className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                  >
+                    <X className="w-6 h-6" />
+                  </motion.button>
+                </div>
+
+                {/* Attendee Info */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-6 mb-6"
+                >
+                  <div className="flex items-center gap-4 mb-6">
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ delay: 0.2, type: "spring" }}
+                      className="w-16 h-16 rounded-full bg-red-600/10 flex items-center justify-center"
+                    >
+                      <User className="w-8 h-8 text-red-600" />
+                    </motion.div>
+                    <div>
+                      <h4 className="text-xl font-bold text-gray-900 dark:text-white">{sessionAttendee.full_name}</h4>
+                      <p className="text-sm text-green-600 font-medium mt-1">Booking Confirmed</p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="space-y-4">
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.4 }}
-                    className="flex items-center gap-3"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center">
-                      <Phone className="w-5 h-5 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">Phone</p>
-                      <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.phone}</p>
-                    </div>
-                  </motion.div>
+                  <div className="space-y-4">
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.4 }}
+                      className="flex items-center gap-3"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center">
+                        <Phone className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider">Phone</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.phone}</p>
+                      </div>
+                    </motion.div>
 
-                  <motion.div
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.5 }}
-                    className="flex items-center gap-3"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-500/10 flex items-center justify-center">
-                      <Mail className="w-5 h-5 text-purple-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wider">Email</p>
-                      <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.email}</p>
-                    </div>
-                  </motion.div>
-                </div>
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.5 }}
+                      className="flex items-center gap-3"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-500/10 flex items-center justify-center">
+                        <Mail className="w-5 h-5 text-purple-600" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider">Email</p>
+                        <p className="font-medium text-gray-900 dark:text-white">{sessionAttendee.email}</p>
+                      </div>
+                    </motion.div>
+                  </div>
+                </motion.div>
+
+                {/* Action Button */}
+                <motion.button
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.6 }}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleSessionCheckIn}
+                  disabled={isSessionProcessing}
+                  className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-emerald-500/30"
+                >
+                  {isSessionProcessing ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                      className="rounded-full h-5 w-5 border-b-2 border-white"
+                    />
+                  ) : (
+                    <>
+                      <CheckCircle className="w-5 h-5" />
+                      Confirm Check-in
+                    </>
+                  )}
+                </motion.button>
               </motion.div>
-
-              {/* Action Button */}
-              <motion.button
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.6 }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleSessionCheckIn}
-                disabled={isSessionProcessing}
-                className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-emerald-500/30"
-              >
-                {isSessionProcessing ? (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                    className="rounded-full h-5 w-5 border-b-2 border-white"
-                  />
-                ) : (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    Confirm Check-in
-                  </>
-                )}
-              </motion.button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+          )
+        }
+      </AnimatePresence >
 
       {/* Settings Modal */}
       <AnimatePresence>
-        {showSettings && (
-          <SettingsModal onClose={() => setShowSettings(false)} />
-        )}
-      </AnimatePresence>
+        {
+          showSettings && (
+            <SettingsModal onClose={() => setShowSettings(false)} />
+          )
+        }
+      </AnimatePresence >
 
       {/* Volunteer Profile Modal */}
-      <VolunteerProfileModal
+      < VolunteerProfileModal
         isOpen={showProfile}
         onClose={() => setShowProfile(false)}
         profile={profile?.volunteer ? {
@@ -1118,14 +1158,34 @@ export const BuildTeamDashboard: React.FC = () => {
       />
       {/* Toast Notification */}
       <AnimatePresence>
-        {toast.isVisible && (
-          <Toast
-            message={toast.message}
-            type={toast.type}
-            onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+        {
+          toast.isVisible && (
+            <Toast
+              message={toast.message}
+              type={toast.type}
+              onClose={() => setToast(prev => ({ ...prev, isVisible: false }))}
+            />
+          )
+        }
+      </AnimatePresence >
+      {/* View All Activities Modal */}
+      <AnimatePresence>
+        {
+          showAllActivitiesModal && (
+            <ViewAllActivitiesModal onClose={() => setShowAllActivitiesModal(false)} />
+          )
+        }
+      </AnimatePresence >
+
+      {/* Notification Modal */}
+      <AnimatePresence>
+        {selectedNotification && (
+          <NotificationModal
+            notification={selectedNotification}
+            onClose={() => setSelectedNotification(null)}
           />
         )}
       </AnimatePresence>
-    </SharedNavigation>
+    </SharedNavigation >
   );
 };
