@@ -5,7 +5,7 @@ import { User, GraduationCap, ChevronRight, CheckCircle, AlertCircle, FileText, 
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RegistrationData, ValidationError, FileUpload as FileUploadType } from '../types';
-import { FACULTIES, CLASS_YEARS, HOW_DID_YOU_HEAR_OPTIONS } from '../utils/constants';
+import { FACULTIES, CLASS_YEARS, HOW_DID_YOU_HEAR_OPTIONS, UNIVERSITIES } from '../utils/constants';
 import { validatePhone, validatePersonalId, validateVolunteerId, validateEmail, validatePassword, validateConfirmPassword, validateName } from '../utils/validation';
 import { registerAttendee } from '../lib/supabase';
 
@@ -88,7 +88,8 @@ const FileUpload: React.FC<{
     label: string;
     currentFile?: File;
     required?: boolean;
-}> = ({ accept, maxSize, onFileSelect, onFileRemove, label, currentFile, required = false }) => {
+    error?: string;
+}> = ({ accept, maxSize, onFileSelect, onFileRemove, label, currentFile, required = false, error }) => {
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
@@ -107,9 +108,11 @@ const FileUpload: React.FC<{
             transition={{ duration: 0.3 }}
             className="space-y-2"
         >
-            <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${currentFile
-                ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
-                : 'border-orange-200 dark:border-orange-800 hover:border-orange-300 dark:hover:border-orange-700'
+            <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all duration-300 ${error
+                ? 'border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-900/20'
+                : currentFile
+                    ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-900/20'
+                    : 'border-orange-200 dark:border-orange-800 hover:border-orange-300 dark:hover:border-orange-700'
                 }`}>
                 {currentFile ? (
                     <motion.div
@@ -138,7 +141,6 @@ const FileUpload: React.FC<{
                             onChange={handleFileChange}
                             className="hidden"
                             id={`file-${label.replace(/\s+/g, '-').toLowerCase()}`}
-                            required={required}
                         />
                         <label
                             htmlFor={`file-${label.replace(/\s+/g, '-').toLowerCase()}`}
@@ -194,14 +196,7 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
         { id: 3, title: 'Event & Documents', icon: FileText }
     ];
 
-    const universities = [
-        'Ain Shams University',
-        'Helwan University',
-        'Canadian Ahram University',
-        'Banha University',
-        'Cairo University',
-        'Other'
-    ];
+
 
     const showErrorPopup = useCallback((message: string, type: 'error' | 'warning' | 'success' = 'error') => {
         setErrorPopup({ message, type });
@@ -263,8 +258,14 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
             const phoneError = validatePhone(formData.phone);
             if (phoneError) validationErrors.push({ field: 'phone', message: phoneError });
 
-            const personalIdError = validatePersonalId(formData.personalId);
-            if (personalIdError) validationErrors.push({ field: 'personalId', message: personalIdError });
+            if (formData.nationality?.toLowerCase() === 'egyptian') {
+                const personalIdError = validatePersonalId(formData.personalId);
+                if (personalIdError) validationErrors.push({ field: 'personalId', message: personalIdError });
+            } else {
+                if (!formData.personalId || !formData.personalId.trim()) {
+                    validationErrors.push({ field: 'personalId', message: 'Personal ID / Passport number is required' });
+                }
+            }
         }
 
         if (step === 2) {
@@ -293,7 +294,7 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
             }
 
             if (!fileUploads.universityId) {
-                validationErrors.push({ field: 'universityId', message: 'University ID is required' });
+                validationErrors.push({ field: 'universityId', message: 'Enrollment proof is required' });
             }
         }
 
@@ -802,7 +803,7 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         }`}
                 >
                     <option value="">Select university</option>
-                    {universities.map(uni => (
+                    {UNIVERSITIES.map(uni => (
                         <option key={uni} value={uni}>{uni}</option>
                     ))}
                 </select>
@@ -1054,8 +1055,17 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
 
                 <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        University ID *
+                        Enrollment Proof <br />
+                        <span className="text-gray-500 font-normal">(University ID, Graduation Certificate, UMS screenshot with full name and grades) *</span>
                     </label>
+
+                    <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start">
+                        <AlertCircle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mr-2 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                            Be sure to upload valid enrollment proof, if not you will be directed to payment link
+                        </p>
+                    </div>
+
                     <FileUpload
                         accept=".jpg,.jpeg,.png,.pdf"
                         maxSize={10 * 1024 * 1024}
@@ -1064,9 +1074,10 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                             setErrors(prev => prev.filter(error => error.field !== 'universityId'));
                         }}
                         onFileRemove={() => setFileUploads(prev => ({ ...prev, universityId: undefined }))}
-                        label="Upload University ID (JPG, PNG, PDF - Max 10MB)"
+                        label="Upload Enrollment Proof (JPG, PNG, PDF - Max 10MB)"
                         currentFile={fileUploads.universityId}
                         required={true}
+                        error={getFieldError('universityId')}
                     />
                     {getFieldError('universityId') && (
                         <motion.p
@@ -1107,7 +1118,7 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
                         <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 mr-2 flex-shrink-0 mt-0.5" />
                         <div className="flex-1">
                             <p className="text-blue-800 dark:text-blue-200 text-sm">
-                                <strong>Note:</strong> University ID is required. CV/Resume is optional and can be uploaded later if needed.
+                                <strong>Note:</strong> Enrollment proof is required. CV/Resume is optional and can be uploaded later if needed.
                             </p>
                         </div>
                     </div>

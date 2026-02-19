@@ -5,11 +5,11 @@ export interface RegistrationData {
   firstName: string;
   lastName: string;
   gender: 'Male' | 'Female' | '';
-  nationality: 'Egyptian' | 'Other' | '';
+  nationality: 'Egyptian' | 'Other' | 'egyptian' | 'other' | '';
   email: string;
   phone: string;
   personalId: string;
-  
+
   // Academic Information
   university: string;
   customUniversity?: string;
@@ -17,11 +17,11 @@ export interface RegistrationData {
   degreeLevel: 'student' | 'graduate' | '';
   program: string;
   classYear?: string;
-  
+
   // Event & Volunteer Information
   howDidYouHear: string;
   volunteerId?: string;
-  
+
   // Account Security
   password: string;
   confirmPassword: string;

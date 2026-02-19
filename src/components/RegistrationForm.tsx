@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { User, GraduationCap, ChevronRight, CheckCircle, AlertCircle, FileText, X, LogOut, Mail, Lock, UserPlus } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { RegistrationData, ValidationError, FileUpload as FileUploadType } from '../types';
-import { FACULTIES, CLASS_YEARS, HOW_DID_YOU_HEAR_OPTIONS } from '../utils/constants';
+import { FACULTIES, CLASS_YEARS, HOW_DID_YOU_HEAR_OPTIONS, UNIVERSITIES } from '../utils/constants';
 import { validatePhone, validatePersonalId, validateVolunteerId, validateEmail, validatePassword, validateConfirmPassword, validateName } from '../utils/validation';
 import { uploadFile, cleanupUploadedFiles, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -120,7 +120,6 @@ const FileUpload: React.FC<{
               onChange={handleFileChange}
               className="hidden"
               id={`file-${label.replace(/\s+/g, '-').toLowerCase()}`}
-              required={required}
             />
             <label
               htmlFor={`file-${label.replace(/\s+/g, '-').toLowerCase()}`}
@@ -231,14 +230,7 @@ export const RegistrationForm: React.FC = () => {
 
   const totalSections = sections.length;
 
-  const universities = [
-    'Ain Shams University',
-    'Helwan University',
-    'Canadian Ahram University',
-    'Banha University',
-    'Cairo University',
-    'Other'
-  ];
+
 
   const showErrorPopup = useCallback((message: string, type: 'error' | 'warning' | 'success' = 'error') => {
     setErrorPopup({ message, type });
@@ -782,7 +774,7 @@ export const RegistrationForm: React.FC = () => {
             }`}
         >
           <option value="">Select university</option>
-          {universities.map(uni => (
+          {UNIVERSITIES.map(uni => (
             <option key={uni} value={uni}>{uni}</option>
           ))}
         </select>
@@ -936,8 +928,17 @@ export const RegistrationForm: React.FC = () => {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            University ID *
+            Enrollment Proof <br />
+            <span className="text-gray-500 font-normal">(University ID, Graduation Certificate, UMS screenshot with full name and grades) *</span>
           </label>
+
+          <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800 rounded-lg flex items-start">
+            <AlertCircle className="w-5 h-5 text-yellow-600 dark:text-yellow-400 mr-2 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-yellow-800 dark:text-yellow-200">
+              Be sure to upload valid enrollment proof, if not you will be directed to payment link
+            </p>
+          </div>
+
           <FileUpload
             accept=".jpg,.jpeg,.png,.pdf"
             maxSize={10 * 1024 * 1024}
@@ -946,7 +947,7 @@ export const RegistrationForm: React.FC = () => {
               setErrors(prev => prev.filter(error => error.field !== 'universityId'));
             }}
             onFileRemove={() => setFileUploads(prev => ({ ...prev, universityId: undefined }))}
-            label="Upload University ID (JPG, PNG, PDF - Max 10MB)"
+            label="Upload Enrollment Proof (JPG, PNG, PDF - Max 10MB)"
             currentFile={fileUploads.universityId}
             required={true}
           />

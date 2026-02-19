@@ -110,6 +110,7 @@ interface VolunteerFormData {
     confirmPassword: string;
     phone: string;
     personalId: string;
+    nationality: string;
 
     teamId: string;
     gender: string;
@@ -138,6 +139,7 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
         confirmPassword: '',
         phone: '',
         personalId: '',
+        nationality: '',
 
         teamId: '',
         gender: '',
@@ -210,8 +212,16 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             const phoneError = validatePhone(formData.phone);
             if (phoneError) validationErrors.push({ field: 'phone', message: phoneError });
 
-            const personalIdError = validatePersonalId(formData.personalId);
-            if (personalIdError) validationErrors.push({ field: 'personalId', message: personalIdError });
+            if (!formData.nationality) validationErrors.push({ field: 'nationality', message: 'Nationality is required' });
+
+            if (formData.nationality === 'egyptian') {
+                const personalIdError = validatePersonalId(formData.personalId);
+                if (personalIdError) validationErrors.push({ field: 'personalId', message: personalIdError });
+            } else {
+                if (!formData.personalId || !formData.personalId.trim()) {
+                    validationErrors.push({ field: 'personalId', message: 'Personal ID / Passport number is required' });
+                }
+            }
 
             const genderError = validateGender(formData.gender);
             if (genderError) validationErrors.push({ field: 'gender', message: genderError });
@@ -615,8 +625,8 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                         onChange={(e) => updateField('personalId', e.target.value)}
                         className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white dark:placeholder-gray-400 ${getFieldError('personalId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                             }`}
-                        placeholder="14-digit Egyptian ID"
-                        maxLength={14}
+                        placeholder="Personal ID / Passport number"
+                        maxLength={formData.nationality === 'egyptian' ? 14 : undefined}
                     />
                     {getFieldError('personalId') && (
                         <motion.p
@@ -631,6 +641,35 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.18 }}
+                >
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Nationality *
+                    </label>
+                    <select
+                        value={formData.nationality}
+                        onChange={(e) => updateField('nationality', e.target.value)}
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('nationality') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                            }`}
+                    >
+                        <option value="">Select nationality</option>
+                        <option value="egyptian">Egyptian</option>
+                        <option value="other">Other</option>
+                    </select>
+                    {getFieldError('nationality') && (
+                        <motion.p
+                            initial={{ opacity: 0, y: -5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="mt-1 text-sm text-red-600"
+                        >
+                            {getFieldError('nationality')}
+                        </motion.p>
+                    )}
+                </motion.div>
+
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -661,7 +700,7 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                     )}
                 </motion.div>
             </div>
-        </motion.div>
+        </motion.div >
     );
 
     const renderRoleSelection = () => (
