@@ -27,8 +27,12 @@ import {
   Check,
   Clock,
   Users,
-  Send
+  Send,
+  Briefcase,
+  Eye,
+  ChevronRight
 } from 'lucide-react';
+import JobApplicantsModal from '../../components/employer/JobApplicantsModal';
 
 // --- Animation Variants ---
 const containerVariants: Variants = {
@@ -63,6 +67,39 @@ interface Company {
   partner_type: 'platinum' | 'gold' | 'silver' | 'bronze' | 'startup' | null;
   company_key: string | null;
   created_at: string | null;
+}
+
+interface AdminJob {
+  id: string;
+  title: string;
+  company_id: string;
+  employer_id: string;
+  event_id: string;
+  job_type: string;
+  location: string;
+  experience_level: string;
+  employment_mode: string;
+  posted_at: string;
+  is_active: boolean;
+  no_of_applicants: number;
+  description: string;
+  required_skills: string;
+  company_name?: string;
+  company_logo?: string | null;
+}
+
+interface AdminEvent {
+  id: string;
+  name: string;
+  event_type: string | null;
+  start_date: string;
+  end_date: string;
+  status: string;
+  allow_non_asu_attendees: boolean;
+  non_asu_ticket_price: number;
+  venue_name: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 interface Speaker {
@@ -132,6 +169,19 @@ const SESSION_TYPE_COLORS: Record<string, string> = {
   other: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300',
 };
 
+const JOB_TYPE_COLORS: Record<string, string> = {
+  'full-time': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  'Full-Time': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  'part-time': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  'Part-Time': 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  'internship': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  'Internship': 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  'contract': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  'Contract': 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  'freelance': 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300',
+  'Freelance': 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300',
+};
+
 const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
 export function AdminPanel() {
@@ -156,10 +206,34 @@ export function AdminPanel() {
   // Modal states
   const [showAddCompanyModal, setShowAddCompanyModal] = useState(false);
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
-  const [showAddEventModal, setShowAddEventModal] = useState(false);
   const [showAddMapModal, setShowAddMapModal] = useState(false);
   const [showAddJobModal, setShowAddJobModal] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+
+  // ===== JOBS STATE =====
+  const [jobs, setJobs] = useState<AdminJob[]>([]);
+  const [isLoadingJobs, setIsLoadingJobs] = useState(false);
+  const [jobSearchQuery, setJobSearchQuery] = useState('');
+  const [selectedJob, setSelectedJob] = useState<AdminJob | null>(null);
+  const [showJobDetailModal, setShowJobDetailModal] = useState(false);
+  const [showJobApplicantsModal, setShowJobApplicantsModal] = useState(false);
+
+  // ===== EVENTS STATE =====
+  const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [selectedEvent, setSelectedEvent] = useState<AdminEvent | null>(null);
+  const [showEventDetailModal, setShowEventDetailModal] = useState(false);
+
+  // Add/Edit Event State
+  const [showAddEditEventModal, setShowAddEditEventModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<AdminEvent | null>(null);
+  const [eventForm, setEventForm] = useState({
+    name: '', event_type: '', start_date: '', end_date: '',
+    status: 'draft', venue_name: '', allow_non_asu_attendees: false, non_asu_ticket_price: 0
+  });
+  const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
+  const [eventFormError, setEventFormError] = useState('');
 
   // ===== DASHBOARD STATS STATE =====
   const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
@@ -309,6 +383,61 @@ export function AdminPanel() {
     finally { setIsLoadingCompanies(false); }
   }, []);
 
+  // ===== JOBS DATA FETCHING =====
+  const fetchJobs = useCallback(async () => {
+    setIsLoadingJobs(true);
+    try {
+      const { data, error } = await supabase
+        .from('job_positions')
+        .select(`
+          *,
+          job_applications(count),
+          companies:company_id(company_name, logo_url)
+        `)
+        .eq('event_id', EVENT_ID)
+        .order('posted_at', { ascending: false });
+
+      if (error) { console.error('Error fetching jobs:', error); return; }
+
+      const mappedJobs: AdminJob[] = (data || []).map((job: any) => ({
+        id: job.id,
+        title: job.title,
+        company_id: job.company_id,
+        employer_id: job.employer_id,
+        event_id: job.event_id,
+        job_type: job.job_type,
+        location: job.location,
+        experience_level: job.experience_level,
+        employment_mode: job.employment_mode,
+        posted_at: job.posted_at,
+        is_active: job.is_active,
+        no_of_applicants: job.job_applications?.[0]?.count || 0,
+        description: job.description,
+        required_skills: job.required_skills,
+        company_name: job.companies?.company_name || 'Unknown Company',
+        company_logo: job.companies?.logo_url || null,
+      }));
+
+      setJobs(mappedJobs);
+    } catch (err) { console.error('Error fetching jobs:', err); }
+    finally { setIsLoadingJobs(false); }
+  }, []);
+
+  // ===== EVENTS DATA FETCHING =====
+  const fetchEvents = useCallback(async () => {
+    setIsLoadingEvents(true);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('start_date', { ascending: false });
+
+      if (error) { console.error('Error fetching events:', error); return; }
+      setEvents(data || []);
+    } catch (err) { console.error('Error fetching events:', err); }
+    finally { setIsLoadingEvents(false); }
+  }, []);
+
   // ===== STATISTICS FETCHING =====
   const fetchStatistics = useCallback(async () => {
     setIsLoadingStatistics(true);
@@ -395,8 +524,10 @@ export function AdminPanel() {
   useEffect(() => {
     if (activeTab === 'sessions') { fetchSessions(); fetchSpeakers(); }
     if (activeTab === 'companies') { fetchCompanies(); }
+    if (activeTab === 'jobs') { fetchJobs(); }
+    if (activeTab === 'events') { fetchEvents(); }
     if (activeTab === 'statistics') { fetchStatistics(); }
-  }, [activeTab, fetchSessions, fetchSpeakers, fetchCompanies, fetchStatistics]);
+  }, [activeTab, fetchSessions, fetchSpeakers, fetchCompanies, fetchJobs, fetchEvents, fetchStatistics]);
 
   // ===== UNIQUE COMPANY KEY GENERATION =====
   const generateUniqueCompanyKey = async (): Promise<string> => {
@@ -415,6 +546,77 @@ export function AdminPanel() {
       attempts++;
     }
     return key;
+  };
+
+  // ===== OPEN EDIT EVENT =====
+  const openEditEvent = (event: AdminEvent) => {
+    setEditingEvent(event);
+    setEventForm({
+      name: event.name || '',
+      event_type: event.event_type || '',
+      start_date: event.start_date ? new Date(event.start_date).toISOString().slice(0, 16) : '',
+      end_date: event.end_date ? new Date(event.end_date).toISOString().slice(0, 16) : '',
+      status: event.status || 'draft',
+      venue_name: event.venue_name || '',
+      allow_non_asu_attendees: event.allow_non_asu_attendees || false,
+      non_asu_ticket_price: event.non_asu_ticket_price || 0,
+    });
+    setEventFormError('');
+    setShowAddEditEventModal(true);
+  };
+
+  // ===== ADD/EDIT EVENT HANDLER =====
+  const handleAddEditEvent = async () => {
+    if (!eventForm.name.trim()) {
+      setEventFormError('Event name is required.');
+      return;
+    }
+    if (!eventForm.start_date || !eventForm.end_date) {
+      setEventFormError('Start date and end date are required.');
+      return;
+    }
+    if (new Date(eventForm.start_date) >= new Date(eventForm.end_date)) {
+      setEventFormError('End date must be after start date.');
+      return;
+    }
+
+    setIsSubmittingEvent(true);
+    setEventFormError('');
+
+    try {
+      const data: any = {
+        name: eventForm.name.trim(),
+        event_type: eventForm.event_type.trim() || null,
+        start_date: new Date(eventForm.start_date).toISOString(),
+        end_date: new Date(eventForm.end_date).toISOString(),
+        status: eventForm.status,
+        venue_name: eventForm.venue_name.trim() || null,
+        allow_non_asu_attendees: eventForm.allow_non_asu_attendees,
+        non_asu_ticket_price: eventForm.allow_non_asu_attendees ? eventForm.non_asu_ticket_price : 0,
+      };
+
+      if (editingEvent) {
+        data.updated_at = new Date().toISOString();
+        const { error } = await supabase.from('events').update(data).eq('id', editingEvent.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('events').insert(data);
+        if (error) throw error;
+      }
+
+      setEventForm({
+        name: '', event_type: '', start_date: '', end_date: '',
+        status: 'draft', venue_name: '', allow_non_asu_attendees: false, non_asu_ticket_price: 0
+      });
+      setShowAddEditEventModal(false);
+      setEditingEvent(null);
+      fetchEvents();
+    } catch (err: any) {
+      console.error('Error saving event:', err);
+      setEventFormError(err.message || 'Failed to save event');
+    } finally {
+      setIsSubmittingEvent(false);
+    }
   };
 
   // ===== ADD COMPANY HANDLER =====
@@ -1024,52 +1226,518 @@ export function AdminPanel() {
   );
 
   // ===== EVENTS TAB =====
+  const filteredEvents = events.filter((e) => {
+    if (!eventSearchQuery.trim()) return true;
+    const q = eventSearchQuery.toLowerCase();
+    return (
+      e.name.toLowerCase().includes(q) ||
+      (e.event_type && e.event_type.toLowerCase().includes(q)) ||
+      (e.venue_name && e.venue_name.toLowerCase().includes(q))
+    );
+  });
+
+  const activeEventsCount = events.filter(e => e.status === 'published' && new Date(e.end_date) >= new Date()).length;
+  const upcomingEventsCount = events.filter(e => new Date(e.start_date) > new Date()).length;
+
   const renderEvents = () => (
-    <div className="space-y-6">
-      {/* Header with Add Buttons */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Events</h2>
-        <div className="flex gap-3">
+    <motion.div
+      key="events"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      className="px-4 sm:px-6 lg:px-8 py-8 space-y-6"
+    >
+      {/* Header */}
+      <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center shrink-0">
+            <Megaphone className="w-6 h-6 text-red-600 dark:text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Events</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Manage all events and career fairs</p>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-red-500 shadow-sm dark:text-white"
+              placeholder="Search events..."
+              type="text"
+              value={eventSearchQuery}
+              onChange={(e) => setEventSearchQuery(e.target.value)}
+            />
+          </div>
           <button
-            onClick={() => setShowAddMapModal(true)}
-            className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md shadow-red-500/20"
-          >
-            <span className="material-symbols-outlined">map</span>
-            Add Map
-          </button>
-          <button
-            onClick={() => setShowAddEventModal(true)}
-            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md shadow-red-500/20"
+            onClick={() => {
+              setEditingEvent(null);
+              setEventForm({
+                name: '', event_type: '', start_date: '', end_date: '',
+                status: 'draft', venue_name: '', allow_non_asu_attendees: false, non_asu_ticket_price: 0
+              });
+              setEventFormError('');
+              setShowAddEditEventModal(true);
+            }}
+            className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-red-500/20"
           >
             <Plus className="h-5 w-5" />
             Add Event
           </button>
         </div>
-      </div>
+      </motion.div>
 
-      {/* Events Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {([] as any[]).map((event) => (
-          <div
-            key={event.id}
-            className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="bg-purple-100 dark:bg-purple-900/30 p-2 rounded-lg">
-                <Megaphone className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-              </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400">{event.date}</span>
+      {/* Stats Bar */}
+      {events.length > 0 && (
+        <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-900/50 flex items-center justify-center">
+              <Megaphone className="w-5 h-5 text-slate-600 dark:text-slate-400" />
             </div>
-            <h3 className="font-bold text-lg text-slate-900 dark:text-white mb-2">{event.title}</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{event.description}</p>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-500 dark:text-slate-400">{event.location}</span>
-              <span className="font-semibold text-slate-900 dark:text-white">{event.time}</span>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Events</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-white">{events.length}</p>
             </div>
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/20 flex items-center justify-center">
+              <Check className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Active/Published</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-white">{activeEventsCount}</p>
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center">
+              <Calendar className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Upcoming</p>
+              <p className="text-xl font-bold text-slate-900 dark:text-white">{upcomingEventsCount}</p>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Loading State */}
+      {isLoadingEvents ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Loading events...</p>
+        </div>
+      ) : events.length === 0 ? (
+        <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+          <span className="material-symbols-outlined text-7xl text-slate-300 dark:text-slate-700 mb-4 block">event_busy</span>
+          <p className="text-lg font-semibold text-slate-600 dark:text-slate-400">No events found</p>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">Create an event to get started</p>
+        </div>
+      ) : filteredEvents.length === 0 ? (
+        <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+          <span className="material-symbols-outlined text-7xl text-slate-300 dark:text-slate-700 mb-4 block">search_off</span>
+          <p className="text-lg font-semibold text-slate-600 dark:text-slate-400">No events match your search</p>
+        </div>
+      ) : (
+        /* Events Grid */
+        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filteredEvents.map((event, index) => {
+            const startDate = new Date(event.start_date);
+            const endDate = new Date(event.end_date);
+            const isOngoing = startDate <= new Date() && endDate >= new Date();
+            const isUpcoming = startDate > new Date();
+
+            return (
+              <motion.div
+                key={event.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 * index, duration: 0.3 }}
+                whileHover={{ y: -5 }}
+                onClick={() => {
+                  setSelectedEvent(event);
+                  setShowEventDetailModal(true);
+                }}
+                className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-xl transition-all duration-300 cursor-pointer group flex flex-col justify-between h-full"
+              >
+                <div className="space-y-4">
+                  {/* Top Row: Icon + Status Badges */}
+                  <div className="flex items-start justify-between">
+                    <div className={`p-3 rounded-xl ${isOngoing ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' :
+                      isUpcoming ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' :
+                        'bg-slate-100 text-slate-600 dark:bg-slate-900/50 dark:text-slate-400'
+                      }`}>
+                      <Calendar className="w-6 h-6" />
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${event.status === 'published' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                        event.status === 'archived' ? 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' :
+                          'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                        }`}>
+                        {event.status}
+                      </span>
+                      {event.event_type && (
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-50 text-slate-600 dark:bg-slate-700/50 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          {event.event_type.charAt(0).toUpperCase() + event.event_type.slice(1).replace('_', ' ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Title */}
+                  <h3 className="font-bold text-xl text-slate-900 dark:text-white leading-tight group-hover:text-red-600 transition-colors line-clamp-2">
+                    {event.name}
+                  </h3>
+
+                  {/* Meta Details */}
+                  <div className="space-y-2 mt-4">
+                    <div className="flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-400">
+                      <Clock className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                      <div className="flex flex-col">
+                        <span>{startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - {endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                        <span className="text-xs text-slate-500">
+                          {startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} to {endDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {event.venue_name && (
+                      <div className="flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-400">
+                        <MapPin className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                        <span className="truncate">{event.venue_name}</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2.5 text-sm text-slate-600 dark:text-slate-400">
+                      <Users className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                      <span>{event.allow_non_asu_attendees ? `Public (Non-ASU: ${event.non_asu_ticket_price} EGP)` : 'ASU Students Only'}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-700 flex justify-end">
+                  <div className="flex items-center gap-1 text-red-600 dark:text-red-400 text-sm font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>View Details</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </motion.div>
+      )}
+    </motion.div>
+  );
+
+  // ===== EVENT DETAIL MODAL =====
+  const renderEventDetailModal = () => (
+    <AnimatePresence>
+      {showEventDetailModal && selectedEvent && (
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowEventDetailModal(false)}
+          />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ type: "spring", duration: 0.5 }}
+            className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden relative z-10 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative bg-gradient-to-br from-red-600 to-red-800 px-8 pt-10 pb-12">
+              <motion.button
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setShowEventDetailModal(false)}
+                className="absolute top-4 right-4 text-white/80 hover:text-white bg-black/20 hover:bg-black/40 rounded-full p-2 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </motion.button>
+
+              <div className="flex gap-4 items-start">
+                <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/20 shadow-lg shrink-0">
+                  <Calendar className="w-10 h-10 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${selectedEvent.status === 'published' ? 'bg-emerald-500/20 text-emerald-100 border border-emerald-500/30' :
+                      selectedEvent.status === 'archived' ? 'bg-slate-500/20 text-slate-200 border border-slate-500/30' :
+                        'bg-amber-500/20 text-amber-100 border border-amber-500/30'
+                      }`}>
+                      {selectedEvent.status}
+                    </span>
+                    {selectedEvent.event_type && (
+                      <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-white/10 text-white border border-white/20">
+                        {selectedEvent.event_type.charAt(0).toUpperCase() + selectedEvent.event_type.slice(1).replace('_', ' ')}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-3xl font-bold text-white leading-tight">{selectedEvent.name}</h3>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-8 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700/50 flex flex-col gap-1">
+                  <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-1">
+                    <Clock className="w-4 h-4" />
+                    <span className="text-xs font-semibold uppercase tracking-wider">Start</span>
+                  </div>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {new Date(selectedEvent.start_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                  <span className="text-sm text-slate-600 dark:text-slate-300">
+                    {new Date(selectedEvent.start_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700/50 flex flex-col gap-1">
+                  <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 mb-1">
+                    <Clock className="w-4 h-4" />
+                    <span className="text-xs font-semibold uppercase tracking-wider">End</span>
+                  </div>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {new Date(selectedEvent.end_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                  <span className="text-sm text-slate-600 dark:text-slate-300">
+                    {new Date(selectedEvent.end_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-2">
+                <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50">
+                  <MapPin className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Venue & Location</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{selectedEvent.venue_name || 'Not specified'}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50">
+                  <Users className="w-5 h-5 text-purple-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Attendance Rules</p>
+                    {selectedEvent.allow_non_asu_attendees ? (
+                      <div>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Open to ASU students and external attendees.</p>
+                        <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
+                          Non-ASU Ticket Price: {selectedEvent.non_asu_ticket_price} EGP
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Restricted to ASU students only.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-6 border-t border-slate-200 dark:border-slate-800 mt-6">
+                <button
+                  onClick={() => setShowEventDetailModal(false)}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => {
+                    setShowEventDetailModal(false);
+                    openEditEvent(selectedEvent);
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 shadow-md transition-colors flex items-center gap-2"
+                >
+                  <Pencil className="w-4 h-4" />
+                  Edit Event
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+
+  // ===== ADD/EDIT EVENT MODAL =====
+  const renderAddEditEventModal = () => (
+    <AnimatePresence>
+      {showAddEditEventModal && (
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !isSubmittingEvent && setShowAddEditEventModal(false)}
+          />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                {editingEvent ? 'Edit Event' : 'Add New Event'}
+              </h2>
+              <button
+                onClick={() => !isSubmittingEvent && setShowAddEditEventModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-5">
+              {eventFormError && (
+                <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-3 rounded-lg text-sm border border-red-200 dark:border-red-800/30">
+                  {eventFormError}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Event Name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={eventForm.name}
+                    onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })}
+                    className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none"
+                    placeholder="e.g., Annual Career Fair 2026"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Event Type</label>
+                  <input
+                    type="text"
+                    value={eventForm.event_type}
+                    onChange={(e) => setEventForm({ ...eventForm, event_type: e.target.value })}
+                    className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all outline-none"
+                    placeholder="e.g., career_fair"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Status</label>
+                  <select
+                    value={eventForm.status}
+                    onChange={(e) => setEventForm({ ...eventForm, status: e.target.value })}
+                    className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 transition-all outline-none"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5 md:col-span-2">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Venue Name</label>
+                  <input
+                    type="text"
+                    value={eventForm.venue_name}
+                    onChange={(e) => setEventForm({ ...eventForm, venue_name: e.target.value })}
+                    className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 transition-all outline-none"
+                    placeholder="e.g., Main Campus Expo Hall"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Start Date & Time <span className="text-red-500">*</span></label>
+                  <input
+                    type="datetime-local"
+                    value={eventForm.start_date}
+                    onChange={(e) => setEventForm({ ...eventForm, start_date: e.target.value })}
+                    className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 transition-all outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">End Date & Time <span className="text-red-500">*</span></label>
+                  <input
+                    type="datetime-local"
+                    value={eventForm.end_date}
+                    onChange={(e) => setEventForm({ ...eventForm, end_date: e.target.value })}
+                    className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 transition-all outline-none"
+                  />
+                </div>
+
+                <div className="space-y-4 md:col-span-2 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 mt-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-semibold text-slate-900 dark:text-white">Allow Non-ASU Attendees</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Toggle to open event registration to external attendees</p>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="sr-only peer"
+                        checked={eventForm.allow_non_asu_attendees}
+                        onChange={(e) => setEventForm({ ...eventForm, allow_non_asu_attendees: e.target.checked })}
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                    </label>
+                  </div>
+
+                  {eventForm.allow_non_asu_attendees && (
+                    <div className="pt-2 border-t border-slate-200 dark:border-slate-700 space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Ticket Price (EGP)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={eventForm.non_asu_ticket_price}
+                        onChange={(e) => setEventForm({ ...eventForm, non_asu_ticket_price: parseInt(e.target.value) || 0 })}
+                        className="w-full border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-2.5 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 transition-all outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3 bg-slate-50 dark:bg-slate-900/50">
+              <button
+                type="button"
+                onClick={() => setShowAddEditEventModal(false)}
+                disabled={isSubmittingEvent}
+                className="px-5 py-2.5 rounded-xl font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleAddEditEvent}
+                disabled={isSubmittingEvent}
+                className="px-5 py-2.5 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center gap-2 transition-colors disabled:opacity-50 shadow-md shadow-red-500/20"
+              >
+                {isSubmittingEvent ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Check className="w-5 h-5" />
+                )}
+                {editingEvent ? 'Save Changes' : 'Create Event'}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 
   // ===== COMPANIES TAB =====
@@ -1254,62 +1922,377 @@ export function AdminPanel() {
   );
 
   // ===== JOBS TAB =====
+  const filteredJobs = jobs.filter((job) => {
+    const q = jobSearchQuery.toLowerCase();
+    if (!q) return true;
+    return (
+      job.title.toLowerCase().includes(q) ||
+      (job.company_name || '').toLowerCase().includes(q) ||
+      (job.location || '').toLowerCase().includes(q) ||
+      (job.job_type || '').toLowerCase().includes(q)
+    );
+  });
+
+  const totalApplicants = jobs.reduce((sum, job) => sum + job.no_of_applicants, 0);
+  const activeJobs = jobs.filter(j => j.is_active).length;
+
   const renderJobs = () => (
-    <div className="space-y-6">
-      {/* Header with Add Button */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Job Opportunities</h2>
-        <button
-          onClick={() => setShowAddJobModal(true)}
-          className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md"
-        >
-          <Plus className="h-5 w-5" />
-          Add Job
-        </button>
-      </div>
+    <motion.div
+      key="jobs"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+      exit="exit"
+      className="px-4 sm:px-6 lg:px-8 py-8 space-y-6"
+    >
+      {/* Header */}
+      <motion.div variants={itemVariants} className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center shrink-0">
+            <Briefcase className="w-6 h-6 text-red-600 dark:text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Job Opportunities</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">Manage all job postings across companies</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="relative flex-1 md:w-72 md:flex-initial">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+            <input
+              className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-red-500 shadow-sm dark:text-white"
+              placeholder="Search jobs, companies..."
+              type="text"
+              value={jobSearchQuery}
+              onChange={(e) => setJobSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+      </motion.div>
 
-      {/* Jobs Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {([] as any[]).map((job) => (
-          <div
-            key={job.id}
-            className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="bg-orange-100 dark:bg-orange-900/30 p-2 rounded-lg">
-                <span className="material-symbols-outlined text-orange-600 dark:text-orange-400 text-2xl">
-                  work
-                </span>
+      {/* Stats Bar */}
+      {jobs.length > 0 && (
+        <motion.div variants={itemVariants} className="grid grid-cols-3 gap-4">
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
+                <Briefcase className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
-              <span className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-xs font-bold px-3 py-1 rounded-full">
-                {job.type}
-              </span>
-            </div>
-
-            <h3 className="font-bold text-lg text-slate-900 dark:text-white mb-2">{job.title}</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">{job.company}</p>
-            <p className="text-xs text-slate-500 dark:text-slate-500 mb-4 flex items-center gap-1">
-              <span className="material-symbols-outlined text-sm">location_on</span>
-              {job.location}
-            </p>
-
-            <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400">
-                  people
-                </span>
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                  {job.applicants} applicants
-                </span>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Jobs</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{jobs.length}</p>
               </div>
-              <button className="text-orange-600 dark:text-orange-400 text-sm font-semibold hover:underline">
-                View
-              </button>
             </div>
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/20 flex items-center justify-center">
+                <Check className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Active</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{activeJobs}</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center">
+                <Users className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Applications</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalApplicants}</p>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Loading State */}
+      {isLoadingJobs ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Loading jobs...</p>
+        </div>
+
+      ) : jobs.length === 0 ? (
+        /* Empty State */
+        <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+          <span className="material-symbols-outlined text-7xl text-slate-300 dark:text-slate-700 mb-4 block">work_off</span>
+          <p className="text-lg font-semibold text-slate-600 dark:text-slate-400">No jobs posted yet</p>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">Job postings from companies will appear here</p>
+        </div>
+
+      ) : filteredJobs.length === 0 ? (
+        /* No Search Results */
+        <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-100 dark:border-slate-800">
+          <span className="material-symbols-outlined text-7xl text-slate-300 dark:text-slate-700 mb-4 block">search_off</span>
+          <p className="text-lg font-semibold text-slate-600 dark:text-slate-400">No jobs match your search</p>
+          <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">Try a different keyword</p>
+        </div>
+
+      ) : (
+        /* Jobs Grid */
+        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+          {filteredJobs.map((job, index) => (
+            <motion.div
+              key={job.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 * index, duration: 0.3 }}
+              whileHover={{ y: -5 }}
+              onClick={() => {
+                setSelectedJob(job);
+                setShowJobDetailModal(true);
+              }}
+              className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-xl transition-all duration-300 cursor-pointer group flex flex-col justify-between h-full"
+            >
+              <div className="space-y-4">
+                {/* Top Row: Company Logo + Badges */}
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    {job.company_logo ? (
+                      <img src={job.company_logo} alt={job.company_name} className="w-10 h-10 rounded-xl object-cover border border-slate-200 dark:border-slate-700" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center">
+                        <Building2 className="w-5 h-5 text-red-600 dark:text-red-400" />
+                      </div>
+                    )}
+                    <p className="text-sm font-medium text-slate-600 dark:text-slate-400">{job.company_name}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!job.is_active && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">Inactive</span>
+                    )}
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${JOB_TYPE_COLORS[job.job_type] || 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300'}`}>
+                      {job.job_type ? job.job_type.charAt(0).toUpperCase() + job.job_type.slice(1).replace('-', ' ') : 'N/A'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Title */}
+                <h3 className="font-bold text-lg text-slate-900 dark:text-white leading-tight group-hover:text-red-600 transition-colors">{job.title}</h3>
+
+                {/* Meta Info */}
+                <div className="space-y-1.5">
+                  {job.location && (
+                    <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                      <MapPin className="w-4 h-4" />
+                      <span>{job.location}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">apartment</span>
+                      {job.employment_mode ? job.employment_mode.charAt(0).toUpperCase() + job.employment_mode.slice(1).replace('-', ' ') : 'N/A'}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm">trending_up</span>
+                      {job.experience_level ? job.experience_level.charAt(0).toUpperCase() + job.experience_level.slice(1) : 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="mt-6 flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-700">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-red-500" />
+                  <span className="text-sm font-semibold text-slate-900 dark:text-white">
+                    {job.no_of_applicants} applicant{job.no_of_applicants !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 text-red-600 dark:text-red-400 text-sm font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span>View</span>
+                  <ChevronRight className="w-4 h-4" />
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
+      )}
+    </motion.div>
+  );
+
+  // ===== JOB DETAIL MODAL =====
+  const renderJobDetailModal = () => (
+    <AnimatePresence>
+      {showJobDetailModal && selectedJob && (
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowJobDetailModal(false)}
+          />
+
+          {/* Card */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            transition={{ type: "spring", duration: 0.5 }}
+            className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden relative z-10 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Gradient */}
+            <div className="relative bg-gradient-to-r from-red-600 to-red-500 px-8 pt-8 pb-14">
+              <motion.button
+                initial={{ opacity: 0, scale: 0 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.2 }}
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setShowJobDetailModal(false)}
+                className="absolute top-4 right-4 text-white/80 hover:text-white bg-black/20 hover:bg-black/40 rounded-full p-2 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </motion.button>
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <p className="text-red-200 text-sm font-semibold uppercase tracking-wider mb-1">{selectedJob.company_name}</p>
+                <h3 className="text-2xl font-bold text-white">{selectedJob.title}</h3>
+              </motion.div>
+
+              {/* Icon */}
+              <motion.div
+                initial={{ scale: 0, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                transition={{ delay: 0.15, type: "spring" }}
+                className="absolute -bottom-8 right-8"
+              >
+                {selectedJob.company_logo ? (
+                  <img src={selectedJob.company_logo} alt={selectedJob.company_name} className="w-16 h-16 rounded-2xl border-4 border-white dark:border-slate-900 object-cover shadow-lg" />
+                ) : (
+                  <div className="w-16 h-16 rounded-2xl border-4 border-white dark:border-slate-900 bg-white dark:bg-slate-800 flex items-center justify-center shadow-lg">
+                    <Building2 className="w-8 h-8 text-red-600" />
+                  </div>
+                )}
+              </motion.div>
+            </div>
+
+            {/* Content */}
+            <div className="p-8 pt-12 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+              {/* Metadata Chips */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.25 }}
+                className="flex flex-wrap gap-2"
+              >
+                <span className={`text-xs font-bold px-3 py-1.5 rounded-full ${JOB_TYPE_COLORS[selectedJob.job_type] || 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300'}`}>
+                  {selectedJob.job_type ? selectedJob.job_type.charAt(0).toUpperCase() + selectedJob.job_type.slice(1).replace('-', ' ') : 'N/A'}
+                </span>
+                <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm">apartment</span>
+                  {selectedJob.employment_mode ? selectedJob.employment_mode.charAt(0).toUpperCase() + selectedJob.employment_mode.slice(1).replace('-', ' ') : 'N/A'}
+                </span>
+                <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm">trending_up</span>
+                  {selectedJob.experience_level ? selectedJob.experience_level.charAt(0).toUpperCase() + selectedJob.experience_level.slice(1) : 'N/A'}
+                </span>
+                {selectedJob.location && (
+                  <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    {selectedJob.location}
+                  </span>
+                )}
+                {!selectedJob.is_active && (
+                  <span className="text-xs font-bold px-3 py-1.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Inactive</span>
+                )}
+              </motion.div>
+
+              {/* Posted date */}
+              <motion.p
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+                className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                Posted {new Date(selectedJob.posted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </motion.p>
+
+              {/* Description */}
+              {selectedJob.description && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.35 }}
+                  className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-5"
+                >
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">Description</h4>
+                  <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap">{selectedJob.description}</p>
+                </motion.div>
+              )}
+
+              {/* Required Skills */}
+              {selectedJob.required_skills && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.4 }}
+                >
+                  <h4 className="text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-3">Required Skills</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedJob.required_skills.split(',').map((skill, i) => (
+                      <span key={i} className="text-xs font-medium px-3 py-1.5 rounded-full bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300 border border-red-200 dark:border-red-800/30">
+                        {skill.trim()}
+                      </span>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Applicants Section */}
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.45 }}
+                className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-5 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-purple-100 dark:bg-purple-900/20 flex items-center justify-center">
+                    <Users className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-slate-900 dark:text-white">{selectedJob.no_of_applicants} Applicant{selectedJob.no_of_applicants !== 1 ? 's' : ''}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">People who applied for this job</p>
+                  </div>
+                </div>
+                {selectedJob.no_of_applicants > 0 && (
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setShowJobDetailModal(false);
+                      setShowJobApplicantsModal(true);
+                    }}
+                    className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-5 py-2.5 rounded-xl font-semibold text-sm transition-colors shadow-lg shadow-red-600/20"
+                  >
+                    <Eye className="w-4 h-4" />
+                    View Applicants
+                  </motion.button>
+                )}
+              </motion.div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 
   // ===== SIMPLE MODALS (Placeholder for non-company modals) =====
@@ -2175,9 +3158,22 @@ export function AdminPanel() {
       {renderAddSessionModal()}
       {renderAnnouncementModal()}
 
-      <SimpleModal show={showAddEventModal} onClose={() => setShowAddEventModal(false)} title="Add Event" />
+      {renderJobDetailModal()}
+      {showJobApplicantsModal && selectedJob && (
+        <JobApplicantsModal
+          jobId={selectedJob.id}
+          jobTitle={selectedJob.title}
+          onClose={() => {
+            setShowJobApplicantsModal(false);
+            setSelectedJob(null);
+          }}
+        />
+      )}
+
+      {renderEventDetailModal()}
+      {renderAddEditEventModal()}
+
       <SimpleModal show={showAddMapModal} onClose={() => setShowAddMapModal(false)} title="Add Map" />
-      <SimpleModal show={showAddJobModal} onClose={() => setShowAddJobModal(false)} title="Add Job" />
 
       {showProfile && attendeeProfile && (
         <AttendeeProfileCard
