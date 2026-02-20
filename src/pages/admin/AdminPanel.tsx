@@ -24,10 +24,13 @@ import {
   Search,
   Pencil,
   Copy,
-  Check
+  Check,
+  Clock,
+  Users,
+  Send
 } from 'lucide-react';
 
-// --- Animation Variants (matching BuildTeamDashboard / tabsanimation pattern) ---
+// --- Animation Variants ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
@@ -62,7 +65,55 @@ interface Company {
   created_at: string | null;
 }
 
+interface Speaker {
+  id: string;
+  first_name: string;
+  last_name: string;
+  title: string;
+  linkedin_url: string | null;
+  photo_url: string | null;
+}
+
+interface Session {
+  id: string;
+  event_id: string;
+  speaker_id: string;
+  title: string;
+  description: string | null;
+  session_type: string;
+  start_time: string;
+  end_time: string;
+  room_name: string | null;
+  room_capacity: number | null;
+  max_attendees: number | null;
+  current_bookings: number;
+  is_full: boolean;
+  requires_booking: boolean;
+  status: string;
+  created_at: string | null;
+  speaker?: Speaker;
+}
+
+interface UserProfile {
+  id: string;
+  full_name: string;
+  phone: string;
+  personal_id: string;
+  email: string | null;
+}
+
+interface DashboardStats {
+  totalAttendees: number;
+  approvedAttendees: number;
+  todayEntries: number;
+  totalCompanies: number;
+  totalSessions: number;
+}
+
 const PARTNER_TYPE_OPTIONS = ['platinum', 'gold', 'silver', 'bronze', 'startup'] as const;
+const SESSION_TYPE_OPTIONS = ['keynote', 'workshop', 'panel', 'networking', 'competition', 'other'] as const;
+const SESSION_STATUS_OPTIONS = ['scheduled', 'ongoing', 'completed', 'cancelled'] as const;
+const ANNOUNCEMENT_TYPE_OPTIONS = ['general', 'urgent', 'update', 'reminder'] as const;
 
 const PARTNER_TYPE_COLORS: Record<string, string> = {
   platinum: 'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-100',
@@ -72,109 +123,16 @@ const PARTNER_TYPE_COLORS: Record<string, string> = {
   startup: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
 };
 
-const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
-
-// Mock Data
-const mockStats = {
-  currentInEvent: 1124,
-  maxInEvent: 1500,
-  currentInBuilding: 312,
-  maxInBuilding: 350,
-  totalRegistrations: 4850,
-  students: 3200,
-  graduates: 1650,
-  todayEntries: 2418,
-  peakHour: '10:00 AM',
-  peakCheckIns: 450
+const SESSION_TYPE_COLORS: Record<string, string> = {
+  keynote: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  workshop: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  panel: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  networking: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  competition: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  other: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300',
 };
 
-const mockSessions = [
-  {
-    id: '1',
-    title: 'Career Growth Strategies',
-    speaker: 'Dr. Sarah Johnson',
-    time: '10:00 AM - 11:30 AM',
-    location: 'Hall A',
-    attendees: 145,
-    capacity: 200
-  },
-  {
-    id: '2',
-    title: 'Tech Industry Insights',
-    speaker: 'Ahmed Hassan',
-    time: '2:00 PM - 3:30 PM',
-    location: 'Hall B',
-    attendees: 98,
-    capacity: 150
-  }
-];
-
-const mockEvents = [
-  {
-    id: '1',
-    title: 'Opening Ceremony',
-    date: '2025-10-19',
-    time: '9:00 AM',
-    location: 'Main Hall',
-    description: 'Official opening of ASU Career Week 2025'
-  },
-  {
-    id: '2',
-    title: 'Networking Night',
-    date: '2025-10-20',
-    time: '6:00 PM',
-    location: 'Garden Area',
-    description: 'Meet professionals and build connections'
-  }
-];
-
-const mockJobs = [
-  {
-    id: '1',
-    title: 'Senior Software Engineer',
-    company: 'Tech Corp',
-    location: 'Cairo, Egypt',
-    type: 'Full-time',
-    applicants: 45,
-    postedDate: '2025-10-15'
-  },
-  {
-    id: '2',
-    title: 'Marketing Manager',
-    company: 'Marketing Pro',
-    location: 'Remote',
-    type: 'Full-time',
-    applicants: 32,
-    postedDate: '2025-10-14'
-  },
-  {
-    id: '3',
-    title: 'Financial Analyst',
-    company: 'Finance Solutions',
-    location: 'Alexandria, Egypt',
-    type: 'Full-time',
-    applicants: 28,
-    postedDate: '2025-10-13'
-  },
-  {
-    id: '4',
-    title: 'UX Designer',
-    company: 'Tech Corp',
-    location: 'Cairo, Egypt',
-    type: 'Contract',
-    applicants: 51,
-    postedDate: '2025-10-12'
-  },
-  {
-    id: '5',
-    title: 'Data Scientist',
-    company: 'Tech Corp',
-    location: 'Hybrid',
-    type: 'Full-time',
-    applicants: 67,
-    postedDate: '2025-10-11'
-  }
-];
+const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
 export function AdminPanel() {
   const { user } = useAuth();
@@ -203,6 +161,41 @@ export function AdminPanel() {
   const [showAddJobModal, setShowAddJobModal] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
 
+  // ===== DASHBOARD STATS STATE =====
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
+    totalAttendees: 0, approvedAttendees: 0, todayEntries: 0, totalCompanies: 0, totalSessions: 0
+  });
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+
+  // ===== SESSIONS STATE =====
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [speakers, setSpeakers] = useState<Speaker[]>([]);
+
+  // Add Session form state
+  const [sessionForm, setSessionForm] = useState({
+    title: '', description: '', session_type: 'workshop' as string, speaker_id: '' as string,
+    start_time: '', end_time: '', room_name: '', max_attendees: '' as string,
+    requires_booking: false, status: 'scheduled' as string,
+    new_speaker_first_name: '', new_speaker_last_name: '', new_speaker_title: '',
+    new_speaker_linkedin: '', new_speaker_photo: '',
+  });
+  const [isSubmittingSession, setIsSubmittingSession] = useState(false);
+  const [sessionFormError, setSessionFormError] = useState('');
+  const [useNewSpeaker, setUseNewSpeaker] = useState(false);
+
+  // ===== ANNOUNCEMENT STATE =====
+  const [announcementForm, setAnnouncementForm] = useState({
+    title: '', content: '', announcement_type: 'general' as string,
+  });
+  const [announcementTargets, setAnnouncementTargets] = useState<string[]>([]);
+  const [isSubmittingAnnouncement, setIsSubmittingAnnouncement] = useState(false);
+  const [announcementFormError, setAnnouncementFormError] = useState('');
+  const [individualSearch, setIndividualSearch] = useState('');
+  const [individualResults, setIndividualResults] = useState<UserProfile[]>([]);
+  const [selectedIndividual, setSelectedIndividual] = useState<UserProfile | null>(null);
+  const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+
   // ===== COMPANIES STATE =====
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
@@ -213,14 +206,8 @@ export function AdminPanel() {
 
   // Add Company form state
   const [companyForm, setCompanyForm] = useState({
-    company_name: '',
-    industry: '',
-    email: '',
-    website: '',
-    description: '',
-    booth_number: '',
-    logo_url: '',
-    partner_type: '' as string,
+    company_name: '', industry: '', email: '', website: '',
+    description: '', booth_number: '', logo_url: '', partner_type: '' as string,
   });
   const [isSubmittingCompany, setIsSubmittingCompany] = useState(false);
   const [companyFormError, setCompanyFormError] = useState('');
@@ -228,46 +215,83 @@ export function AdminPanel() {
   // Edit Company state
   const [showEditCompanyModal, setShowEditCompanyModal] = useState(false);
   const [editCompanyForm, setEditCompanyForm] = useState({
-    company_name: '',
-    industry: '',
-    email: '',
-    website: '',
-    description: '',
-    booth_number: '',
-    logo_url: '',
-    partner_type: '' as string,
+    company_name: '', industry: '', email: '', website: '',
+    description: '', booth_number: '', logo_url: '', partner_type: '' as string,
   });
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
   const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
   const [editFormError, setEditFormError] = useState('');
+
+  // ===== DASHBOARD STATS FETCHING =====
+  const fetchDashboardStats = useCallback(async () => {
+    setIsLoadingStats(true);
+    try {
+      const [attendeesRes, approvedRes, todayRes, companiesRes, sessionsRes] = await Promise.all([
+        supabase.from('attendees').select('*', { count: 'exact', head: true }),
+        supabase.from('attendees').select('*', { count: 'exact', head: true }).eq('registration_status', 'approved'),
+        (() => {
+          const today = new Date(); today.setHours(0, 0, 0, 0);
+          const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+          return supabase.from('attendee_attendance').select('*', { count: 'exact', head: true })
+            .eq('event_id', EVENT_ID).gte('check_in_time', today.toISOString()).lt('check_in_time', tomorrow.toISOString());
+        })(),
+        supabase.from('companies').select('*', { count: 'exact', head: true }).eq('event_id', EVENT_ID),
+        supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('event_id', EVENT_ID),
+      ]);
+      setDashboardStats({
+        totalAttendees: attendeesRes.count || 0,
+        approvedAttendees: approvedRes.count || 0,
+        todayEntries: todayRes.count || 0,
+        totalCompanies: companiesRes.count || 0,
+        totalSessions: sessionsRes.count || 0,
+      });
+    } catch (err) { console.error('Error fetching dashboard stats:', err); }
+    finally { setIsLoadingStats(false); }
+  }, []);
+
+  // ===== SESSIONS FETCHING =====
+  const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    try {
+      const { data, error } = await supabase
+        .from('sessions')
+        .select('*, speaker:speaker_id(id, first_name, last_name, title, linkedin_url, photo_url)')
+        .eq('event_id', EVENT_ID)
+        .order('start_time', { ascending: true });
+      if (error) { console.error('Error fetching sessions:', error); return; }
+      setSessions(data || []);
+    } catch (err) { console.error('Error fetching sessions:', err); }
+    finally { setIsLoadingSessions(false); }
+  }, []);
+
+  const fetchSpeakers = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('speaker').select('*').order('first_name');
+      setSpeakers(data || []);
+    } catch (err) { console.error('Error fetching speakers:', err); }
+  }, []);
 
   // ===== COMPANIES DATA FETCHING =====
   const fetchCompanies = useCallback(async () => {
     setIsLoadingCompanies(true);
     try {
       const { data, error } = await supabase
-        .from('companies')
-        .select('*')
-        .eq('event_id', EVENT_ID)
+        .from('companies').select('*').eq('event_id', EVENT_ID)
         .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching companies:', error);
-        return;
-      }
+      if (error) { console.error('Error fetching companies:', error); return; }
       setCompanies(data || []);
-    } catch (err) {
-      console.error('Error fetching companies:', err);
-    } finally {
-      setIsLoadingCompanies(false);
-    }
+    } catch (err) { console.error('Error fetching companies:', err); }
+    finally { setIsLoadingCompanies(false); }
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'companies') {
-      fetchCompanies();
-    }
-  }, [activeTab, fetchCompanies]);
+    fetchDashboardStats();
+  }, [fetchDashboardStats]);
+
+  useEffect(() => {
+    if (activeTab === 'sessions') { fetchSessions(); fetchSpeakers(); }
+    if (activeTab === 'companies') { fetchCompanies(); }
+  }, [activeTab, fetchSessions, fetchSpeakers, fetchCompanies]);
 
   // ===== UNIQUE COMPANY KEY GENERATION =====
   const generateUniqueCompanyKey = async (): Promise<string> => {
@@ -420,25 +444,30 @@ export function AdminPanel() {
   const renderDashboard = () => (
     <div className="space-y-6">
       {/* Welcome Card */}
-      <div className="bg-gradient-to-br from-orange-400 to-orange-600 rounded-3xl p-8 md:p-10 text-white shadow-xl">
-        <h1 className="text-3xl md:text-4xl font-bold mb-3">Welcome, Admin</h1>
-        <p className="text-orange-50 text-lg mb-6 max-w-2xl">
-          Monitor and manage all aspects of the career fair event from one central hub.
-        </p>
-        <button
-          onClick={() => setShowProfile(true)}
-          className="bg-white text-orange-600 px-6 py-3 rounded-xl font-semibold hover:bg-orange-50 transition-all flex items-center gap-2 shadow-lg"
-        >
-          <UserCheck className="h-5 w-5" />
-          Show Profile
-        </button>
+      <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-3xl p-8 md:p-10 text-white shadow-xl shadow-red-500/20 relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-8 opacity-10">
+          <span className="material-symbols-outlined text-9xl text-white transform rotate-12">admin_panel_settings</span>
+        </div>
+        <div className="relative z-10">
+          <h1 className="text-3xl md:text-4xl font-bold mb-3">Welcome, Admin</h1>
+          <p className="text-red-100 text-lg mb-6 max-w-2xl">
+            Monitor and manage all aspects of the career fair event from one central hub.
+          </p>
+          <button
+            onClick={() => setShowProfile(true)}
+            className="bg-white text-red-600 px-6 py-3 rounded-xl font-semibold hover:bg-red-50 transition-all flex items-center gap-2 shadow-lg"
+          >
+            <UserCheck className="h-5 w-5" />
+            Show Profile
+          </button>
+        </div>
       </div>
 
       {/* Quick Actions */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button
           onClick={() => setShowAddCompanyModal(true)}
-          className="bg-gradient-to-br from-orange-500 to-orange-600 text-white p-6 rounded-2xl hover:shadow-xl transition-all flex items-center justify-between group"
+          className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-2xl hover:shadow-xl transition-all flex items-center justify-between group shadow-md shadow-red-500/20"
         >
           <div className="flex items-center gap-3">
             <div className="bg-white/20 p-3 rounded-xl">
@@ -451,7 +480,7 @@ export function AdminPanel() {
 
         <button
           onClick={() => setShowAddSessionModal(true)}
-          className="bg-gradient-to-br from-blue-500 to-blue-600 text-white p-6 rounded-2xl hover:shadow-xl transition-all flex items-center justify-between group"
+          className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-2xl hover:shadow-xl transition-all flex items-center justify-between group shadow-md shadow-red-500/20"
         >
           <div className="flex items-center gap-3">
             <div className="bg-white/20 p-3 rounded-xl">
@@ -464,7 +493,7 @@ export function AdminPanel() {
 
         <button
           onClick={() => setShowAnnouncementModal(true)}
-          className="bg-gradient-to-br from-purple-500 to-purple-600 text-white p-6 rounded-2xl hover:shadow-xl transition-all flex items-center justify-between group"
+          className="bg-gradient-to-br from-red-500 to-red-600 text-white p-6 rounded-2xl hover:shadow-xl transition-all flex items-center justify-between group shadow-md shadow-red-500/20"
         >
           <div className="flex items-center gap-3">
             <div className="bg-white/20 p-3 rounded-xl">
@@ -478,109 +507,27 @@ export function AdminPanel() {
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Current in Event */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="flex items-start justify-between mb-4">
-            <div className="bg-orange-100 dark:bg-orange-900/30 p-3 rounded-xl">
-              <span className="material-symbols-outlined text-orange-600 dark:text-orange-400 text-3xl">
-                location_city
-              </span>
-            </div>
-            <span className="bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-bold px-3 py-1 rounded-full">
-              Good
-            </span>
-          </div>
-          <div className="mb-2">
-            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">
-              CURRENT IN EVENT
-            </p>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-slate-900 dark:text-white">
-                {mockStats.currentInEvent.toLocaleString()}
-              </span>
-              <span className="text-slate-400 dark:text-slate-500">
-                / {mockStats.maxInEvent.toLocaleString()} max
-              </span>
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-orange-500 to-orange-600 rounded-full"
-                style={{ width: `${(mockStats.currentInEvent / mockStats.maxInEvent) * 100}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Current in Building */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="flex items-start justify-between mb-4">
-            <div className="bg-blue-100 dark:bg-blue-900/30 p-3 rounded-xl">
-              <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-3xl">
-                business
-              </span>
-            </div>
-            <span className="bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 text-xs font-bold px-3 py-1 rounded-full">
-              Warning
-            </span>
-          </div>
-          <div className="mb-2">
-            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">
-              CURRENT IN BUILDING
-            </p>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-slate-900 dark:text-white">
-                {mockStats.currentInBuilding.toLocaleString()}
-              </span>
-              <span className="text-slate-400 dark:text-slate-500">
-                / {mockStats.maxInBuilding.toLocaleString()} max
-              </span>
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full"
-                style={{ width: `${(mockStats.currentInBuilding / mockStats.maxInBuilding) * 100}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
         {/* Total Registrations */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
           <div className="flex items-start justify-between mb-4">
-            <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-xl">
-              <span className="material-symbols-outlined text-green-600 dark:text-green-400 text-3xl">
-                person_add
-              </span>
+            <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
+              <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-3xl">person_add</span>
             </div>
             <div className="bg-green-100 dark:bg-green-900/30 px-3 py-1 rounded-full flex items-center gap-1">
               <TrendingUp className="h-4 w-4 text-green-600 dark:text-green-400" />
-              <span className="text-green-700 dark:text-green-400 text-xs font-bold">12%</span>
+              <span className="text-green-700 dark:text-green-400 text-xs font-bold">Live</span>
             </div>
           </div>
-          <div className="mb-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">
-              TOTAL REGISTRATIONS
-            </p>
-            <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">
-              {mockStats.totalRegistrations.toLocaleString()}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">TOTAL REGISTRATIONS</p>
+          <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.totalAttendees}</div>
+          <div className="grid grid-cols-2 gap-4 pt-4 mt-4 border-t border-slate-200 dark:border-slate-700">
             <div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Students</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white">
-                {mockStats.students.toLocaleString()}
-              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Approved</p>
+              <p className="text-xl font-bold text-green-600">{dashboardStats.approvedAttendees}</p>
             </div>
             <div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Graduates</p>
-              <p className="text-xl font-bold text-slate-900 dark:text-white">
-                {mockStats.graduates.toLocaleString()}
-              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Pending</p>
+              <p className="text-xl font-bold text-amber-600">{dashboardStats.totalAttendees - dashboardStats.approvedAttendees}</p>
             </div>
           </div>
         </div>
@@ -588,34 +535,34 @@ export function AdminPanel() {
         {/* Today's Entries */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
           <div className="flex items-start justify-between mb-4">
-            <div className="bg-purple-100 dark:bg-purple-900/30 p-3 rounded-xl">
-              <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-3xl">
-                login
-              </span>
-            </div>
-            <span className="text-xs text-slate-400 dark:text-slate-500 flex items-center gap-1">
-              <span className="material-symbols-outlined text-base">schedule</span>
-              Last entry: 2m ago
-            </span>
-          </div>
-          <div className="mb-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">
-              TODAY'S ENTRIES
-            </p>
-            <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">
-              {mockStats.todayEntries.toLocaleString()}
+            <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
+              <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-3xl">login</span>
             </div>
           </div>
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-700">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-purple-600 dark:text-purple-400 font-medium">
-                Peak Hour Volume
-              </span>
-              <span className="text-sm font-bold text-slate-900 dark:text-white">
-                {mockStats.peakCheckIns} check-ins
-              </span>
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">TODAY'S CHECK-INS</p>
+          <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.todayEntries}</div>
+        </div>
+
+        {/* Companies */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="flex items-start justify-between mb-4">
+            <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
+              <Building2 className="h-7 w-7 text-red-600 dark:text-red-400" />
             </div>
           </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">COMPANIES</p>
+          <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.totalCompanies}</div>
+        </div>
+
+        {/* Sessions */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+          <div className="flex items-start justify-between mb-4">
+            <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
+              <Calendar className="h-7 w-7 text-red-600 dark:text-red-400" />
+            </div>
+          </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">SESSIONS</p>
+          <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.totalSessions}</div>
         </div>
       </div>
     </div>
@@ -629,7 +576,7 @@ export function AdminPanel() {
         <button
           onClick={() => setStatisticsView('general')}
           className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === 'general'
-            ? 'bg-orange-500 text-white shadow-md'
+            ? 'bg-red-600 text-white shadow-md'
             : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
             }`}
         >
@@ -638,7 +585,7 @@ export function AdminPanel() {
         <button
           onClick={() => setStatisticsView('filter')}
           className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === 'filter'
-            ? 'bg-orange-500 text-white shadow-md'
+            ? 'bg-red-600 text-white shadow-md'
             : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
             }`}
         >
@@ -647,7 +594,7 @@ export function AdminPanel() {
         <button
           onClick={() => setStatisticsView('day')}
           className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === 'day'
-            ? 'bg-orange-500 text-white shadow-md'
+            ? 'bg-red-600 text-white shadow-md'
             : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
             }`}
         >
@@ -683,7 +630,7 @@ export function AdminPanel() {
                 key={day}
                 onClick={() => setSelectedDay(day)}
                 className={`px-6 py-3 rounded-xl font-semibold transition-all ${selectedDay === day
-                  ? 'bg-orange-500 text-white shadow-md'
+                  ? 'bg-red-600 text-white shadow-md'
                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-orange-300'
                   }`}
               >
@@ -713,7 +660,7 @@ export function AdminPanel() {
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Sessions</h2>
         <button
           onClick={() => setShowAddSessionModal(true)}
-          className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md"
+          className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md shadow-red-500/20"
         >
           <Plus className="h-5 w-5" />
           Add Session
@@ -721,31 +668,63 @@ export function AdminPanel() {
       </div>
 
       {/* Sessions Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {mockSessions.map((session) => (
-          <div
-            key={session.id}
-            className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div className="bg-blue-100 dark:bg-blue-900/30 p-2 rounded-lg">
-                <Calendar className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <span className="text-xs text-slate-500 dark:text-slate-400">{session.time}</span>
-            </div>
-            <h3 className="font-bold text-lg text-slate-900 dark:text-white mb-2">{session.title}</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-              Speaker: {session.speaker}
-            </p>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-500 dark:text-slate-400">{session.location}</span>
-              <span className="font-semibold text-slate-900 dark:text-white">
-                {session.attendees}/{session.capacity}
-              </span>
-            </div>
+      {isLoadingSessions ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-500 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
           </div>
-        ))}
-      </div>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Loading sessions...</p>
+        </div>
+      ) : sessions.length === 0 ? (
+        <div className="text-center py-16 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800">
+          <Calendar className="w-16 h-16 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
+          <p className="text-lg font-semibold text-slate-600 dark:text-slate-400">No sessions yet</p>
+          <p className="text-sm text-slate-500 mt-1">Click "Add Session" to create one</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {sessions.map((session) => {
+            const speakerName = session.speaker ? `${session.speaker.first_name} ${session.speaker.last_name}` : 'TBD';
+            const startDate = new Date(session.start_time);
+            const endDate = new Date(session.end_time);
+            const timeStr = `${startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${endDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            const dateStr = startDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            return (
+              <motion.div
+                key={session.id}
+                variants={itemVariants}
+                whileHover={{ y: -4 }}
+                className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${SESSION_TYPE_COLORS[session.session_type] || SESSION_TYPE_COLORS.other}`}>
+                    {session.session_type}
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{dateStr}</span>
+                </div>
+                <h3 className="font-bold text-lg text-slate-900 dark:text-white mb-2">{session.title}</h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
+                  <Users className="w-4 h-4" /> {speakerName}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" /> {timeStr}
+                </p>
+                <div className="flex items-center justify-between text-sm pt-4 border-t border-slate-200 dark:border-slate-700">
+                  <span className="text-slate-500 dark:text-slate-400">{session.room_name || 'No room'}</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {session.current_bookings}/{session.max_attendees || '∞'}
+                  </span>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 
@@ -758,14 +737,14 @@ export function AdminPanel() {
         <div className="flex gap-3">
           <button
             onClick={() => setShowAddMapModal(true)}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md"
+            className="bg-red-500 hover:bg-red-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md shadow-red-500/20"
           >
             <span className="material-symbols-outlined">map</span>
             Add Map
           </button>
           <button
             onClick={() => setShowAddEventModal(true)}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md"
+            className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md shadow-red-500/20"
           >
             <Plus className="h-5 w-5" />
             Add Event
@@ -775,7 +754,7 @@ export function AdminPanel() {
 
       {/* Events Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {mockEvents.map((event) => (
+        {([] as any[]).map((event) => (
           <div
             key={event.id}
             className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
@@ -996,7 +975,7 @@ export function AdminPanel() {
 
       {/* Jobs Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {mockJobs.map((job) => (
+        {([] as any[]).map((job) => (
           <div
             key={job.id}
             className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
@@ -1614,7 +1593,7 @@ export function AdminPanel() {
               <button
                 onClick={handleEditCompany}
                 disabled={isSubmittingEdit}
-                className="px-6 py-3 rounded-xl font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md"
+                className="px-6 py-3 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md shadow-red-500/20"
               >
                 {isSubmittingEdit ? (
                   <>
@@ -1627,6 +1606,246 @@ export function AdminPanel() {
                     Save Changes
                   </>
                 )}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      </AnimatePresence>
+    );
+  };
+
+  // ===== ADD SESSION HANDLER =====
+  const handleAddSession = async () => {
+    if (!sessionForm.title.trim()) { setSessionFormError('Title is required.'); return; }
+    if (!sessionForm.start_time || !sessionForm.end_time) { setSessionFormError('Start and end times are required.'); return; }
+    if (!useNewSpeaker && !sessionForm.speaker_id) { setSessionFormError('Please select a speaker or create a new one.'); return; }
+    if (useNewSpeaker && (!sessionForm.new_speaker_first_name.trim() || !sessionForm.new_speaker_last_name.trim() || !sessionForm.new_speaker_title.trim())) {
+      setSessionFormError('Speaker first name, last name and title are required.'); return;
+    }
+    setIsSubmittingSession(true); setSessionFormError('');
+    try {
+      let speakerId = sessionForm.speaker_id;
+      if (useNewSpeaker) {
+        const { data: newSpeaker, error: speakerErr } = await supabase.from('speaker').insert({
+          first_name: sessionForm.new_speaker_first_name.trim(),
+          last_name: sessionForm.new_speaker_last_name.trim(),
+          title: sessionForm.new_speaker_title.trim(),
+          linkedin_url: sessionForm.new_speaker_linkedin.trim() || null,
+          photo_url: sessionForm.new_speaker_photo.trim() || null,
+        }).select().single();
+        if (speakerErr) { setSessionFormError(speakerErr.message); return; }
+        speakerId = newSpeaker.id;
+      }
+      const insertData: any = {
+        event_id: EVENT_ID, title: sessionForm.title.trim(), speaker_id: speakerId,
+        session_type: sessionForm.session_type, status: sessionForm.status,
+        start_time: new Date(sessionForm.start_time).toISOString(),
+        end_time: new Date(sessionForm.end_time).toISOString(),
+        requires_booking: sessionForm.requires_booking,
+      };
+      if (sessionForm.description.trim()) insertData.description = sessionForm.description.trim();
+      if (sessionForm.room_name.trim()) insertData.room_name = sessionForm.room_name.trim();
+      if (sessionForm.max_attendees) insertData.max_attendees = parseInt(sessionForm.max_attendees);
+      const { error } = await supabase.from('sessions').insert(insertData);
+      if (error) { setSessionFormError(error.message); return; }
+      setSessionForm({ title: '', description: '', session_type: 'workshop', speaker_id: '', start_time: '', end_time: '', room_name: '', max_attendees: '', requires_booking: false, status: 'scheduled', new_speaker_first_name: '', new_speaker_last_name: '', new_speaker_title: '', new_speaker_linkedin: '', new_speaker_photo: '' });
+      setUseNewSpeaker(false); setShowAddSessionModal(false);
+      fetchSessions(); fetchSpeakers(); fetchDashboardStats();
+    } catch (err: any) { setSessionFormError(err.message || 'Failed to add session'); }
+    finally { setIsSubmittingSession(false); }
+  };
+
+  // ===== SEARCH USERS FOR ANNOUNCEMENT =====
+  const searchUsers = async (query: string) => {
+    if (query.length < 2) { setIndividualResults([]); return; }
+    setIsSearchingUsers(true);
+    try {
+      const { data } = await supabase.from('user_profiles').select('id, full_name, phone, personal_id, email')
+        .or(`full_name.ilike.%${query}%,personal_id.ilike.%${query}%`).limit(10);
+      setIndividualResults(data || []);
+    } catch (err) { console.error(err); }
+    finally { setIsSearchingUsers(false); }
+  };
+
+  // ===== SEND ANNOUNCEMENT HANDLER =====
+  const handleSendAnnouncement = async () => {
+    if (!announcementForm.title.trim() || !announcementForm.content.trim()) { setAnnouncementFormError('Title and content are required.'); return; }
+    if (announcementTargets.length === 0 && !selectedIndividual) { setAnnouncementFormError('Select at least one target audience.'); return; }
+    setIsSubmittingAnnouncement(true); setAnnouncementFormError('');
+    try {
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (!currentUser) { setAnnouncementFormError('Not authenticated'); return; }
+      const insertData: any = {
+        event_id: EVENT_ID, title: announcementForm.title.trim(),
+        content: announcementForm.content.trim(),
+        announcement_type: announcementForm.announcement_type,
+        sender_id: currentUser.id,
+      };
+      if (selectedIndividual) {
+        insertData.target_roles = ['individual'];
+        insertData.target_user_id = selectedIndividual.id;
+      } else {
+        insertData.target_roles = announcementTargets;
+      }
+      const { error } = await supabase.from('notifications').insert(insertData);
+      if (error) { setAnnouncementFormError(error.message); return; }
+      setAnnouncementForm({ title: '', content: '', announcement_type: 'general' });
+      setAnnouncementTargets([]); setSelectedIndividual(null); setIndividualSearch(''); setIndividualResults([]);
+      setShowAnnouncementModal(false);
+    } catch (err: any) { setAnnouncementFormError(err.message || 'Failed to send announcement'); }
+    finally { setIsSubmittingAnnouncement(false); }
+  };
+
+  // ===== ADD SESSION MODAL =====
+  const renderAddSessionModal = () => {
+    if (!showAddSessionModal) return null;
+    const inputClass = "w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all outline-none";
+    const labelClass = "block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5";
+
+    return (
+      <AnimatePresence>
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAddSessionModal(false)} />
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} transition={{ duration: 0.3, ease: 'easeOut' }} className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-8 py-5 flex items-center justify-between rounded-t-2xl z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center"><Calendar className="w-5 h-5 text-red-600 dark:text-red-400" /></div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">Add Session</h3>
+              </div>
+              <button onClick={() => setShowAddSessionModal(false)} className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><X className="w-5 h-5 text-slate-500 dark:text-slate-400" /></button>
+            </div>
+            <div className="px-8 py-6 space-y-5">
+              {sessionFormError && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-sm text-red-700 dark:text-red-300">{sessionFormError}</motion.div>}
+              <div><label className={labelClass}>Title *</label><input type="text" className={inputClass} placeholder="e.g. Career Growth Panel" value={sessionForm.title} onChange={(e) => setSessionForm({ ...sessionForm, title: e.target.value })} /></div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div><label className={labelClass}>Session Type</label><select className={inputClass} value={sessionForm.session_type} onChange={(e) => setSessionForm({ ...sessionForm, session_type: e.target.value })}>{SESSION_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}</select></div>
+                <div><label className={labelClass}>Status</label><select className={inputClass} value={sessionForm.status} onChange={(e) => setSessionForm({ ...sessionForm, status: e.target.value })}>{SESSION_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}</select></div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Speaker *</label>
+                  <button type="button" onClick={() => setUseNewSpeaker(!useNewSpeaker)} className="text-xs text-red-600 dark:text-red-400 font-semibold hover:underline">{useNewSpeaker ? 'Select Existing' : '+ New Speaker'}</button>
+                </div>
+                {!useNewSpeaker ? (
+                  <select className={inputClass} value={sessionForm.speaker_id} onChange={(e) => setSessionForm({ ...sessionForm, speaker_id: e.target.value })}>
+                    <option value="">Select a speaker...</option>
+                    {speakers.map(s => <option key={s.id} value={s.id}>{s.first_name} {s.last_name} — {s.title}</option>)}
+                  </select>
+                ) : (
+                  <div className="space-y-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <div className="grid grid-cols-2 gap-3">
+                      <input type="text" className={inputClass} placeholder="First Name *" value={sessionForm.new_speaker_first_name} onChange={(e) => setSessionForm({ ...sessionForm, new_speaker_first_name: e.target.value })} />
+                      <input type="text" className={inputClass} placeholder="Last Name *" value={sessionForm.new_speaker_last_name} onChange={(e) => setSessionForm({ ...sessionForm, new_speaker_last_name: e.target.value })} />
+                    </div>
+                    <input type="text" className={inputClass} placeholder="Title/Position *" value={sessionForm.new_speaker_title} onChange={(e) => setSessionForm({ ...sessionForm, new_speaker_title: e.target.value })} />
+                    <input type="url" className={inputClass} placeholder="LinkedIn URL (optional)" value={sessionForm.new_speaker_linkedin} onChange={(e) => setSessionForm({ ...sessionForm, new_speaker_linkedin: e.target.value })} />
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div><label className={labelClass}>Start Time *</label><input type="datetime-local" className={inputClass} value={sessionForm.start_time} onChange={(e) => setSessionForm({ ...sessionForm, start_time: e.target.value })} /></div>
+                <div><label className={labelClass}>End Time *</label><input type="datetime-local" className={inputClass} value={sessionForm.end_time} onChange={(e) => setSessionForm({ ...sessionForm, end_time: e.target.value })} /></div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <div><label className={labelClass}>Room Name</label><input type="text" className={inputClass} placeholder="e.g. Hall A" value={sessionForm.room_name} onChange={(e) => setSessionForm({ ...sessionForm, room_name: e.target.value })} /></div>
+                <div><label className={labelClass}>Max Attendees</label><input type="number" className={inputClass} placeholder="e.g. 100" value={sessionForm.max_attendees} onChange={(e) => setSessionForm({ ...sessionForm, max_attendees: e.target.value })} /></div>
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="requires_booking" checked={sessionForm.requires_booking} onChange={(e) => setSessionForm({ ...sessionForm, requires_booking: e.target.checked })} className="w-4 h-4 text-red-600 rounded border-slate-300 focus:ring-red-500" />
+                <label htmlFor="requires_booking" className="text-sm text-slate-700 dark:text-slate-300">Requires Booking</label>
+              </div>
+              <div><label className={labelClass}>Description</label><textarea className={`${inputClass} resize-none`} rows={3} placeholder="Brief description..." value={sessionForm.description} onChange={(e) => setSessionForm({ ...sessionForm, description: e.target.value })} /></div>
+            </div>
+            <div className="sticky bottom-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-8 py-5 flex justify-end gap-3 rounded-b-2xl">
+              <button onClick={() => setShowAddSessionModal(false)} className="px-6 py-3 rounded-xl font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all" disabled={isSubmittingSession}>Cancel</button>
+              <button onClick={handleAddSession} disabled={isSubmittingSession} className="px-6 py-3 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md shadow-red-500/20">
+                {isSubmittingSession ? (<><Loader2 className="w-4 h-4 animate-spin" /> Adding...</>) : (<><Plus className="w-4 h-4" /> Add Session</>)}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      </AnimatePresence>
+    );
+  };
+
+  // ===== SEND ANNOUNCEMENT MODAL =====
+  const renderAnnouncementModal = () => {
+    if (!showAnnouncementModal) return null;
+    const inputClass = "w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all outline-none";
+    const labelClass = "block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5";
+    const targetOptions = [
+      { key: 'team_leader', label: 'Team Leaders', icon: 'supervisor_account' },
+      { key: 'volunteer', label: 'Volunteers', icon: 'volunteer_activism' },
+      { key: 'attendee', label: 'Attendees', icon: 'people' },
+    ];
+    const toggleTarget = (t: string) => {
+      setSelectedIndividual(null);
+      setAnnouncementTargets(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+    };
+
+    return (
+      <AnimatePresence>
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAnnouncementModal(false)} />
+          <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} transition={{ duration: 0.3, ease: 'easeOut' }} className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-8 py-5 flex items-center justify-between rounded-t-2xl z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center"><Megaphone className="w-5 h-5 text-red-600 dark:text-red-400" /></div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">Send Announcement</h3>
+              </div>
+              <button onClick={() => setShowAnnouncementModal(false)} className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><X className="w-5 h-5 text-slate-500 dark:text-slate-400" /></button>
+            </div>
+            <div className="px-8 py-6 space-y-5">
+              {announcementFormError && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-sm text-red-700 dark:text-red-300">{announcementFormError}</motion.div>}
+              <div><label className={labelClass}>Title *</label><input type="text" className={inputClass} placeholder="Announcement title" value={announcementForm.title} onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })} /></div>
+              <div><label className={labelClass}>Content *</label><textarea className={`${inputClass} resize-none`} rows={4} placeholder="Announcement content..." value={announcementForm.content} onChange={(e) => setAnnouncementForm({ ...announcementForm, content: e.target.value })} /></div>
+              <div><label className={labelClass}>Type</label><select className={inputClass} value={announcementForm.announcement_type} onChange={(e) => setAnnouncementForm({ ...announcementForm, announcement_type: e.target.value })}>{ANNOUNCEMENT_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}</select></div>
+              <div>
+                <label className={labelClass}>Target Audience *</label>
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  {targetOptions.map(opt => (
+                    <button key={opt.key} type="button" onClick={() => toggleTarget(opt.key)}
+                      className={`p-3 rounded-xl border-2 text-center transition-all ${announcementTargets.includes(opt.key) && !selectedIndividual
+                        ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-red-300'}`}>
+                      <span className="material-symbols-outlined text-xl block mb-1">{opt.icon}</span>
+                      <span className="text-xs font-semibold">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Or send to an individual</p>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input type="text" className={`${inputClass} pl-10`} placeholder="Search by name or personal ID..." value={individualSearch}
+                      onChange={(e) => { setIndividualSearch(e.target.value); searchUsers(e.target.value); }} />
+                  </div>
+                  {selectedIndividual && (
+                    <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
+                      <span className="material-symbols-outlined text-red-600 dark:text-red-400">person</span>
+                      <span className="text-sm font-semibold text-red-700 dark:text-red-300 flex-1">{selectedIndividual.full_name}</span>
+                      <button onClick={() => { setSelectedIndividual(null); setAnnouncementTargets([]); }} className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-800"><X className="w-4 h-4 text-red-500" /></button>
+                    </div>
+                  )}
+                  {!selectedIndividual && individualResults.length > 0 && (
+                    <div className="mt-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl max-h-40 overflow-y-auto">
+                      {individualResults.map(u => (
+                        <button key={u.id} type="button" onClick={() => { setSelectedIndividual(u); setAnnouncementTargets([]); setIndividualResults([]); setIndividualSearch(''); }}
+                          className="w-full px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 last:border-0">
+                          <span className="material-symbols-outlined text-slate-400">person</span>
+                          <div><p className="text-sm font-semibold text-slate-900 dark:text-white">{u.full_name}</p><p className="text-xs text-slate-500">{u.personal_id}</p></div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {isSearchingUsers && <p className="text-xs text-slate-400 mt-2">Searching...</p>}
+                </div>
+              </div>
+            </div>
+            <div className="sticky bottom-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-8 py-5 flex justify-end gap-3 rounded-b-2xl">
+              <button onClick={() => setShowAnnouncementModal(false)} className="px-6 py-3 rounded-xl font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all" disabled={isSubmittingAnnouncement}>Cancel</button>
+              <button onClick={handleSendAnnouncement} disabled={isSubmittingAnnouncement} className="px-6 py-3 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md shadow-red-500/20">
+                {isSubmittingAnnouncement ? (<><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>) : (<><Send className="w-4 h-4" /> Send Announcement</>)}
               </button>
             </div>
           </motion.div>
@@ -1655,49 +1874,24 @@ export function AdminPanel() {
         </motion.div>
       </AnimatePresence>
 
-      {/* Add Company Modal */}
       {renderAddCompanyModal()}
-
-      {/* View Company Modal */}
       {renderViewCompanyModal()}
-
-      {/* Edit Company Modal */}
       {renderEditCompanyModal()}
+      {renderAddSessionModal()}
+      {renderAnnouncementModal()}
 
-      {/* Other Modals (Placeholders) */}
-      <SimpleModal
-        show={showAddSessionModal}
-        onClose={() => setShowAddSessionModal(false)}
-        title="Add Session"
-      />
-      <SimpleModal
-        show={showAddEventModal}
-        onClose={() => setShowAddEventModal(false)}
-        title="Add Event"
-      />
-      <SimpleModal
-        show={showAddMapModal}
-        onClose={() => setShowAddMapModal(false)}
-        title="Add Map"
-      />
-      <SimpleModal
-        show={showAddJobModal}
-        onClose={() => setShowAddJobModal(false)}
-        title="Add Job"
-      />
-      <SimpleModal
-        show={showAnnouncementModal}
-        onClose={() => setShowAnnouncementModal(false)}
-        title="Send Announcement"
-      />
+      <SimpleModal show={showAddEventModal} onClose={() => setShowAddEventModal(false)} title="Add Event" />
+      <SimpleModal show={showAddMapModal} onClose={() => setShowAddMapModal(false)} title="Add Map" />
+      <SimpleModal show={showAddJobModal} onClose={() => setShowAddJobModal(false)} title="Add Job" />
 
-      {/* Profile Card */}
       {showProfile && attendeeProfile && (
         <AttendeeProfileCard
           profile={attendeeProfile}
           onClose={() => setShowProfile(false)}
+          hasActiveApplications={false}
         />
       )}
     </SharedNavigation>
   );
 }
+
