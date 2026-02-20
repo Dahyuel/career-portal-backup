@@ -4,6 +4,7 @@ import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigat
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAttendeeProfile } from '../../hooks/useAttendeeProfile';
+import Toast from '../../components/shared/Toast';
 import AttendeeProfileCard from '../../components/AttendeeProfileCard';
 import { supabase } from '../../lib/supabase';
 import {
@@ -142,6 +143,8 @@ interface UserProfile {
 interface DashboardStats {
   totalAttendees: number;
   approvedAttendees: number;
+  rejectedAttendees: number;
+  pendingAttendees: number;
   todayEntries: number;
   totalCompanies: number;
   totalSessions: number;
@@ -209,6 +212,7 @@ export function AdminPanel() {
   const [showAddMapModal, setShowAddMapModal] = useState(false);
   const [showAddJobModal, setShowAddJobModal] = useState(false);
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ show: false, message: '', type: 'info' });
 
   // ===== JOBS STATE =====
   const [jobs, setJobs] = useState<AdminJob[]>([]);
@@ -237,7 +241,7 @@ export function AdminPanel() {
 
   // ===== DASHBOARD STATS STATE =====
   const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
-    totalAttendees: 0, approvedAttendees: 0, todayEntries: 0, totalCompanies: 0, totalSessions: 0
+    totalAttendees: 0, approvedAttendees: 0, rejectedAttendees: 0, pendingAttendees: 0, todayEntries: 0, totalCompanies: 0, totalSessions: 0
   });
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
@@ -247,6 +251,8 @@ export function AdminPanel() {
   const [speakers, setSpeakers] = useState<Speaker[]>([]);
 
   // Add Session form state
+  const [editingSession, setEditingSession] = useState<Session | null>(null);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState('');
   const [sessionForm, setSessionForm] = useState({
     title: '', description: '', session_type: 'workshop' as string, speaker_id: '' as string,
     start_time: '', end_time: '', room_name: '', max_attendees: '' as string,
@@ -325,9 +331,11 @@ export function AdminPanel() {
   const fetchDashboardStats = useCallback(async () => {
     setIsLoadingStats(true);
     try {
-      const [attendeesRes, approvedRes, todayRes, companiesRes, sessionsRes] = await Promise.all([
+      const [attendeesRes, approvedRes, rejectedRes, pendingRes, todayRes, companiesRes, sessionsRes] = await Promise.all([
         supabase.from('attendees').select('*', { count: 'exact', head: true }),
         supabase.from('attendees').select('*', { count: 'exact', head: true }).eq('registration_status', 'approved'),
+        supabase.from('attendees').select('*', { count: 'exact', head: true }).eq('registration_status', 'rejected'),
+        supabase.from('attendees').select('*', { count: 'exact', head: true }).eq('registration_status', 'pending'),
         (() => {
           const today = new Date(); today.setHours(0, 0, 0, 0);
           const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -340,6 +348,8 @@ export function AdminPanel() {
       setDashboardStats({
         totalAttendees: attendeesRes.count || 0,
         approvedAttendees: approvedRes.count || 0,
+        rejectedAttendees: rejectedRes.count || 0,
+        pendingAttendees: pendingRes.count || 0,
         todayEntries: todayRes.count || 0,
         totalCompanies: companiesRes.count || 0,
         totalSessions: sessionsRes.count || 0,
@@ -816,59 +826,65 @@ export function AdminPanel() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Total Registrations */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="flex items-start justify-between mb-4">
-            <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
-              <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-3xl">person_add</span>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-4">
+              <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
+                <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-3xl">person_add</span>
+              </div>
+              <p className="text-base text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wide">TOTAL REGISTRATIONS</p>
             </div>
             <div className="bg-green-100 dark:bg-green-900/30 px-3 py-1 rounded-full flex items-center gap-1">
               <TrendingUp className="h-4 w-4 text-green-600 dark:text-green-400" />
               <span className="text-green-700 dark:text-green-400 text-xs font-bold">Live</span>
             </div>
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">TOTAL REGISTRATIONS</p>
           <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.totalAttendees}</div>
-          <div className="grid grid-cols-2 gap-4 pt-4 mt-4 border-t border-slate-200 dark:border-slate-700">
+          <div className="grid grid-cols-3 gap-4 pt-4 mt-4 border-t border-slate-200 dark:border-slate-700">
             <div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Approved</p>
               <p className="text-xl font-bold text-green-600">{dashboardStats.approvedAttendees}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Pending</p>
-              <p className="text-xl font-bold text-amber-600">{dashboardStats.totalAttendees - dashboardStats.approvedAttendees}</p>
+              <p className="text-xl font-bold text-amber-600">{dashboardStats.pendingAttendees}</p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Rejected</p>
+              <p className="text-xl font-bold text-rose-600">{dashboardStats.rejectedAttendees}</p>
             </div>
           </div>
         </div>
 
         {/* Today's Entries */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-4 mb-4">
             <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
               <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-3xl">login</span>
             </div>
+            <p className="text-base text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wide">TODAY'S CHECK-INS</p>
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">TODAY'S CHECK-INS</p>
           <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.todayEntries}</div>
         </div>
 
         {/* Companies */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-4 mb-4">
             <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
               <Building2 className="h-7 w-7 text-red-600 dark:text-red-400" />
             </div>
+            <p className="text-base text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wide">COMPANIES</p>
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">COMPANIES</p>
           <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.totalCompanies}</div>
         </div>
 
         {/* Sessions */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-          <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-4 mb-4">
             <div className="bg-red-100 dark:bg-red-900/30 p-3 rounded-xl">
               <Calendar className="h-7 w-7 text-red-600 dark:text-red-400" />
             </div>
+            <p className="text-base text-slate-500 dark:text-slate-400 font-semibold uppercase tracking-wide">SESSIONS</p>
           </div>
-          <p className="text-sm text-slate-500 dark:text-slate-400 font-medium uppercase tracking-wide">SESSIONS</p>
           <div className="text-4xl font-bold text-slate-900 dark:text-white mt-1">{dashboardStats.totalSessions}</div>
         </div>
       </div>
@@ -879,14 +895,14 @@ export function AdminPanel() {
   // Helper: stat card
   const StatCard = ({ label, value, sub, icon, color }: { label: string; value: number | string; sub?: string; icon: string; color: string }) => (
     <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
-      <div className="flex items-start justify-between mb-3">
+      <div className="flex items-center gap-4 mb-4">
         <div className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center`}>
           <span className="material-symbols-outlined text-lg">{icon}</span>
         </div>
+        <p className="text-lg font-medium text-slate-600 dark:text-slate-300">{label}</p>
       </div>
-      <p className="text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
-      <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
-      {sub && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{sub}</p>}
+      <p className="text-3xl font-bold text-slate-900 dark:text-white">{value}</p>
+      {sub && <p className="text-sm font-medium text-slate-400 dark:text-slate-500 mt-2">{sub}</p>}
     </div>
   );
 
@@ -909,8 +925,7 @@ export function AdminPanel() {
                 <div className="w-32 bg-slate-100 dark:bg-slate-700 rounded-full h-2 hidden sm:block">
                   <div className="bg-red-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="text-lg font-bold text-slate-900 dark:text-white w-12 text-right">{item.count}</span>
-                <span className="text-sm font-medium text-slate-400 w-14 text-right">{pct}%</span>
+                <span className="text-lg font-bold text-slate-900 dark:text-white w-20 text-right">{item.count}</span>
               </div>
             );
           })}
@@ -976,14 +991,14 @@ export function AdminPanel() {
             {/* Overview Cards — 2 cols on mobile, 4 on desktop */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard label="Total Registrations" value={s.totalRegistrations} icon="people" color="bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400" />
-              <StatCard label="Approved" value={s.approvedCount} sub={`${s.totalRegistrations > 0 ? ((s.approvedCount / s.totalRegistrations) * 100).toFixed(0) : 0}%`} icon="check_circle" color="bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400" />
+              <StatCard label="Approved" value={s.approvedCount} icon="check_circle" color="bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400" />
               <StatCard label="Pending" value={s.pendingCount} icon="schedule" color="bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400" />
               <StatCard label="Rejected" value={s.rejectedCount} icon="cancel" color="bg-rose-100 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400" />
             </div>
 
             {/* Second row */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard label="Total Check-ins" value={s.totalCheckIns} sub={`${s.uniqueCheckIns} unique`} icon="login" color="bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400" />
+              <StatCard label="Total Check-ins" value={s.totalCheckIns} icon="login" color="bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400" />
               <StatCard label="ASU Students" value={s.asuStudents} icon="school" color="bg-indigo-100 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400" />
               <StatCard label="Other Universities" value={s.nonAsuStudents} icon="domain" color="bg-purple-100 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400" />
               <StatCard label="Paid" value={s.paidCount} icon="paid" color="bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400" />
@@ -1059,8 +1074,8 @@ export function AdminPanel() {
                           </div>
                           <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Top</span>
                         </div>
-                        <p className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 truncate">{topItem?.label || '—'}</p>
-                        <p className="text-sm text-emerald-500 mt-0.5">{topItem ? `${topItem.count} (${topPct}%)` : ''}</p>
+                        <p className="text-xl font-medium text-emerald-600 dark:text-emerald-400 mb-1 truncate">{topItem?.label || '—'}</p>
+                        <p className="text-4xl font-extrabold text-emerald-700 dark:text-emerald-300">{topItem ? topItem.count : ''}</p>
                       </div>
                     </div>
 
@@ -1156,12 +1171,29 @@ export function AdminPanel() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Sessions</h2>
         <button
-          onClick={() => setShowAddSessionModal(true)}
+          onClick={() => {
+            setEditingSession(null);
+            setSessionForm({ title: '', description: '', session_type: 'workshop', speaker_id: '', start_time: '', end_time: '', room_name: '', max_attendees: '', requires_booking: false, status: 'scheduled', new_speaker_first_name: '', new_speaker_last_name: '', new_speaker_title: '', new_speaker_linkedin: '', new_speaker_photo: '' });
+            setUseNewSpeaker(false);
+            setSessionFormError('');
+            setShowAddSessionModal(true);
+          }}
           className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center gap-2 transition-all shadow-md shadow-red-500/20"
         >
           <Plus className="h-5 w-5" />
           Add Session
         </button>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+        <input
+          type="text"
+          placeholder="Search sessions by title or speaker..."
+          value={sessionSearchQuery}
+          onChange={(e) => setSessionSearchQuery(e.target.value)}
+          className="w-full pl-12 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-slate-900 dark:text-white"
+        />
       </div>
 
       {/* Sessions Grid */}
@@ -1185,7 +1217,12 @@ export function AdminPanel() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {sessions.map((session) => {
+          {sessions.filter(session => {
+            if (!sessionSearchQuery.trim()) return true;
+            const q = sessionSearchQuery.toLowerCase();
+            const speakerName = session.speaker ? `${session.speaker.first_name} ${session.speaker.last_name}`.toLowerCase() : '';
+            return session.title.toLowerCase().includes(q) || speakerName.includes(q);
+          }).map((session) => {
             const speakerName = session.speaker ? `${session.speaker.first_name} ${session.speaker.last_name}` : 'TBD';
             const startDate = new Date(session.start_time);
             const endDate = new Date(session.end_time);
@@ -1196,7 +1233,8 @@ export function AdminPanel() {
                 key={session.id}
                 variants={itemVariants}
                 whileHover={{ y: -4 }}
-                className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all"
+                onClick={() => openEditSession(session)}
+                className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg hover:border-red-200 dark:hover:border-red-800/50 transition-all cursor-pointer group"
               >
                 <div className="flex items-start justify-between mb-4">
                   <span className={`text-xs font-bold px-3 py-1 rounded-full uppercase ${SESSION_TYPE_COLORS[session.session_type] || SESSION_TYPE_COLORS.other}`}>
@@ -1212,10 +1250,19 @@ export function AdminPanel() {
                   <Clock className="w-3.5 h-3.5" /> {timeStr}
                 </p>
                 <div className="flex items-center justify-between text-sm pt-4 border-t border-slate-200 dark:border-slate-700">
-                  <span className="text-slate-500 dark:text-slate-400">{session.room_name || 'No room'}</span>
-                  <span className="font-semibold text-slate-900 dark:text-white">
-                    {session.current_bookings}/{session.max_attendees || '∞'}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-500 dark:text-slate-400">{session.room_name || 'No room'}</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {session.current_bookings}/{session.max_attendees || '∞'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openEditSession(session); }}
+                    className="flex w-8 h-8 items-center justify-center rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors opacity-0 group-hover:opacity-100 sm:opacity-100"
+                    title="Edit Session"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
                 </div>
               </motion.div>
             );
@@ -2892,8 +2939,29 @@ export function AdminPanel() {
     );
   };
 
-  // ===== ADD SESSION HANDLER =====
-  const handleAddSession = async () => {
+  // ===== OPEN EDIT SESSION =====
+  const openEditSession = (session: Session) => {
+    setEditingSession(session);
+    setSessionForm({
+      title: session.title || '',
+      description: session.description || '',
+      session_type: session.session_type || 'other',
+      speaker_id: session.speaker_id || '',
+      start_time: session.start_time ? new Date(session.start_time).toISOString().slice(0, 16) : '',
+      end_time: session.end_time ? new Date(session.end_time).toISOString().slice(0, 16) : '',
+      room_name: session.room_name || '',
+      max_attendees: session.max_attendees ? String(session.max_attendees) : '',
+      requires_booking: session.requires_booking,
+      status: session.status || 'scheduled',
+      new_speaker_first_name: '', new_speaker_last_name: '', new_speaker_title: '', new_speaker_linkedin: '', new_speaker_photo: ''
+    });
+    setUseNewSpeaker(false);
+    setSessionFormError('');
+    setShowAddSessionModal(true);
+  };
+
+  // ===== ADD/EDIT SESSION HANDLER =====
+  const handleAddEditSession = async () => {
     if (!sessionForm.title.trim()) { setSessionFormError('Title is required.'); return; }
     if (!sessionForm.start_time || !sessionForm.end_time) { setSessionFormError('Start and end times are required.'); return; }
     if (!useNewSpeaker && !sessionForm.speaker_id) { setSessionFormError('Please select a speaker or create a new one.'); return; }
@@ -2924,12 +2992,21 @@ export function AdminPanel() {
       if (sessionForm.description.trim()) insertData.description = sessionForm.description.trim();
       if (sessionForm.room_name.trim()) insertData.room_name = sessionForm.room_name.trim();
       if (sessionForm.max_attendees) insertData.max_attendees = parseInt(sessionForm.max_attendees);
-      const { error } = await supabase.from('sessions').insert(insertData);
-      if (error) { setSessionFormError(error.message); return; }
+
+      if (editingSession) {
+        const { error } = await supabase.from('sessions').update(insertData).eq('id', editingSession.id);
+        if (error) { setSessionFormError(error.message); return; }
+        setToast({ show: true, message: 'Session updated successfully!', type: 'success' });
+      } else {
+        const { error } = await supabase.from('sessions').insert(insertData);
+        if (error) { setSessionFormError(error.message); return; }
+        setToast({ show: true, message: 'Session created successfully!', type: 'success' });
+      }
+
       setSessionForm({ title: '', description: '', session_type: 'workshop', speaker_id: '', start_time: '', end_time: '', room_name: '', max_attendees: '', requires_booking: false, status: 'scheduled', new_speaker_first_name: '', new_speaker_last_name: '', new_speaker_title: '', new_speaker_linkedin: '', new_speaker_photo: '' });
-      setUseNewSpeaker(false); setShowAddSessionModal(false);
+      setUseNewSpeaker(false); setShowAddSessionModal(false); setEditingSession(null);
       fetchSessions(); fetchSpeakers(); fetchDashboardStats();
-    } catch (err: any) { setSessionFormError(err.message || 'Failed to add session'); }
+    } catch (err: any) { setSessionFormError(err.message || (editingSession ? 'Failed to update session' : 'Failed to add session')); }
     finally { setIsSubmittingSession(false); }
   };
 
@@ -2947,12 +3024,24 @@ export function AdminPanel() {
 
   // ===== SEND ANNOUNCEMENT HANDLER =====
   const handleSendAnnouncement = async () => {
-    if (!announcementForm.title.trim() || !announcementForm.content.trim()) { setAnnouncementFormError('Title and content are required.'); return; }
-    if (announcementTargets.length === 0 && !selectedIndividual) { setAnnouncementFormError('Select at least one target audience.'); return; }
+    if (!announcementForm.title.trim() || !announcementForm.content.trim()) {
+      setAnnouncementFormError('Title and content are required.');
+      setToast({ show: true, message: 'Please fill in both title and content', type: 'warning' });
+      return;
+    }
+    if (announcementTargets.length === 0 && !selectedIndividual) {
+      setAnnouncementFormError('Select at least one target audience.');
+      setToast({ show: true, message: 'Select at least one target audience', type: 'warning' });
+      return;
+    }
     setIsSubmittingAnnouncement(true); setAnnouncementFormError('');
     try {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (!currentUser) { setAnnouncementFormError('Not authenticated'); return; }
+      if (!currentUser) {
+        setAnnouncementFormError('Not authenticated');
+        setToast({ show: true, message: 'Not authenticated', type: 'error' });
+        return;
+      }
       const insertData: any = {
         event_id: EVENT_ID, title: announcementForm.title.trim(),
         content: announcementForm.content.trim(),
@@ -2966,11 +3055,19 @@ export function AdminPanel() {
         insertData.target_roles = announcementTargets;
       }
       const { error } = await supabase.from('notifications').insert(insertData);
-      if (error) { setAnnouncementFormError(error.message); return; }
+      if (error) {
+        setAnnouncementFormError(error.message);
+        setToast({ show: true, message: `Error sending announcement: ${error.message}`, type: 'error' });
+        return;
+      }
       setAnnouncementForm({ title: '', content: '', announcement_type: 'general' });
       setAnnouncementTargets([]); setSelectedIndividual(null); setIndividualSearch(''); setIndividualResults([]);
       setShowAnnouncementModal(false);
-    } catch (err: any) { setAnnouncementFormError(err.message || 'Failed to send announcement'); }
+      setToast({ show: true, message: 'Announcement sent successfully!', type: 'success' });
+    } catch (err: any) {
+      setAnnouncementFormError(err.message || 'Failed to send announcement');
+      setToast({ show: true, message: 'Failed to send announcement', type: 'error' });
+    }
     finally { setIsSubmittingAnnouncement(false); }
   };
 
@@ -2983,14 +3080,14 @@ export function AdminPanel() {
     return (
       <AnimatePresence>
         <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowAddSessionModal(false)} />
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShowAddSessionModal(false); setEditingSession(null); }} />
           <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} transition={{ duration: 0.3, ease: 'easeOut' }} className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-8 py-5 flex items-center justify-between rounded-t-2xl z-10">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/20 flex items-center justify-center"><Calendar className="w-5 h-5 text-red-600 dark:text-red-400" /></div>
-                <h3 className="text-xl font-bold text-slate-900 dark:text-white">Add Session</h3>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">{editingSession ? 'Edit Session' : 'Add Session'}</h3>
               </div>
-              <button onClick={() => setShowAddSessionModal(false)} className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><X className="w-5 h-5 text-slate-500 dark:text-slate-400" /></button>
+              <button onClick={() => { setShowAddSessionModal(false); setEditingSession(null); }} className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><X className="w-5 h-5 text-slate-500 dark:text-slate-400" /></button>
             </div>
             <div className="px-8 py-6 space-y-5">
               {sessionFormError && <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 text-sm text-red-700 dark:text-red-300">{sessionFormError}</motion.div>}
@@ -3035,9 +3132,9 @@ export function AdminPanel() {
               <div><label className={labelClass}>Description</label><textarea className={`${inputClass} resize-none`} rows={3} placeholder="Brief description..." value={sessionForm.description} onChange={(e) => setSessionForm({ ...sessionForm, description: e.target.value })} /></div>
             </div>
             <div className="sticky bottom-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 px-8 py-5 flex justify-end gap-3 rounded-b-2xl">
-              <button onClick={() => setShowAddSessionModal(false)} className="px-6 py-3 rounded-xl font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all" disabled={isSubmittingSession}>Cancel</button>
-              <button onClick={handleAddSession} disabled={isSubmittingSession} className="px-6 py-3 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md shadow-red-500/20">
-                {isSubmittingSession ? (<><Loader2 className="w-4 h-4 animate-spin" /> Adding...</>) : (<><Plus className="w-4 h-4" /> Add Session</>)}
+              <button onClick={() => { setShowAddSessionModal(false); setEditingSession(null); }} className="px-6 py-3 rounded-xl font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all" disabled={isSubmittingSession}>Cancel</button>
+              <button onClick={handleAddEditSession} disabled={isSubmittingSession} className="px-6 py-3 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-md shadow-red-500/20">
+                {isSubmittingSession ? (<><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>) : editingSession ? (<><Pencil className="w-4 h-4" /> Save Changes</>) : (<><Plus className="w-4 h-4" /> Add Session</>)}
               </button>
             </div>
           </motion.div>
@@ -3180,6 +3277,14 @@ export function AdminPanel() {
           profile={attendeeProfile}
           onClose={() => setShowProfile(false)}
           hasActiveApplications={false}
+        />
+      )}
+
+      {toast.show && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast({ ...toast, show: false })}
         />
       )}
     </SharedNavigation>
