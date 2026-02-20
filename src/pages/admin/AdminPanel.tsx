@@ -196,6 +196,31 @@ export function AdminPanel() {
   const [selectedIndividual, setSelectedIndividual] = useState<UserProfile | null>(null);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
 
+  // ===== STATISTICS STATE =====
+  type CountMap = { label: string; count: number }[];
+  interface StatsData {
+    totalRegistrations: number;
+    approvedCount: number;
+    pendingCount: number;
+    rejectedCount: number;
+    asuStudents: number;
+    nonAsuStudents: number;
+    paidCount: number;
+    unpaidCount: number;
+    paymentPendingCount: number;
+    totalCheckIns: number;
+    uniqueCheckIns: number;
+    universities: CountMap;
+    faculties: CountMap;
+    departments: CountMap;
+    totalCompanies: number;
+    totalSessions: number;
+    dayStats: { date: string; label: string; checkIns: number; uniqueAttendees: number; asuCheckIns: number; nonAsuCheckIns: number; universities: CountMap; faculties: CountMap }[];
+  }
+  const [statsData, setStatsData] = useState<StatsData | null>(null);
+  const [isLoadingStatistics, setIsLoadingStatistics] = useState(false);
+  const [statsFilterCategory, setStatsFilterCategory] = useState<'university' | 'faculty' | 'registration' | 'payment' | 'asu'>('university');
+
   // ===== COMPANIES STATE =====
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false);
@@ -284,6 +309,85 @@ export function AdminPanel() {
     finally { setIsLoadingCompanies(false); }
   }, []);
 
+  // ===== STATISTICS FETCHING =====
+  const fetchStatistics = useCallback(async () => {
+    setIsLoadingStatistics(true);
+    try {
+      const [attendeesRes, attendanceRes, companiesCountRes, sessionsCountRes] = await Promise.all([
+        supabase.from('attendees').select('user_id, is_asu_student, university, faculty, department, registration_status, payment_status'),
+        supabase.from('attendee_attendance').select('attendee_id, check_in_time, attendees!inner(is_asu_student, university, faculty)').eq('event_id', EVENT_ID),
+        supabase.from('companies').select('*', { count: 'exact', head: true }).eq('event_id', EVENT_ID),
+        supabase.from('sessions').select('*', { count: 'exact', head: true }).eq('event_id', EVENT_ID),
+      ]);
+
+      const attendees = attendeesRes.data || [];
+      const attendance = (attendanceRes.data || []) as any[];
+
+      // Registration counts
+      const approved = attendees.filter(a => a.registration_status === 'approved').length;
+      const pending = attendees.filter(a => a.registration_status === 'pending').length;
+      const rejected = attendees.filter(a => a.registration_status === 'rejected').length;
+      const asu = attendees.filter(a => a.is_asu_student === true).length;
+      const nonAsu = attendees.filter(a => a.is_asu_student === false).length;
+      const paid = attendees.filter(a => a.payment_status === 'paid').length;
+      const paymentPending = attendees.filter(a => a.payment_status === 'pending').length;
+      const unpaid = attendees.filter(a => !a.payment_status || (a.payment_status !== 'paid' && a.payment_status !== 'pending')).length;
+
+      // University breakdown
+      const uniMap = new Map<string, number>();
+      attendees.forEach(a => { const u = a.university || 'Unknown'; uniMap.set(u, (uniMap.get(u) || 0) + 1); });
+      const universities = Array.from(uniMap.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+
+      // Faculty breakdown
+      const facMap = new Map<string, number>();
+      attendees.forEach(a => { const f = a.faculty || 'Unknown'; facMap.set(f, (facMap.get(f) || 0) + 1); });
+      const faculties = Array.from(facMap.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+
+      // Department breakdown
+      const deptMap = new Map<string, number>();
+      attendees.forEach(a => { const d = a.department || 'Unknown'; deptMap.set(d, (deptMap.get(d) || 0) + 1); });
+      const departments = Array.from(deptMap.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+
+      // Unique check-ins
+      const uniqueCheckInIds = new Set(attendance.map(a => a.attendee_id));
+
+      // Day-based stats (only two days)
+      const dayMap = new Map<string, any[]>();
+      attendance.forEach(a => {
+        const date = new Date(a.check_in_time).toISOString().split('T')[0];
+        if (!dayMap.has(date)) dayMap.set(date, []);
+        dayMap.get(date)!.push(a);
+      });
+      const sortedDays = Array.from(dayMap.keys()).sort();
+      const dayStats = sortedDays.slice(0, 2).map((date, i) => {
+        const records = dayMap.get(date)!;
+        const dayUniqueIds = new Set(records.map((r: any) => r.attendee_id));
+        const dayAsu = records.filter((r: any) => r.attendees?.is_asu_student === true).length;
+        const dayNonAsu = records.filter((r: any) => r.attendees?.is_asu_student === false).length;
+        // university breakdown for this day
+        const dayUniMap = new Map<string, number>();
+        records.forEach((r: any) => { const u = r.attendees?.university || 'Unknown'; dayUniMap.set(u, (dayUniMap.get(u) || 0) + 1); });
+        const dayUniversities = Array.from(dayUniMap.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+        // faculty breakdown for this day
+        const dayFacMap = new Map<string, number>();
+        records.forEach((r: any) => { const f = r.attendees?.faculty || 'Unknown'; dayFacMap.set(f, (dayFacMap.get(f) || 0) + 1); });
+        const dayFaculties = Array.from(dayFacMap.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+
+        return { date, label: `Day ${i + 1} — ${new Date(date).toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}`, checkIns: records.length, uniqueAttendees: dayUniqueIds.size, asuCheckIns: dayAsu, nonAsuCheckIns: dayNonAsu, universities: dayUniversities, faculties: dayFaculties };
+      });
+
+      setStatsData({
+        totalRegistrations: attendees.length, approvedCount: approved, pendingCount: pending, rejectedCount: rejected,
+        asuStudents: asu, nonAsuStudents: nonAsu, paidCount: paid, unpaidCount: unpaid, paymentPendingCount: paymentPending,
+        totalCheckIns: attendance.length, uniqueCheckIns: uniqueCheckInIds.size,
+        universities, faculties, departments,
+        totalCompanies: companiesCountRes.count || 0, totalSessions: sessionsCountRes.count || 0,
+        dayStats,
+      });
+    } catch (err) { console.error('Error fetching statistics:', err); }
+    finally { setIsLoadingStatistics(false); }
+  }, []);
+
   useEffect(() => {
     fetchDashboardStats();
   }, [fetchDashboardStats]);
@@ -291,7 +395,8 @@ export function AdminPanel() {
   useEffect(() => {
     if (activeTab === 'sessions') { fetchSessions(); fetchSpeakers(); }
     if (activeTab === 'companies') { fetchCompanies(); }
-  }, [activeTab, fetchSessions, fetchSpeakers, fetchCompanies]);
+    if (activeTab === 'statistics') { fetchStatistics(); }
+  }, [activeTab, fetchSessions, fetchSpeakers, fetchCompanies, fetchStatistics]);
 
   // ===== UNIQUE COMPANY KEY GENERATION =====
   const generateUniqueCompanyKey = async (): Promise<string> => {
@@ -569,88 +674,278 @@ export function AdminPanel() {
   );
 
   // ===== STATISTICS TAB =====
-  const renderStatistics = () => (
-    <div className="space-y-6">
-      {/* View Selector */}
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-2 shadow-sm border border-slate-200 dark:border-slate-700 inline-flex gap-2">
-        <button
-          onClick={() => setStatisticsView('general')}
-          className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === 'general'
-            ? 'bg-red-600 text-white shadow-md'
-            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-            }`}
-        >
-          General Analytics
-        </button>
-        <button
-          onClick={() => setStatisticsView('filter')}
-          className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === 'filter'
-            ? 'bg-red-600 text-white shadow-md'
-            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-            }`}
-        >
-          By Filter
-        </button>
-        <button
-          onClick={() => setStatisticsView('day')}
-          className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === 'day'
-            ? 'bg-red-600 text-white shadow-md'
-            : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
-            }`}
-        >
-          By Day
-        </button>
+  // Helper: stat card
+  const StatCard = ({ label, value, sub, icon, color }: { label: string; value: number | string; sub?: string; icon: string; color: string }) => (
+    <div className="bg-white dark:bg-slate-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-slate-700">
+      <div className="flex items-start justify-between mb-3">
+        <div className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center`}>
+          <span className="material-symbols-outlined text-lg">{icon}</span>
+        </div>
       </div>
-
-      {/* Content based on selected view */}
-      {statisticsView === 'general' && (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-700">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">General Analytics</h2>
-          <p className="text-slate-600 dark:text-slate-400">
-            Overall event statistics and trends will be displayed here.
-          </p>
-        </div>
-      )}
-
-      {statisticsView === 'filter' && (
-        <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-700">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">Filter Analytics</h2>
-          <p className="text-slate-600 dark:text-slate-400">
-            Filter by faculty, university, degree level, and more.
-          </p>
-        </div>
-      )}
-
-      {statisticsView === 'day' && (
-        <div className="space-y-6">
-          {/* Day Selector */}
-          <div className="flex gap-2 flex-wrap">
-            {[1, 2, 3, 4, 5].map((day) => (
-              <button
-                key={day}
-                onClick={() => setSelectedDay(day)}
-                className={`px-6 py-3 rounded-xl font-semibold transition-all ${selectedDay === day
-                  ? 'bg-red-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-orange-300'
-                  }`}
-              >
-                Day {day}
-              </button>
-            ))}
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-700">
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-6">
-              Day {selectedDay} Statistics
-            </h2>
-            <p className="text-slate-600 dark:text-slate-400">
-              Detailed statistics for Day {selectedDay} will be displayed here.
-            </p>
-          </div>
-        </div>
-      )}
+      <p className="text-2xl font-bold text-slate-900 dark:text-white">{value}</p>
+      <p className="text-sm text-slate-500 dark:text-slate-400">{label}</p>
+      {sub && <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{sub}</p>}
     </div>
   );
+
+  // Helper: breakdown table
+  const BreakdownTable = ({ title, data, icon }: { title: string; data: { label: string; count: number }[]; icon: string }) => {
+    const total = data.reduce((s, d) => s + d.count, 0);
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+          <span className="material-symbols-outlined text-red-500">{icon}</span>
+          <h3 className="font-bold text-slate-900 dark:text-white">{title}</h3>
+          <span className="ml-auto text-sm text-slate-500 dark:text-slate-400">{data.length} items</span>
+        </div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-80 overflow-y-auto">
+          {data.map((item, i) => {
+            const pct = total > 0 ? ((item.count / total) * 100).toFixed(1) : '0';
+            return (
+              <div key={i} className="px-6 py-3 flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors">
+                <span className="text-sm font-medium text-slate-900 dark:text-white flex-1 truncate">{item.label}</span>
+                <div className="w-32 bg-slate-100 dark:bg-slate-700 rounded-full h-2 hidden sm:block">
+                  <div className="bg-red-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                </div>
+                <span className="text-lg font-bold text-slate-900 dark:text-white w-12 text-right">{item.count}</span>
+                <span className="text-sm font-medium text-slate-400 w-14 text-right">{pct}%</span>
+              </div>
+            );
+          })}
+          {data.length === 0 && <p className="px-6 py-8 text-center text-sm text-slate-400">No data available</p>}
+        </div>
+      </div>
+    );
+  };
+
+  // ===== STATISTICS TAB =====
+  const renderStatistics = () => {
+    if (isLoadingStatistics || !statsData) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div className="absolute inset-0 border-4 border-transparent border-t-red-500 rounded-full" animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }} />
+          </div>
+          <p className="text-slate-500 dark:text-slate-400 font-medium">Loading statistics...</p>
+        </div>
+      );
+    }
+
+    const s = statsData;
+
+    // Filter view data
+    const filterData: Record<string, { label: string; count: number }[]> = {
+      university: s.universities,
+      faculty: s.faculties,
+      registration: [
+        { label: 'Approved', count: s.approvedCount },
+        { label: 'Pending', count: s.pendingCount },
+        { label: 'Rejected', count: s.rejectedCount },
+      ],
+      payment: [
+        { label: 'Paid', count: s.paidCount },
+        { label: 'Pending', count: s.paymentPendingCount },
+        { label: 'Unpaid', count: s.unpaidCount },
+      ],
+      asu: [
+        { label: 'ASU Students', count: s.asuStudents },
+        { label: 'Other Universities', count: s.nonAsuStudents },
+      ],
+    };
+    const filterLabels: Record<string, string> = { university: 'University', faculty: 'Faculty', registration: 'Registration Status', payment: 'Payment Status', asu: 'ASU vs Others' };
+    const filterIcons: Record<string, string> = { university: 'school', faculty: 'account_balance', registration: 'how_to_reg', payment: 'payments', asu: 'groups' };
+
+    return (
+      <div className="space-y-6">
+        {/* View Selector */}
+        <div className="bg-white dark:bg-slate-800 rounded-2xl p-2 shadow-sm border border-slate-200 dark:border-slate-700 inline-flex gap-2">
+          {(['general', 'filter', 'day'] as const).map(v => (
+            <button key={v} onClick={() => setStatisticsView(v)}
+              className={`px-6 py-3 rounded-xl font-semibold transition-all ${statisticsView === v ? 'bg-red-600 text-white shadow-md' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
+              {v === 'general' ? 'General Analytics' : v === 'filter' ? 'By Filter' : 'By Day'}
+            </button>
+          ))}
+        </div>
+
+        {/* ===== GENERAL VIEW ===== */}
+        {statisticsView === 'general' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            {/* Overview Cards — 2 cols on mobile, 4 on desktop */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Total Registrations" value={s.totalRegistrations} icon="people" color="bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400" />
+              <StatCard label="Approved" value={s.approvedCount} sub={`${s.totalRegistrations > 0 ? ((s.approvedCount / s.totalRegistrations) * 100).toFixed(0) : 0}%`} icon="check_circle" color="bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400" />
+              <StatCard label="Pending" value={s.pendingCount} icon="schedule" color="bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400" />
+              <StatCard label="Rejected" value={s.rejectedCount} icon="cancel" color="bg-rose-100 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400" />
+            </div>
+
+            {/* Second row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Total Check-ins" value={s.totalCheckIns} sub={`${s.uniqueCheckIns} unique`} icon="login" color="bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400" />
+              <StatCard label="ASU Students" value={s.asuStudents} icon="school" color="bg-indigo-100 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400" />
+              <StatCard label="Other Universities" value={s.nonAsuStudents} icon="domain" color="bg-purple-100 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400" />
+              <StatCard label="Paid" value={s.paidCount} icon="paid" color="bg-emerald-100 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400" />
+            </div>
+
+            {/* Third row */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Companies" value={s.totalCompanies} icon="business" color="bg-orange-100 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400" />
+              <StatCard label="Sessions" value={s.totalSessions} icon="event" color="bg-sky-100 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400" />
+            </div>
+
+            {/* University + Faculty breakdown */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <BreakdownTable title="Universities" data={s.universities} icon="school" />
+              <BreakdownTable title="Faculties" data={s.faculties} icon="account_balance" />
+            </div>
+          </motion.div>
+        )}
+
+        {/* ===== FILTER VIEW ===== */}
+        {statisticsView === 'filter' && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+            {/* Filter Category Chips */}
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(filterLabels) as Array<keyof typeof filterLabels>).map(key => (
+                <button key={key} onClick={() => setStatsFilterCategory(key as any)}
+                  className={`px-5 py-2.5 rounded-xl font-semibold text-sm flex items-center gap-2 transition-all ${statsFilterCategory === key
+                    ? 'bg-red-600 text-white shadow-md shadow-red-500/20'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-red-300'}`}>
+                  <span className="material-symbols-outlined text-base">{filterIcons[key]}</span>
+                  {filterLabels[key]}
+                </button>
+              ))}
+            </div>
+
+            {/* Filtered Results */}
+            <BreakdownTable title={`Breakdown by ${filterLabels[statsFilterCategory]}`} data={filterData[statsFilterCategory] || []} icon={filterIcons[statsFilterCategory]} />
+
+            {/* Summary card */}
+            {(() => {
+              const currentData = filterData[statsFilterCategory] || [];
+              const total = currentData.reduce((sum, d) => sum + d.count, 0);
+              const topItem = currentData.length > 0 ? currentData[0] : null;
+              const topPct = topItem && total > 0 ? ((topItem.count / total) * 100).toFixed(1) : '0';
+              const colors = ['bg-red-500', 'bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500', 'bg-sky-500', 'bg-pink-500', 'bg-indigo-500'];
+              return (
+                <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  {/* Header */}
+                  <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-red-500">insights</span>
+                    <h3 className="font-bold text-slate-900 dark:text-white">Summary — {filterLabels[statsFilterCategory]}</h3>
+                  </div>
+
+                  <div className="p-6">
+                    {/* Metric cards row */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                      {/* Total */}
+                      <div className="bg-blue-50 dark:bg-blue-900/10 rounded-xl p-4 border border-blue-100 dark:border-blue-900/30">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-sm">functions</span>
+                          </div>
+                          <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">Total</span>
+                        </div>
+                        <p className="text-4xl font-extrabold text-blue-700 dark:text-blue-300">{total}</p>
+                      </div>
+
+                      {/* Highest */}
+                      <div className="bg-emerald-50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-100 dark:border-emerald-900/30">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                            <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-sm">trending_up</span>
+                          </div>
+                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Top</span>
+                        </div>
+                        <p className="text-2xl font-extrabold text-emerald-700 dark:text-emerald-300 truncate">{topItem?.label || '—'}</p>
+                        <p className="text-sm text-emerald-500 mt-0.5">{topItem ? `${topItem.count} (${topPct}%)` : ''}</p>
+                      </div>
+                    </div>
+
+                    {/* Distribution bar */}
+                    {currentData.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">Distribution</p>
+                        <div className="flex h-4 rounded-full overflow-hidden mb-3">
+                          {currentData.map((item, i) => (
+                            <div key={i} className={`${colors[i % colors.length]} transition-all`} style={{ width: `${total > 0 ? (item.count / total) * 100 : 0}%` }} title={`${item.label}: ${item.count}`} />
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                          {currentData.slice(0, 6).map((item, i) => (
+                            <div key={i} className="flex items-center gap-1.5">
+                              <div className={`w-2.5 h-2.5 rounded-full ${colors[i % colors.length]}`} />
+                              <span className="text-xs text-slate-600 dark:text-slate-400">{item.label} <span className="font-semibold text-slate-900 dark:text-white">({item.count})</span></span>
+                            </div>
+                          ))}
+                          {currentData.length > 6 && <span className="text-xs text-slate-400">+{currentData.length - 6} more</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </motion.div>
+        )
+        }
+
+        {/* ===== BY DAY VIEW ===== */}
+        {
+          statisticsView === 'day' && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+              {/* Day Selector — exactly 2 days */}
+              <div className="flex gap-3 flex-wrap">
+                {s.dayStats.length === 0 ? (
+                  <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 shadow-sm border border-slate-200 dark:border-slate-700 w-full text-center">
+                    <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-700 mb-3">event_busy</span>
+                    <p className="text-lg font-semibold text-slate-600 dark:text-slate-400">No check-in data yet</p>
+                    <p className="text-sm text-slate-500 mt-1">Check-in statistics will appear here once attendees start checking in.</p>
+                  </div>
+                ) : (
+                  <>
+                    {s.dayStats.map((day, i) => (
+                      <button key={day.date} onClick={() => setSelectedDay(i + 1)}
+                        className={`px-6 py-3 rounded-xl font-semibold transition-all flex items-center gap-2 ${selectedDay === i + 1
+                          ? 'bg-red-600 text-white shadow-md shadow-red-500/20'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:border-red-300'}`}>
+                        <span className="material-symbols-outlined text-base">calendar_today</span>
+                        {day.label}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              {/* Selected Day Stats */}
+              {s.dayStats.length > 0 && (() => {
+                const dayIndex = Math.min(selectedDay - 1, s.dayStats.length - 1);
+                const day = s.dayStats[dayIndex];
+                return (
+                  <div className="space-y-6">
+                    {/* Day overview cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <StatCard label="Total Check-ins" value={day.checkIns} icon="login" color="bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400" />
+                      <StatCard label="Unique Attendees" value={day.uniqueAttendees} icon="badge" color="bg-blue-100 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400" />
+                      <StatCard label="ASU Check-ins" value={day.asuCheckIns} icon="school" color="bg-indigo-100 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400" />
+                      <StatCard label="Other Uni Check-ins" value={day.nonAsuCheckIns} icon="domain" color="bg-purple-100 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400" />
+                    </div>
+
+                    {/* Day breakdowns */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <BreakdownTable title={`${day.label} — Universities`} data={day.universities} icon="school" />
+                      <BreakdownTable title={`${day.label} — Faculties`} data={day.faculties} icon="account_balance" />
+                    </div>
+                  </div>
+                );
+              })()}
+            </motion.div>
+          )
+        }
+      </div >
+    );
+  };
+
 
   // ===== SESSIONS TAB =====
   const renderSessions = () => (
