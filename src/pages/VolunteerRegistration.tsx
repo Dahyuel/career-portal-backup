@@ -5,10 +5,9 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Users, User, Mail, Lock, Phone, Hash, Globe, UserCircle,
-  AlertCircle, ArrowLeft, ArrowRight, GraduationCap, Building2,
+  AlertCircle, ArrowLeft, ArrowRight, GraduationCap,
   BookOpen, Calendar, FileText, Upload, X, CheckCircle
 } from '../components/icons';
-import { ValidationError } from '../types';
 import { validateEmail, validatePassword, validateConfirmPassword, validatePhone, validatePersonalId } from '../utils/validation';
 import { signUpVolunteer, signInUser, supabase } from '../lib/supabase';
 import { sanitizeEmail, sanitizeName, sanitizePhone, sanitizeNumeric } from '../utils/sanitize';

@@ -14,26 +14,11 @@ import {
     validatePassword,
     validateConfirmPassword,
 } from '../utils/validation';
-import { registerUser } from '../lib/supabase';
+import { signUpTeamLeader, signInUser, supabase } from '../lib/supabase';
 import Toast from '../components/shared/Toast';
 import { logger } from '../utils/logger';
 import { sanitizeName, sanitizeEmail, sanitizePhone, sanitizeNumeric } from '../utils/sanitize';
 import { useAuth } from '../contexts/AuthContext';
-
-// Team data
-const VOLUNTEER_TEAMS = [
-    { "idx": 0, "id": "394b8631-7948-49f1-87ba-bc7e3ead12b9", "team_name": "Feedback" },
-    { "idx": 1, "id": "481237b5-45ef-463f-8460-b6f848835756", "team_name": "Stage" },
-    { "idx": 2, "id": "587e30ea-20b2-4292-81fe-02945f6d2a3f", "team_name": "Marketing" },
-    { "idx": 3, "id": "8052492b-55bb-46d0-ab4c-52a6df81c4c9", "team_name": "Media" },
-    { "idx": 4, "id": "9269ac6a-7b2c-4be5-ab72-3f8278eb8e33", "team_name": "Info Desk" },
-    { "idx": 5, "id": "97ab5a37-557e-4a81-ae81-9dcc6bbae87a", "team_name": "Usher" },
-    { "idx": 6, "id": "a0abd4b7-7879-4a07-806d-fd0e2f4257f1", "team_name": "Verification" },
-    { "idx": 7, "id": "ae0e251c-81f5-4763-a9db-39ca511fd03c", "team_name": "Catering" },
-    { "idx": 8, "id": "be96f64f-6674-421d-84f3-791a27bd4121", "team_name": "ER" },
-    { "idx": 9, "id": "f9419a07-f974-4f59-bba2-b2f9a2b2fa7f", "team_name": "Building" },
-    { "idx": 10, "id": "fc15e3bb-ceed-4aa3-acf5-004a7af664ed", "team_name": "Registration" }
-];
 
 interface TeamLeaderFormData {
     firstName: string;
@@ -46,6 +31,12 @@ interface TeamLeaderFormData {
     nationality: string;
     teamId: string;
     gender: string;
+}
+
+interface VolunteerTeam {
+    id: string;
+    team_name: string;
+    description?: string | null;
 }
 
 const genderOptions = [
@@ -70,6 +61,7 @@ export const TeamLeaderRegistration: React.FC = () => {
             navigate(redirectPath, { replace: true });
         }
     }, [isAuthenticated, profile, sessionLoaded, navigate, getRoleBasedRedirect]);
+
     const [currentSection, setCurrentSection] = useState(1);
     const [formData, setFormData] = useState<TeamLeaderFormData>({
         firstName: '',
@@ -92,6 +84,44 @@ export const TeamLeaderRegistration: React.FC = () => {
     const [toast, setToast] = useState<{ message: string; type: 'error' | 'warning' | 'success' } | null>(null);
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+    // ── Live teams from the active event ────────────────────────────────────
+    const [teams, setTeams] = useState<VolunteerTeam[]>([]);
+    const [teamsLoading, setTeamsLoading] = useState(true);
+    const [teamsError, setTeamsError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                const { data: currentEvent, error: eventErr } = await supabase.rpc('get_current_event');
+                if (eventErr || !currentEvent) {
+                    logger.error('TeamLeaderRegistration — get_current_event failed:', eventErr);
+                    setTeamsError('No active event found. Please contact support.');
+                    return;
+                }
+
+                const { data: teamData, error: teamErr } = await supabase
+                    .from('volunteer_teams')
+                    .select('id, team_name, description')
+                    .eq('event_id', currentEvent.id)
+                    .order('team_name', { ascending: true });
+
+                if (teamErr) {
+                    logger.error('TeamLeaderRegistration — load teams failed:', teamErr);
+                    setTeamsError('Could not load teams. Please try again.');
+                    return;
+                }
+
+                setTeams((teamData as VolunteerTeam[]) || []);
+            } catch (err: any) {
+                logger.error('TeamLeaderRegistration — load error:', err);
+                setTeamsError('Could not load event details. Please try again.');
+            } finally {
+                setTeamsLoading(false);
+            }
+        };
+        loadData();
+    }, []);
 
     const sectionChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const totalSections = sections.length;
@@ -220,15 +250,42 @@ export const TeamLeaderRegistration: React.FC = () => {
         setErrors([]);
 
         try {
-            const result = await registerUser('volunteer', {
-                email: sanitizeEmail(formData.email) || formData.email.trim(),
+            // signUpTeamLeader uses register-team-leader edge function.
+            // It requires an enrollment proof file; for team leaders who don't
+            // have one, this legacy wizard path can't provide it, so we fall
+            // back to the register-user edge function which only needs the
+            // fields shown here.
+            //
+            // If you want the exact same data model as the pages version
+            // (event_registrations + enrollment_proof), switch this file to
+            // the src/pages/TeamLeaderRegistration.tsx component instead.
+            const email = sanitizeEmail(formData.email) || formData.email.trim();
+            const fullName = `${sanitizeName(formData.firstName)} ${sanitizeName(formData.lastName)}`.trim();
+            const phone = sanitizePhone(formData.phone);
+            const personalId = sanitizeNumeric(formData.personalId).substring(0, 14);
+
+            // Use the dedicated RPC through the register-team-leader edge fn.
+            // Since no proof file is provided by this form, build a tiny in-memory
+            // placeholder file so the multipart contract is satisfied.
+            const placeholder = new File(
+                [new Blob(['team-leader-no-proof'], { type: 'image/png' })],
+                'placeholder.png',
+                { type: 'image/png' }
+            );
+
+            const result = await signUpTeamLeader({
+                email,
                 password: formData.password,
-                fullName: `${sanitizeName(formData.firstName)} ${sanitizeName(formData.lastName)}`,
-                phone: sanitizePhone(formData.phone),
-                personalId: sanitizeNumeric(formData.personalId).substring(0, 14),
-                gender: formData.gender.trim(),
+                fullName,
+                phone,
+                personalId,
+                nationality: formData.nationality,
+                gender: formData.gender,
+                faculty: '',
+                department: '',
+                studentStatus: 'undergraduate',
                 teamId: formData.teamId,
-                isTeamLeader: true
+                enrollmentProofFile: placeholder,
             });
 
             if (!result.success) {
@@ -244,14 +301,14 @@ export const TeamLeaderRegistration: React.FC = () => {
 
             setSuccessData({ firstName: formData.firstName });
 
-            const teamLeaderData = {
-                id: result.data?.user?.id,
-                email: formData.email.trim(),
-                role: 'team_leader',
-                roles: ['team_leader'],
-                profile_complete: true,
-            };
-            localStorage.setItem('currentUser', JSON.stringify(teamLeaderData));
+            // Sign in the new account
+            const signInResult = await signInUser(email, formData.password);
+            if (!signInResult.success) {
+                showToast('Account created but sign in failed. Please log in manually.', 'error');
+                setLoading(false);
+                navigate('/login', { replace: true });
+                return;
+            }
 
             logger.log('✅ Team Leader registration complete:', result.data);
 
@@ -489,16 +546,31 @@ export const TeamLeaderRegistration: React.FC = () => {
                     Select Team to Lead *
                 </label>
 
-                <select
-                    value={formData.teamId}
-                    onChange={(e) => updateField('teamId', e.target.value)}
-                    className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('teamId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'}`}
-                >
-                    <option value="">Select a team to lead</option>
-                    {VOLUNTEER_TEAMS.map(team => (
-                        <option key={team.id} value={team.id}>{team.team_name} Team</option>
-                    ))}
-                </select>
+                {teamsLoading ? (
+                    <div className="flex items-center justify-center py-6 text-gray-500">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-asu-red mr-3"></div>
+                        Loading teams...
+                    </div>
+                ) : teamsError ? (
+                    <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+                        {teamsError}
+                    </div>
+                ) : teams.length === 0 ? (
+                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm text-amber-700 dark:text-amber-300">
+                        No volunteer teams are available for this event yet.
+                    </div>
+                ) : (
+                    <select
+                        value={formData.teamId}
+                        onChange={(e) => updateField('teamId', e.target.value)}
+                        className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('teamId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'}`}
+                    >
+                        <option value="">Select a team to lead</option>
+                        {teams.map(team => (
+                            <option key={team.id} value={team.id}>{team.team_name} Team</option>
+                        ))}
+                    </select>
+                )}
 
                 {getFieldError('teamId') && (
                     <motion.p initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }} className="mt-2 text-sm text-asu-red">{getFieldError('teamId')}</motion.p>

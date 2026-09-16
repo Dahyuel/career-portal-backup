@@ -95,7 +95,7 @@ export const VerificationDashboard: React.FC = () => {
 
         try {
             const { data, error } = await supabase.rpc(
-                'get_verification_notifications',
+                'verif_team_get_notifications',
                 { p_event_id: profile.event_id }
             );
 
@@ -280,7 +280,7 @@ export const VerificationDashboard: React.FC = () => {
             const offset = page * VERIFICATION_PAGE_SIZE;
 
             // Fetch the current page of the active sub-tab
-            const { data: mainData, error: mainError } = await supabase.rpc('get_verification_attendees', {
+            const { data: mainData, error: mainError } = await supabase.rpc('verif_team_get_attendees', {
                 p_is_asu: isAsuTab,
                 p_search_term: searchTerm.trim(),
                 p_status_filter: statusSubTab,
@@ -307,7 +307,7 @@ export const VerificationDashboard: React.FC = () => {
             const otherStatuses = (['pending', 'approved', 'rejected'] as const).filter(s => s !== statusSubTab);
             const [countRes1, countRes2] = await Promise.all(
                 otherStatuses.map(status =>
-                    supabase.rpc('get_verification_attendees', {
+                    supabase.rpc('verif_team_get_attendees', {
                         p_is_asu: isAsuTab,
                         p_search_term: searchTerm.trim(),
                         p_status_filter: status,
@@ -435,7 +435,7 @@ export const VerificationDashboard: React.FC = () => {
         try {
             setProcessingAction(status);
 
-            const { data, error } = await supabase.rpc('update_attendee_verification_status', {
+            const { data, error } = await supabase.rpc('verif_team_update_attendee_status', {
                 p_attendee_user_id: userId,
                 p_status: status,
                 p_event_id: profile.event_id,

@@ -1,7 +1,7 @@
-// components/teamleader/BonusActionModal.tsx
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 import Toast from '../shared/Toast';
 import { logger } from '../../utils/logger';
 
@@ -33,6 +33,7 @@ const BonusActionModal: React.FC<BonusActionModalProps> = ({
     volunteer,
     onSuccess
 }) => {
+    const { profile } = useAuth();
     const [selectedPoints, setSelectedPoints] = useState<number | null>(null);
     const [description, setDescription] = useState('');
     const [processing, setProcessing] = useState(false);
@@ -50,23 +51,28 @@ const BonusActionModal: React.FC<BonusActionModalProps> = ({
             return;
         }
 
+        if (!profile?.event_id) {
+            showToast('No active event — please reload.', 'error');
+            return;
+        }
+
         setProcessing(true);
         try {
             const { data, error } = await supabase.rpc('award_bonus_points', {
                 p_volunteer_user_id: volunteer.user_id,
-                p_event_id: EVENT_ID,
+                p_event_id: profile.event_id,
                 p_points: selectedPoints,
                 p_description: description.trim() || 'Completed bonus task'
             });
 
             if (error) {
                 logger.error('Error awarding bonus:', error);
-                showToast('Failed to award bonus points', 'error');
+                showToast(error.message || 'Failed to award bonus points', 'error');
                 return;
             }
 
-            if (!data.success) {
-                showToast(data.message, 'warning');
+            if (!data?.success) {
+                showToast(data?.error || 'Failed to award bonus points', 'warning');
                 return;
             }
 

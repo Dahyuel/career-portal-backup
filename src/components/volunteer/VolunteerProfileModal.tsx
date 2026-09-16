@@ -231,7 +231,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                         </div>
 
                                                         {/* Stats - Only for volunteers */}
-                                                        {authProfile.isVolunteer && (
+                                                        {authProfile.isVolunteer && authProfile.volunteer && (
                                                             <>
                                                                 <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
                                                                     <span className="material-symbols-outlined text-red-600">emoji_events</span>

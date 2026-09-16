@@ -24,19 +24,15 @@ export const LoginForm: React.FC = () => {
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   // ── Shared redirect decision ─────────────────────────────────────────────
-  // Attendees without an event → /select-event
-  // Everyone else (volunteer, staff, admin, employer) → role dashboard
+  // Attendees ALWAYS go through event selection after login, even if they
+  // have a previously-bound event_id. This makes the selector authoritative.
+  // Everyone else (volunteer, staff, admin, employer) → role dashboard.
   const redirectBasedOnRole = (p: { role: string; event_id?: string } | null) => {
     if (!p?.role) return;
 
     if (p.role === 'attendee') {
-      if (!p.event_id) {
-        logger.log('👤 Attendee without event → /select-event');
-        navigate('/select-event', { replace: true });
-      } else {
-        logger.log('👤 Attendee with event → /attendee');
-        navigate('/attendee', { replace: true });
-      }
+      logger.log('👤 Attendee → /select-event (forced post-login)');
+      navigate('/select-event', { replace: true });
       return;
     }
 
@@ -46,20 +42,18 @@ export const LoginForm: React.FC = () => {
   };
 
   // ── Redirect once profile is loaded ──────────────────────────────────────
-  // No polling, no timeouts. We simply wait for AuthContext to give us a
-  // profile with a role, then navigate once.
+  // Fires whenever AuthContext publishes a profile with a role. This is a
+  // safety net; handleSubmit usually wins the race and sets isRedirecting.
   useEffect(() => {
     if (!isAuthenticated || !sessionLoaded) return;
-    if (!profile?.role) return;      // profile not ready — keep waiting
-    if (isRedirecting) return;       // already redirecting
+    if (!profile?.role) return;
+    if (isRedirecting) return;
 
     setIsRedirecting(true);
 
     const role = profile.role;
-    const target =
-      role === 'attendee'
-        ? (profile.event_id ? '/attendee' : '/select-event')
-        : getRoleBasedRedirect(role);
+    // Attendees always go through event selection after login.
+    const target = role === 'attendee' ? '/select-event' : getRoleBasedRedirect(role);
 
     logger.log(`➡️ ${role} → ${target}`);
     navigate(target, { replace: true });
@@ -128,36 +122,36 @@ export const LoginForm: React.FC = () => {
 
       logger.log('✅ Auth successful — waiting for AuthContext to load profile...');
 
-      // Do NOT navigate here. The useEffect above will fire as soon as
-      // AuthContext publishes a profile with a role, and route correctly.
-      // We keep `loading=true` until the redirect fires so the button stays
-      // disabled and the user sees "Signing In..." meanwhile.
-      // Block the auto-redirect useEffect while we handle navigation here
-      setIsRedirecting(true);
-
-      // Wait for AuthContext to populate profile (auto-resolve may need a
-      // round-trip to fetch the active event id).
-      await new Promise(resolve => setTimeout(resolve, 400));
-
-      // Re-read profile from localStorage as the source of truth after
-      // AuthContext has had time to cache it. If it's not there yet, wait
-      // another beat.
+      // Poll localStorage for the cached profile. AuthContext's SIGNED_IN
+      // handler runs asynchronously and may still be in-flight. We wait
+      // briefly, then route based on whatever role we find.
       let cached: any = null;
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < 15; i++) {
         try {
           const stored = localStorage.getItem('currentUser');
           if (stored) {
-            cached = JSON.parse(stored);
-            if (cached?.role) break;
+            const parsed = JSON.parse(stored);
+            // Only accept a cached profile that has a role set
+            if (parsed?.role) {
+              cached = parsed;
+              break;
+            }
+            // Even without a role, remember the last thing we saw
+            cached = parsed;
           }
         } catch { /* ignore */ }
         await new Promise(resolve => setTimeout(resolve, 150));
       }
 
+      // Block the safety-net useEffect from double-navigating.
+      setIsRedirecting(true);
+
       if (cached?.role) {
         redirectBasedOnRole(cached);
       } else {
-        // Fallback: send to select-event only if we truly couldn't determine role
+        // Fallback: no role yet — send to select-event which is safe for
+        // attendees. Non-attendees will get bounced by ProtectedRoute to
+        // their correct dashboard once their profile resolves.
         logger.warn('⚠️ Profile did not load in time — falling back to /select-event');
         navigate('/select-event', { replace: true });
       }

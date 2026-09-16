@@ -2,7 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeCanvas } from 'qrcode.react';
 import { AttendeeProfile } from '../hooks/useAttendeeProfile';
-import { supabase, uploadFile } from '../lib/supabase';
+import {
+    supabase,
+    uploadFile,
+    getActiveEvents,
+    checkEventRegistration,
+    FairEvent,
+} from '../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logger } from '../utils/logger';
 import { useAuth } from '../contexts/AuthContext';
@@ -33,6 +39,15 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'qrcode'>('overview');
     const [showRestrictionModal, setShowRestrictionModal] = useState(false);
 
+    // ── Event switcher state ─────────────────────────────────────────────
+    const [showEventSwitcher, setShowEventSwitcher] = useState(false);
+    const [events, setEvents] = useState<FairEvent[]>([]);
+    const [eventsLoading, setEventsLoading] = useState(false);
+    const [eventsError, setEventsError] = useState<string | null>(null);
+    const [switchingEventId, setSwitchingEventId] = useState<string | null>(null);
+    const [currentEventName, setCurrentEventName] = useState<string | null>(null);
+    const [eventNameLoading, setEventNameLoading] = useState<boolean>(!!eventId);
+
     // Editable field states
     const [editingName, setEditingName] = useState(false);
     const [editName, setEditName] = useState('');
@@ -52,6 +67,39 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
         setSaveMessage({ text, type });
         setTimeout(() => setSaveMessage(null), 3000);
     };
+
+    // ── Load current event name (for the header chip) ────────────────────
+    useEffect(() => {
+        let cancelled = false;
+        if (!eventId) {
+            setCurrentEventName(null);
+            setEventNameLoading(false);
+            return;
+        }
+
+        setEventNameLoading(true);
+        (async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('events')
+                    .select('name')
+                    .eq('id', eventId)
+                    .maybeSingle();
+                if (cancelled) return;
+                if (error) {
+                    logger.warn('Failed to load current event name:', error);
+                    return;
+                }
+                setCurrentEventName(data?.name ?? null);
+            } catch (err) {
+                logger.warn('Failed to load current event name:', err);
+            } finally {
+                if (!cancelled) setEventNameLoading(false);
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [eventId]);
 
     // ── Generate signed URLs whenever profile.cv_url / enrollment_proof_url changes ──
     useEffect(() => {
@@ -109,14 +157,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     }, [profile?.cv_url, profile?.enrollment_proof_url, profile]);
 
     // ── Refresh profile without full page reload ──
-    // Pass event_id, user_id, user_email explicitly so AuthContext doesn't need
-    // to re-fetch the session, and skip cache invalidation (forceRefresh=false).
     const silentRefreshProfile = async () => {
-        console.log('[SILENT REFRESH] Called with:', {
-            hasProfileId: !!authProfile?.id,
-            hasEmail: !!authProfile?.email,
-            eventId,
-        });
         try {
             if (!authProfile?.id || !authProfile?.email || !eventId) {
                 console.warn('[SILENT REFRESH] Missing required values — skipping');
@@ -136,17 +177,13 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
         }
         setSaving(true);
         try {
-            console.log('[SAVE NAME] Sending:', editName.trim());
-            const { data, error } = await supabase.rpc('update_display_name', { p_full_name: editName.trim() });
-            console.log('[SAVE NAME] RPC response:', { data, error });
+            const { error } = await supabase.rpc('update_display_name', { p_full_name: editName.trim() });
             if (error) throw error;
 
             showSaveMsg('Name updated successfully!', 'success');
             setEditingName(false);
 
-            console.log('[SAVE NAME] Calling silent refresh...');
             await silentRefreshProfile();
-            console.log('[SAVE NAME] Silent refresh done');
             onProfileUpdate?.();
         } catch (err: any) {
             console.error('[SAVE NAME] Failed:', err);
@@ -227,7 +264,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
 
     const handleCVUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        event.target.value = ''; // allow re-selecting the same file
+        event.target.value = '';
         if (!file || !profile) return;
 
         if (file.type !== 'application/pdf') {
@@ -244,7 +281,6 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
         setUploadMessage('');
 
         try {
-            // 1. Delete old CV from bucket if one exists (any extension)
             if (profile.cv_url) {
                 const parts = profile.cv_url.split('/');
                 const personalId = parts[0];
@@ -260,7 +296,6 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                 }
             }
 
-            // 2. Upload new CV
             const { data: uploadData, error: uploadError } = await uploadFile(
                 'CV',
                 profile.id,
@@ -270,7 +305,6 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
 
             if (uploadError || !uploadData) throw new Error(uploadError?.message || 'Upload failed');
 
-            // 3. Save the PATH (not a signed URL) to the DB
             const { error: updateError } = await supabase
                 .rpc('update_attendee_cv', { p_cv_url: uploadData.path });
 
@@ -284,6 +318,86 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
             setUploadMessage(error.message || 'Failed to upload CV');
         } finally {
             setUploading(false);
+        }
+    };
+
+    // ── Open the event switcher modal and load active events ────────────
+    const handleOpenEventSwitcher = async () => {
+        setShowEventSwitcher(true);
+        setEventsError(null);
+        setEventsLoading(true);
+        try {
+            const { data, error } = await getActiveEvents();
+            if (error) {
+                setEventsError(error.message);
+                return;
+            }
+            // Hide the currently-selected event from the list — no point
+            // offering to switch to the one already bound.
+            const filtered = (data || []).filter(e => e.id !== eventId);
+            setEvents(filtered);
+        } catch (err: any) {
+            logger.error('Failed to load events for switcher:', err);
+            setEventsError('Could not load events. Please try again.');
+        } finally {
+            setEventsLoading(false);
+        }
+    };
+
+    // ── Switch to a different event ─────────────────────────────────────
+    const handleSwitchEvent = async (event: FairEvent) => {
+        if (!authProfile?.id || !authProfile?.email) return;
+
+        setSwitchingEventId(event.id);
+
+        try {
+            // 1. Check if the user is already registered for this event.
+            const { data: registration, error: regError } = await checkEventRegistration(event.id);
+
+            if (regError) {
+                setEventsError(regError.message);
+                setSwitchingEventId(null);
+                return;
+            }
+
+            if (registration) {
+                // 2a. Registered → rebind the profile to this event and
+                //     reload the dashboard so all RPCs scope to it.
+                const updated = await refreshProfile(
+                    event.id,
+                    authProfile.id,
+                    authProfile.email,
+                    true
+                );
+
+                if (!updated?.event_id) {
+                    logger.error('Event switch did not bind event_id', {
+                        eventId: event.id,
+                        updated,
+                    });
+                    setEventsError('Could not activate this event. Please try again.');
+                    setSwitchingEventId(null);
+                    return;
+                }
+
+                // Close modal + card, then reload the dashboard so every
+                // hook and RPC picks up the new EVENT_ID.
+                setShowEventSwitcher(false);
+                onClose();
+                const role = updated.role || 'attendee';
+                navigate(getRoleBasedRedirect(role), { replace: true });
+                return;
+            }
+
+            // 2b. Not registered → send to registration form for that event.
+            setShowEventSwitcher(false);
+            onClose();
+            navigate(`/register-event?eventId=${event.id}`, { replace: false });
+        } catch (err: any) {
+            logger.error('Error switching event:', err);
+            setEventsError(err.message || 'Something went wrong. Please try again.');
+        } finally {
+            setSwitchingEventId(null);
         }
     };
 
@@ -407,11 +521,38 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                             </>
                         )}
                     </motion.div>
+
+                    {/* ── Current event chip + switch button ─────────────── */}
+                    <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.25 }}
+                        className="mt-2 flex flex-wrap items-center gap-2"
+                    >
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 text-xs font-medium text-red-700 dark:text-red-300">
+                            <span className="material-symbols-outlined text-sm">event</span>
+                            {eventNameLoading ? (
+                                <span className="inline-block w-24 h-3 rounded-full bg-red-200/60 dark:bg-red-800/40 animate-pulse" />
+                            ) : (
+                                currentEventName || 'No event selected'
+                            )}
+                        </span>
+                        <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
+                            onClick={handleOpenEventSwitcher}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 bg-gray-100 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-gray-200 dark:border-slate-700 hover:border-red-200 dark:hover:border-red-800/50 transition-all"
+                        >
+                            <span className="material-symbols-outlined text-sm">swap_horiz</span>
+                            Switch Event
+                        </motion.button>
+                    </motion.div>
+
                     <motion.p
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.3 }}
-                        className="text-gray-600 dark:text-gray-400 text-sm"
+                        className="text-gray-600 dark:text-gray-400 text-sm mt-1"
                     >
                         {profile.university || 'ASU Student'}
                     </motion.p>
@@ -479,7 +620,6 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                 transition={{ duration: 0.3 }}
                                 className="space-y-6"
                             >
-                                {/* Back to Volunteer Dashboard — only for non-attendee roles */}
                                 {authProfile?.role && authProfile.role !== 'attendee' && (
                                     <motion.button
                                         initial={{ opacity: 0, y: -8 }}
@@ -932,6 +1072,156 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                 >
                                     Understood
                                 </motion.button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* ── Event Switcher Modal ─────────────────────────────────── */}
+            <AnimatePresence>
+                {showEventSwitcher && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                        onClick={() => !switchingEventId && setShowEventSwitcher(false)}
+                    >
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            transition={{ type: 'spring', duration: 0.4 }}
+                            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-gray-100 dark:border-slate-800"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            {/* Header */}
+                            <div className="flex items-center justify-between p-5 border-b border-gray-100 dark:border-slate-800">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
+                                        <span className="material-symbols-outlined text-red-600 dark:text-red-400">swap_horiz</span>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Switch Event</h3>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            Pick another active event to join
+                                        </p>
+                                    </div>
+                                </div>
+                                <motion.button
+                                    whileHover={{ scale: 1.1, rotate: 90 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => !switchingEventId && setShowEventSwitcher(false)}
+                                    disabled={!!switchingEventId}
+                                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-40"
+                                >
+                                    <span className="material-symbols-outlined">close</span>
+                                </motion.button>
+                            </div>
+
+                            {/* Body */}
+                            <div className="p-5 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                                {eventsError && (
+                                    <motion.div
+                                        initial={{ opacity: 0, y: -8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2"
+                                    >
+                                        <span className="material-symbols-outlined text-red-600 dark:text-red-400 text-lg flex-shrink-0">error</span>
+                                        <p className="text-sm text-red-700 dark:text-red-300">{eventsError}</p>
+                                    </motion.div>
+                                )}
+
+                                {eventsLoading ? (
+                                    <div className="flex flex-col items-center justify-center py-12">
+                                        <motion.div
+                                            animate={{ rotate: 360 }}
+                                            transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                                            className="rounded-full h-10 w-10 border-b-2 border-red-600 mb-3"
+                                        />
+                                        <p className="text-sm text-gray-500 dark:text-gray-400">Loading events...</p>
+                                    </div>
+                                ) : events.length === 0 ? (
+                                    <div className="text-center py-10">
+                                        <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">event_busy</span>
+                                        <p className="text-gray-600 dark:text-gray-400 font-medium">No other active events</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                            You're already in the only active event.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {events.map((event, index) => (
+                                            <motion.button
+                                                key={event.id}
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: 0.05 * index }}
+                                                onClick={() => handleSwitchEvent(event)}
+                                                disabled={!!switchingEventId}
+                                                className="w-full text-left group bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl p-4 hover:border-red-400 dark:hover:border-red-500 hover:shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-1">
+                                                            <h4 className="font-semibold text-gray-900 dark:text-white truncate">
+                                                                {event.name}
+                                                            </h4>
+                                                            {event.is_current && (
+                                                                <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full flex-shrink-0">
+                                                                    Current
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                                                            {event.start_date && (
+                                                                <span className="flex items-center gap-1">
+                                                                    <span className="material-symbols-outlined text-sm">calendar_today</span>
+                                                                    {new Date(event.start_date).toLocaleDateString('en-US', {
+                                                                        month: 'short',
+                                                                        day: 'numeric',
+                                                                        year: 'numeric',
+                                                                    })}
+                                                                </span>
+                                                            )}
+                                                            {event.venue_name && (
+                                                                <span className="flex items-center gap-1">
+                                                                    <span className="material-symbols-outlined text-sm">location_on</span>
+                                                                    {event.venue_name}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex-shrink-0 pt-0.5">
+                                                        {switchingEventId === event.id ? (
+                                                            <motion.div
+                                                                animate={{ rotate: 360 }}
+                                                                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                                                                className="rounded-full h-5 w-5 border-b-2 border-red-600"
+                                                            />
+                                                        ) : (
+                                                            <span className="material-symbols-outlined text-gray-400 group-hover:text-red-600 transition-colors">
+                                                                arrow_forward
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </motion.button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Footer */}
+                            <div className="px-5 py-3 border-t border-gray-100 dark:border-slate-800 bg-gray-50 dark:bg-slate-900/50">
+                                <p className="text-xs text-gray-500 dark:text-gray-400 flex items-start gap-2">
+                                    <span className="material-symbols-outlined text-sm flex-shrink-0 mt-0.5">info</span>
+                                    <span>
+                                        Switching events reloads your dashboard with data for the selected event.
+                                        If you're not yet registered for it, you'll be taken to the registration form.
+                                    </span>
+                                </p>
                             </div>
                         </motion.div>
                     </motion.div>

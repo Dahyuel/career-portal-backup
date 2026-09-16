@@ -161,18 +161,16 @@ export const BuildTeamDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
-
   const fetchNotifications = useCallback(async () => {
-    if (!profile?.id || !profile?.roles) return;
+    if (!profile?.id || !profile?.event_id) return;
     try {
-      const { data, error } = await getBuildingNotificationsRPC(EVENT_ID);
+      const { data, error } = await getBuildingNotificationsRPC(profile.event_id);
       if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
       logger.error('Error fetching notifications:', error);
     }
-  }, [profile?.id, profile?.roles]);
+  }, [profile?.id, profile?.event_id]);
 
   useEffect(() => {
     fetchNotifications();
@@ -195,11 +193,9 @@ export const BuildTeamDashboard: React.FC = () => {
   // Fetch volunteer stats on mount
   useEffect(() => {
     const fetchVolunteerStats = async () => {
-      // Use profile.id directly if user is not available from useAuth immediately, though useAuth ensures user is loaded
-      // We'll use a local ID variable to be safe
       const userId = profile?.id;
 
-      if (!userId) return;
+      if (!userId || !profile?.event_id) return;
 
       logger.log('📊 [DASHBOARD] Fetching stats for:', userId);
       setUserStats(prev => ({ ...prev, loading: true }));
@@ -238,10 +234,10 @@ export const BuildTeamDashboard: React.FC = () => {
     };
 
     fetchVolunteerStats();
-  }, [profile?.id, refreshTrigger]);
+  }, [profile?.id, profile?.event_id, refreshTrigger]);
 
-  // Fetch sessions from backend - Uses index: idx_sessions_event_time_status
   const fetchSessions = useCallback(async () => {
+    if (!profile?.event_id) return;
     try {
       setIsLoadingSessions(true);
       const { data, error } = await getBuildingSessionsRPC();
@@ -257,7 +253,7 @@ export const BuildTeamDashboard: React.FC = () => {
     } finally {
       setIsLoadingSessions(false);
     }
-  }, []);
+  }, [profile?.event_id]);
 
   // Load sessions when tab changes to sessions
   useEffect(() => {

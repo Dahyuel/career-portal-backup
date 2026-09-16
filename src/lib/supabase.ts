@@ -3,13 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import { logger } from '../utils/logger';
 import { sanitizeSearchQuery } from '../utils/sanitize';
 
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-export const DEFAULT_EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
@@ -667,24 +666,6 @@ export const getAttendeeByPersonalId = async (personalId: string) => {
   }
 };
 
-export const getAttendeeByUUID = async (uuid: string, eventId: string = DEFAULT_EVENT_ID) => {
-  try {
-    const { data, error } = await supabase
-      .rpc('infodesk_get_attendee_by_uuid', { p_uuid: uuid, p_event_id: eventId });
-
-    if (error) {
-      logger.error('infodesk_get_attendee_by_uuid Error:', error);
-      return { data: null, error: { message: error.message } };
-    }
-
-    if (!data) return { data: null, error: { message: 'Attendee not found' } };
-
-    return { data: data as any, error: null };
-  } catch (error: any) {
-    logger.error('getAttendeeByUUID Exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
 
 export const processAttendance = async (personalId: string, action: 'enter' | 'exit') => {
   try {
@@ -734,36 +715,6 @@ export const getRecentActivities = async (_userId: string, limit: number = 10) =
   }
 };
 
-export const awardPoints = async ({
-  userId: _userId,
-  activityType,
-  points,
-  description
-}: {
-  userId: string;
-  activityType: string;
-  points: number;
-  description: string;
-}) => {
-  try {
-    const { error } = await supabase
-      .rpc('log_user_activity', {
-        p_event_id: DEFAULT_EVENT_ID,
-        p_activity_type: activityType,
-        p_description: description,
-        p_points: points
-      });
-
-    if (error) {
-      logger.error('log_user_activity Error:', error);
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, error: null };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
-};
 
 // ============================================================================
 // SECURE REGTEAM FUNCTIONS (via SECURITY DEFINER RPCs)
@@ -803,11 +754,23 @@ export const getAttendeeByPersonalIdOptimized = async (personalId: string) => {
     return { data: null, error: { message: error.message } };
   }
 };
-
 export const getUserProfileByUUID = async (uuid: string) => {
   try {
+    const { data: roleRow } = await supabase
+      .from('user_roles')
+      .select('role, event_id')
+      .in('role', ['registration', 'building'])
+      .order('role', { ascending: true }) // 'building' < 'registration'
+      .limit(1)
+      .maybeSingle();
+
+    const rpcName =
+      roleRow?.role === 'building'
+        ? 'build_team_get_attendee_by_uuid'
+        : 'reg_team_get_attendee_by_uuid';
+
     const { data, error } = await supabase
-      .rpc('reg_team_get_attendee_by_uuid', { p_uuid: uuid });
+      .rpc(rpcName, { p_uuid: uuid });
 
     if (error) {
       logger.error('reg_team_get_attendee_by_uuid Error:', error);
@@ -863,8 +826,23 @@ export const recordAttendeeAttendance = async ({
 
 export const getVolunteerStatsRPC = async (_userId: string) => {
   try {
+    const { data: roleRow } = await supabase
+      .from('user_roles')
+      .select('role, event_id')
+      .in('role', ['registration', 'verification', 'building'])
+      .order('role', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    const rpcName =
+      roleRow?.role === 'building'
+        ? 'build_team_get_volunteer_stats'
+        : roleRow?.role === 'verification'
+          ? 'verif_team_get_volunteer_stats'
+          : 'reg_team_get_volunteer_stats';
+
     const { data, error } = await supabase
-      .rpc('get_volunteer_team_stats')
+      .rpc(rpcName)
       .single();
 
     if (error) {
@@ -896,7 +874,7 @@ export const searchSessionBookings = async (sessionId: string, query: string) =>
 
   try {
     const { data, error } = await supabase
-      .rpc('building_search_session_bookings', {
+      .rpc('build_team_search_session_bookings', {
         p_session_id: sessionId,
         p_query: sanitizeSearchQuery(query)
       });
@@ -919,21 +897,36 @@ export const searchSessionBookings = async (sessionId: string, query: string) =>
 
 export const getBuildingNotificationsRPC = async (eventId: string) => {
   try {
-    const { data, error } = await supabase.rpc('get_building_notifications', { p_event_id: eventId });
+    // Shared by RegTeam + Building dashboards. Route by caller role.
+    const { data: roleRow } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('event_id', eventId)
+      .in('role', ['registration', 'building'])
+      .order('role', { ascending: true }) // 'building' < 'registration'
+      .limit(1)
+      .maybeSingle();
+
+    const rpcName =
+      roleRow?.role === 'building'
+        ? 'build_team_get_notifications'
+        : 'reg_team_get_notifications';
+
+    const { data, error } = await supabase.rpc(rpcName, { p_event_id: eventId });
     if (error) {
-      logger.error('❌ [BUILDING NOTIFICATIONS RPC] Error:', error);
+      logger.error('❌ [NOTIFICATIONS RPC] Error:', error);
       return { data: null, error: { message: error.message } };
     }
     return { data: data || [], error: null };
   } catch (error: any) {
-    logger.error('💥 [BUILDING NOTIFICATIONS RPC] Exception:', error);
+    logger.error('💥 [NOTIFICATIONS RPC] Exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
 
 export const getBuildingActivitiesRPC = async (limit: number = 3) => {
   try {
-    const { data, error } = await supabase.rpc('get_building_activities', { p_limit: limit });
+    const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit });
     if (error) {
       logger.error('❌ [BUILDING ACTIVITIES RPC] Error:', error);
       return { data: null, error: { message: error.message } };
@@ -947,7 +940,7 @@ export const getBuildingActivitiesRPC = async (limit: number = 3) => {
 
 export const getBuildingSessionsRPC = async () => {
   try {
-    const { data, error } = await supabase.rpc('get_building_sessions');
+    const { data, error } = await supabase.rpc('build_team_get_sessions');
     if (error) {
       logger.error('❌ [BUILDING SESSIONS RPC] Error:', error);
       return { data: null, error: { message: error.message } };
@@ -961,7 +954,7 @@ export const getBuildingSessionsRPC = async () => {
 
 export const getSessionBookingForCheckinRPC = async (sessionId: string, attendeeId: string) => {
   try {
-    const { data, error } = await supabase.rpc('get_session_booking_for_checkin', {
+    const { data, error } = await supabase.rpc('build_team_get_session_booking_for_checkin', {
       p_session_id: sessionId,
       p_attendee_id: attendeeId
     });
@@ -979,7 +972,7 @@ export const getSessionBookingForCheckinRPC = async (sessionId: string, attendee
 
 export const buildingSessionCheckinRPC = async (bookingId: string) => {
   try {
-    const { data, error } = await supabase.rpc('building_session_checkin', { p_booking_id: bookingId });
+    const { data, error } = await supabase.rpc('build_team_session_checkin', { p_booking_id: bookingId });
     if (error) {
       logger.error('❌ [BUILDING SESSION CHECKIN RPC] Error:', error);
       return { data: null, error: { message: error.message } };
@@ -993,7 +986,7 @@ export const buildingSessionCheckinRPC = async (bookingId: string) => {
 
 export const getMyScanCountRPC = async () => {
   try {
-    const { data, error } = await supabase.rpc('get_my_scan_count');
+    const { data, error } = await supabase.rpc('reg_team_get_my_scan_count');
     if (error) {
       logger.error('❌ [MY SCAN COUNT RPC] Error:', error);
       return { count: 0, error: { message: error.message } };
@@ -1094,5 +1087,149 @@ export const getSessionBookingsRPC = async (sessionId: string) => {
   } catch (error: any) {
     logger.error('💥 [SESSION BOOKINGS RPC] Exception:', error);
     return { data: null, error: { message: error.message } };
+  }
+};
+// ============================================================================
+// SHARED — any authenticated user with any role can read their own activities
+// ============================================================================
+
+export const getMyActivitiesRPC = async (limit: number = 3) => {
+  const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit });
+  return {
+    data: (data as any[]) || [],
+    error: error ? { message: error.message } : null,
+  };
+};
+// ============================================================================
+// BUILDING TEAM RPC WRAPPERS (strict: role = 'building')
+// ============================================================================
+
+export const buildTeamGetAttendeeByUUID = async (uuid: string) => {
+  const { data, error } = await supabase.rpc('build_team_get_attendee_by_uuid', { p_uuid: uuid });
+  if (error) return { data: null, error: { message: error.message } };
+  if (!data) return { data: null, error: { message: 'User not found' } };
+  return { data: data as any, error: null };
+};
+
+export const buildTeamGetVolunteerStatsRPC = async () => {
+  const { data, error } = await supabase.rpc('build_team_get_volunteer_stats').single();
+  if (error) {
+    logger.error('❌ [BUILD TEAM STATS RPC] Error:', error);
+    return { data: null, error: { message: error.message } };
+  }
+  const stats = data as any;
+  return {
+    data: {
+      total_points: stats?.total_points || 0,
+      team_rank: stats?.team_rank || 0,
+      team_size: stats?.team_size || 0,
+    },
+    error: null,
+  };
+};
+
+export const buildTeamGetNotificationsRPC = async (eventId: string) => {
+  const { data, error } = await supabase.rpc('build_team_get_notifications', { p_event_id: eventId });
+  return {
+    data: (data as any[]) || [],
+    error: error ? { message: error.message } : null,
+  };
+};
+
+export const buildTeamGetSessionsRPC = async () => {
+  const { data, error } = await supabase.rpc('build_team_get_sessions');
+  return {
+    data: (data as any[]) || [],
+    error: error ? { message: error.message } : null,
+  };
+};
+
+export const buildTeamSearchSessionBookings = async (sessionId: string, query: string) => {
+  if (!query || query.length < 2) return { data: [], error: null };
+  const { data, error } = await supabase.rpc('build_team_search_session_bookings', {
+    p_session_id: sessionId,
+    p_query: sanitizeSearchQuery(query),
+  });
+  return {
+    data: (data as any[]) || [],
+    error: error ? { message: error.message } : null,
+  };
+};
+
+export const buildTeamGetSessionBookingForCheckin = async (sessionId: string, attendeeId: string) => {
+  const { data, error } = await supabase.rpc('build_team_get_session_booking_for_checkin', {
+    p_session_id: sessionId,
+    p_attendee_id: attendeeId,
+  });
+  if (error) return { data: null, error: { message: error.message } };
+  const booking = Array.isArray(data) && data.length > 0 ? data[0] : null;
+  return { data: booking, error: null };
+};
+
+export const buildTeamSessionCheckinRPC = async (bookingId: string) => {
+  const { data, error } = await supabase.rpc('build_team_session_checkin', { p_booking_id: bookingId });
+  return {
+    data,
+    error: error ? { message: error.message } : null,
+  };
+};
+
+export const signUpTeamLeader = async (data: VolunteerSignupData): Promise<AuthResult> => {
+  try {
+    const formData = new FormData();
+    formData.append('email', data.email.trim().toLowerCase());
+    formData.append('password', data.password);
+    formData.append('fullName', data.fullName.trim());
+    formData.append('phone', data.phone.trim());
+    formData.append('personalId', data.personalId.trim());
+    formData.append('nationality', data.nationality.trim());
+    formData.append('gender', data.gender.trim());
+    formData.append('registrationType', 'team_leader');
+    formData.append('faculty', data.faculty);
+    formData.append('department', data.department);
+    formData.append('studentStatus', data.studentStatus);
+    if (data.year !== undefined) formData.append('year', data.year.toString());
+    formData.append('teamId', data.teamId);
+    formData.append('enrollmentProofFile', data.enrollmentProofFile);
+    if (data.cvFile) formData.append('cvFile', data.cvFile);
+
+    const { data: invokeData, error: fnError } = await supabase.functions.invoke(
+      'register-team-leader',
+      { body: formData }
+    );
+
+    let result: any = invokeData;
+    if (!result && fnError) {
+      try {
+        const ctx = await fnError.context?.json?.();
+        if (ctx) result = ctx;
+      } catch { /* ignore */ }
+    }
+
+    if (!result?.success) {
+      return {
+        success: false,
+        data: null,
+        error: {
+          message: result?.error || fnError?.message || 'Registration failed. Please try again.',
+          field: result?.field || 'general',
+          validationErrors: result?.field && result.field !== 'general'
+            ? [{ field: result.field, message: result.error }]
+            : [],
+        },
+      };
+    }
+
+    return {
+      success: true,
+      data: { user: { id: result.userId }, session: null },
+      error: null,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      data: null,
+      error: { message: error.message || 'Something went wrong.' },
+    };
   }
 };

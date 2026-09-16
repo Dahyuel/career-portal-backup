@@ -11,7 +11,7 @@ import DashboardLoading from '../components/DashboardLoading';
 
 export const EventSelection: React.FC = () => {
   const navigate = useNavigate();
-  const { signOut, user, profile, getRoleBasedRedirect, refreshProfile } = useAuth();
+  const { signOut, user, getRoleBasedRedirect, refreshProfile } = useAuth();
 
   const [events, setEvents] = useState<FairEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,10 +54,22 @@ export const EventSelection: React.FC = () => {
       }
 
       if (registration) {
-        // Already registered for this event → persist event_id and go to dashboard
-        await refreshProfile(event.id, user.id, user.email, true);
-        const role = registration.role || profile?.role || 'attendee';
+        // Already registered → bind event_id to the profile and go to dashboard.
+        const updated = await refreshProfile(event.id, user.id, user.email, true);
+
+        if (!updated?.event_id) {
+          logger.error('Profile refresh did not bind event_id', { eventId: event.id, updated });
+          setError(
+            'Could not activate this event. The server did not return an event-scoped profile. ' +
+            'Please contact support if this persists.'
+          );
+          setSelectingId(null);
+          return;
+        }
+
+        const role = registration.role || updated.role || 'attendee';
         const redirectPath = getRoleBasedRedirect(role);
+        logger.log(`✅ Event ${event.id} bound. Redirecting ${role} → ${redirectPath}`);
         navigate(redirectPath, { replace: true });
         return;
       }

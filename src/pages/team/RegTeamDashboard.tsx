@@ -168,19 +168,16 @@ export const RegTeamDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
-
   const fetchNotifications = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id || !profile?.event_id) return;
     try {
-      const { data, error } = await getBuildingNotificationsRPC(EVENT_ID);
-      console.log('[NOTIFICATIONS] data:', data, 'error:', error); // add this
+      const { data, error } = await getBuildingNotificationsRPC(profile.event_id);
       if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
-      console.error('[NOTIFICATIONS] caught error:', error); // and this
+      console.error('[NOTIFICATIONS] caught error:', error);
     }
-  }, [user?.id]);
+  }, [user?.id, profile?.event_id]);
 
   useEffect(() => {
     fetchNotifications();

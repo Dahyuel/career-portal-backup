@@ -6,9 +6,6 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { supabase } from './lib/supabase';
 import { ResetPasswordForm } from './components/ResetPasswordForm';
-// import DashboardLoading from './components/DashboardLoading'; // Removed as we use shared LoadingScreen
-
-
 
 // Auth Components (lazy loaded)
 const LoginForm = React.lazy(() => import('./components/LoginForm').then(module => ({ default: module.LoginForm })));
@@ -31,6 +28,7 @@ const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDash
 const EventSelection = React.lazy(() => import('./pages/EventSelection').then(module => ({ default: module.EventSelection })));
 const EventRegistration = React.lazy(() => import('./pages/EventRegistration').then(module => ({ default: module.EventRegistration })));
 const VolunteerRegistration = React.lazy(() => import('./pages/VolunteerRegistration').then(module => ({ default: module.VolunteerRegistration })));
+const TeamLeaderRegistration = React.lazy(() => import('./pages/TeamLeaderRegistration').then(module => ({ default: module.TeamLeaderRegistration })));
 const PendingApproval = React.lazy(() => import('./pages/PendingApproval').then(module => ({ default: module.PendingApproval })));
 const RegistrationConfirmed = React.lazy(() => import('./pages/RegistrationConfirmed').then(module => ({ default: module.RegistrationConfirmed })));
 const RejectedAttendee = React.lazy(() => import('./pages/RejectedAttendee').then(module => ({ default: module.RejectedAttendee })));
@@ -42,10 +40,8 @@ const Partners = React.lazy(() => import('./pages/Landing page/Partners').then(m
 const Speakers = React.lazy(() => import('./pages/Landing page/Speakers').then(module => ({ default: module.Speakers })));
 const AboutCareerCenter = React.lazy(() => import('./pages/Landing page/AboutCareerCenter').then(module => ({ default: module.AboutCareerCenter })));
 
-
 // Loading Screen
 import DashboardLoading from './components/DashboardLoading';
-
 
 // Main App Router
 const AppRouter: React.FC = () => {
@@ -56,8 +52,6 @@ const AppRouter: React.FC = () => {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, _session) => {
       if (event === 'PASSWORD_RECOVERY') {
-        // Only redirect if THIS tab has the recovery token in the URL (i.e. opened from email).
-        // This prevents the old "forgot password" tab from also navigating via cross-tab session sync.
         const hash = window.location.hash;
         if (hash.includes('type=recovery') || hash.includes('access_token')) {
           navigate('/reset-password' + hash, { replace: true });
@@ -134,6 +128,12 @@ const AppRouter: React.FC = () => {
         </Suspense>
       } />
 
+      {/* Hidden team leader registration endpoint — not linked publicly */}
+      <Route path="/tl-register-9k2x" element={
+        <Suspense fallback={<DashboardLoading message="Loading team leader registration..." />}>
+          <TeamLeaderRegistration />
+        </Suspense>
+      } />
 
       {/* Protected Event Selection & Registration */}
       <Route path="/select-event" element={
@@ -249,7 +249,7 @@ const AppRouter: React.FC = () => {
       } />
 
       <Route path="/super-ctrl-92k1x" element={
-        <ProtectedRoute requiredRole={['super_admin', 'sadmin']}> {/* Handle both potential role names */}
+        <ProtectedRoute requiredRole={['super_admin', 'sadmin']}>
           <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <SuperAdminPanel />
           </Suspense>
@@ -330,7 +330,6 @@ const LogoutPopup: React.FC = () => {
 // Maintenance Mode Guard
 const MaintenanceGuard: React.FC = () => {
   const { pathname } = useLocation();
-  // null = not yet checked, true = maintenance on, false = maintenance off
   const [isMaintenance, setIsMaintenance] = useState<boolean | null>(null);
   const [maintenanceMsg, setMaintenanceMsg] = useState('System is under maintenance. Please try again later.');
 
@@ -345,7 +344,6 @@ const MaintenanceGuard: React.FC = () => {
           setIsMaintenance(false);
         }
       } catch {
-        // If RPC fails, assume not in maintenance to avoid blocking users permanently
         setIsMaintenance(false);
       }
     };
@@ -355,11 +353,9 @@ const MaintenanceGuard: React.FC = () => {
     return () => clearInterval(interval);
   }, [pathname]);
 
-  // Never block auth pages or super admin path
   const exemptPaths = ['/super-ctrl-92k1x', '/login', '/forgot-password', '/reset-password', '/', '/partners', '/speakers', '/about'];
   if (exemptPaths.includes(pathname)) return null;
 
-  // While still checking maintenance status — show a blank dark screen to hide dashboard content
   if (isMaintenance === null) {
     return (
       <div className="fixed inset-0 bg-slate-900 z-[9998]" />

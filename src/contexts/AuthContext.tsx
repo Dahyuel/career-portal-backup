@@ -1,6 +1,6 @@
 // AuthContext with optimized session handling and proper RPC response parsing
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { supabase, signOutUser, getCurrentSession, DEFAULT_EVENT_ID } from "../lib/supabase";
+import { supabase, signOutUser, getCurrentSession } from "../lib/supabase";
 import { clearAllFormCaches } from "../utils/formCache";
 import type { User } from "@supabase/supabase-js";
 import { logger } from '../utils/logger';
@@ -182,7 +182,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // ----- Clear all user-related cached data -----
+  // ----- Clear all user-related cached data (full wipe, used on sign-out) -----
   const clearAllCachedData = useCallback(() => {
     // Preserve theme
     const theme = localStorage.getItem("theme");
@@ -198,6 +198,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     logger.log('🧹 All cached user data cleared');
+  }, []);
+
+  // ----- Lighter wipe used on fresh sign-in: keeps `currentUser` in
+  // localStorage so ProtectedRoute's pre-load fallback still works. -----
+  const clearSessionScopedData = useCallback(() => {
+    try {
+      sessionStorage.clear();
+      clearAllFormCaches();
+      logger.log('🧹 Session-scoped caches cleared (kept currentUser)');
+    } catch (err) {
+      logger.warn('clearSessionScopedData failed:', err);
+    }
   }, []);
 
   const profileRef = useRef<UserProfile | null>(profile);
@@ -217,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return currentProfile;
         }
 
+        // Skip no-eventId fetch only if we already have an event-scoped profile
         if (
           !eventId &&
           !forceRefresh &&
@@ -364,6 +377,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
     []
   );
+
   // ----- Refresh profile -----
   const refreshProfile = useCallback(
     async (eventId?: string, userId?: string, userEmail?: string, forceRefresh: boolean = false): Promise<UserProfile | null> => {
@@ -426,14 +440,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session?.user) {
         setUser(session.user);
-        // On a fresh login, clear any stale cached profile first so we start clean
-        // but don't call fetchUserProfile here without eventId — the login flow
-        // will call refreshProfile with the correct eventId separately.
-        // We only fetch here if there's truly no profile yet.
+
         const current = profileRef.current;
-        if (!current || current.id !== session.user.id) {
-          fetchUserProfile(session.user.id, session.user.email || "", undefined).catch(console.error);
+        const isDifferentUser = !current || current.id !== session.user.id;
+
+        if (isDifferentUser) {
+          // New user: clear session-scoped caches only.
+          // IMPORTANT: we do NOT call clearAllCachedData() here — that would
+          // wipe `currentUser` from localStorage and break ProtectedRoute's
+          // pre-load fallback (causing a 5s force-logout loop).
+          clearSessionScopedData();
+
+          // Seed a minimal `currentUser` so ProtectedRoute can route
+          // immediately while the RPC resolves.
+          localStorage.setItem("currentUser", JSON.stringify({
+            id: session.user.id,
+            email: session.user.email || "",
+          }));
+        } else if (current?.role === 'attendee') {
+          // Same attendee re-logging in: strip event_id so they must re-select.
+          const clearedProfile = { ...current, event_id: undefined };
+          setProfile(clearedProfile);
+
+          try {
+            const stored = localStorage.getItem('currentUser');
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              delete parsed.event_id;
+              localStorage.setItem('currentUser', JSON.stringify(parsed));
+            }
+          } catch { /* ignore */ }
         }
+
+        // Fetch fresh profile. For attendees this will come back with
+        // roles: [] and no event_id until they pick one.
+        fetchUserProfile(session.user.id, session.user.email || "", undefined)
+          .catch(console.error);
       } else if (event === "SIGNED_OUT") {
         setUser(null);
         setProfile(null);
@@ -444,7 +486,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchUserProfile, clearAllCachedData]);
+  }, [fetchUserProfile, clearAllCachedData, clearSessionScopedData]);
 
   // ----- Role helpers -----
   const hasRole = useCallback(

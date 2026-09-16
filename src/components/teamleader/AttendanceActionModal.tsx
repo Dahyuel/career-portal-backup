@@ -6,7 +6,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import Toast from '../shared/Toast';
 import { logger } from '../../utils/logger';
 
-const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
 interface VolunteerInfo {
     user_id: string;
@@ -33,7 +32,7 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
     volunteer,
     onSuccess
 }) => {
-    useAuth();
+    const { profile } = useAuth();
     const [processing, setProcessing] = useState(false);
     const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'info' });
 
@@ -44,24 +43,28 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
     };
 
     const handleCheckIn = async () => {
+        if (!profile?.event_id) {
+            showToast('No active event — please reload.', 'error');
+            return;
+        }
+
         setProcessing(true);
         try {
             const { data, error } = await supabase.rpc('volunteer_check_in', {
                 p_volunteer_user_id: volunteer.user_id,
-                p_event_id: EVENT_ID
+                p_event_id: profile.event_id
             });
 
             if (error) {
                 logger.error('Error in check-in:', error);
-                showToast('Failed to check in', 'error');
+                showToast(error.message || 'Failed to check in', 'error');
                 return;
             }
 
-            if (!data.success) {
-                showToast(data.message, 'warning');
+            if (!data?.success) {
+                showToast(data?.message || 'Failed to check in', 'warning');
                 return;
             }
-
             showToast(`${volunteer.full_name} checked in successfully!`, 'success');
             setTimeout(() => {
                 onSuccess();
@@ -77,11 +80,16 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
     };
 
     const handleCheckOut = async () => {
+        if (!profile?.event_id) {
+            showToast('No active event — please reload.', 'error');
+            return;
+        }
+
         setProcessing(true);
         try {
             const { data, error } = await supabase.rpc('volunteer_check_out', {
                 p_volunteer_user_id: volunteer.user_id,
-                p_event_id: EVENT_ID
+                p_event_id: profile.event_id
             });
 
             if (error) {

@@ -30,6 +30,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   } = useAuth();
   const location = useLocation();
 
+  // Is the current location a public event path?
+  const onPublicPath = PUBLIC_EVENT_PATHS.includes(location.pathname);
+
   // Read localStorage ONCE at mount — used ONLY as a pre-load fallback.
   const localUserData = React.useMemo(() => {
     try {
@@ -43,8 +46,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const isSuperAdmin = (role?: string) =>
     role === 'sadmin' || role === 'super_admin';
 
-  // Safety timeout: force logout only if stuck with no data at all
+  // Safety timeout: force logout only if stuck with no data at all.
+  // IMPORTANT: never arm this while on a public event path — those are
+  // legitimate destinations that don't require an event_id, and the user
+  // may be mid-selection.
   React.useEffect(() => {
+    if (onPublicPath) return;
+
     let timeout: NodeJS.Timeout;
     if ((loading || (isAuthenticated && !profile)) && !localUserData) {
       timeout = setTimeout(async () => {
@@ -53,7 +61,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }, 5000);
     }
     return () => { if (timeout) clearTimeout(timeout); };
-  }, [loading, isAuthenticated, profile, signOut, localUserData]);
+  }, [loading, isAuthenticated, profile, signOut, localUserData, onPublicPath]);
 
   // ── 1. Initial bootstrap spinner ─────────────────────────────────────────
   if (loading && !sessionLoaded) {
@@ -94,7 +102,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     const role = profile.role;
     const isAdmin = isSuperAdmin(role);
     const isAttendee = role === 'attendee';
-    const onPublicPath = PUBLIC_EVENT_PATHS.includes(location.pathname);
 
     // ── 5a. Non-attendee without active event → block ─────────────────────
     // Every non-attendee (volunteer, staff, employer, etc.) REQUIRES an
@@ -106,14 +113,16 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     }
 
-    // ── 5b. Attendee without event → /select-event ────────────────────────
-    if (isAttendee && profile.roles.length === 0 && !onPublicPath) {
+    // ── 5b. Attendee without an event → /select-event ─────────────────────
+    // This is the KEY check: even if login races or stale cache sneaks
+    // through, an attendee with no bound event is always pushed back to
+    // the selector.
+    if (isAttendee && !profile.event_id && !onPublicPath) {
       logger.log('👤 Attendee has no event — redirecting to selection');
       return <Navigate to="/select-event" replace />;
     }
 
     // ── 5c. Non-attendee with event_id but empty roles → /no-active-event ─
-    // Edge case: profile loaded, event resolved, but the user has no role row.
     if (!isAdmin && !isAttendee && profile.event_id && profile.roles.length === 0) {
       logger.log('⚠️ Non-attendee with event but empty roles');
       if (!onPublicPath) {
@@ -126,24 +135,27 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       const { registration_status, is_asu_student } = profile.attendee;
       const currentPath = location.pathname;
 
-      if (registration_status === 'approved') {
-        if (currentPath !== '/attendee') {
-          return <Navigate to="/attendee" replace />;
-        }
-      } else if (registration_status === 'rejected') {
-        if (currentPath !== '/rejected-attendee') {
-          return <Navigate to="/rejected-attendee" replace />;
-        }
-      } else if (registration_status === 'pending') {
-        if (is_asu_student && currentPath !== '/pending-approval') {
-          return <Navigate to="/pending-approval" replace />;
-        }
-        if (!is_asu_student && currentPath !== '/payment-required') {
-          return <Navigate to="/payment-required" replace />;
-        }
-      } else {
-        if (currentPath !== '/attendee') {
-          return <Navigate to="/attendee" replace />;
+      // Don't fight the event selector while the user is mid-pick
+      if (!onPublicPath) {
+        if (registration_status === 'approved') {
+          if (currentPath !== '/attendee') {
+            return <Navigate to="/attendee" replace />;
+          }
+        } else if (registration_status === 'rejected') {
+          if (currentPath !== '/rejected-attendee') {
+            return <Navigate to="/rejected-attendee" replace />;
+          }
+        } else if (registration_status === 'pending') {
+          if (is_asu_student && currentPath !== '/pending-approval') {
+            return <Navigate to="/pending-approval" replace />;
+          }
+          if (!is_asu_student && currentPath !== '/payment-required') {
+            return <Navigate to="/payment-required" replace />;
+          }
+        } else {
+          if (currentPath !== '/attendee') {
+            return <Navigate to="/attendee" replace />;
+          }
         }
       }
     }

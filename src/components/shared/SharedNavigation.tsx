@@ -6,7 +6,6 @@ import SettingsModal from './SettingsModal';
 import LeaderboardModal from './LeaderboardModal';
 
 import { logger } from '../../utils/logger';
-import { DEFAULT_EVENT_ID } from '../../lib/supabase';
 
 // Navigation item type
 export interface NavItem {
@@ -178,7 +177,7 @@ const NotificationItem = memo(({ notification, onClick }: {
 
 NotificationItem.displayName = 'NotificationItem';
 
-const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
+const SharedNavigation: React.FC<SharedNavigationProps> = ({
     children,
     navItems,
     activeItem,
@@ -190,7 +189,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     hideDock = false,
     hideNotifications = false,
     eventId,
-}, ref) => {
+}) => {
     const navigate = useNavigate();
     const { signOut, hasAnyRole, profile } = useAuth();
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -389,7 +388,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     ), [notifications, handleNotificationClick]);
 
     return (
-        <div ref={ref} className="flex min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
+        <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-200">
             {/* Desktop Sidebar */}
             <aside className={`${navItems.length > 0 ? 'lg:flex' : 'hidden'} hidden flex-col w-80 h-screen sticky top-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 z-50`}>
                 <SidebarLogo animate={shouldAnimate} />
@@ -578,8 +577,6 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
 
         </div>
     );
-});
-
-SharedNavigation.displayName = 'SharedNavigation';
+};
 
 export default SharedNavigation;

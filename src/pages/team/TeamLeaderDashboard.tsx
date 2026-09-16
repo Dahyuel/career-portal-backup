@@ -5,6 +5,7 @@ import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigat
 import { supabase } from '../../lib/supabase';
 import { QRScanner } from '../../components/shared/QRScanner';
 import VolunteerInfoModal from '../../components/teamleader/VolunteerInfoModal';
+import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
 import Toast from '../../components/shared/Toast';
 import DashboardLoading from '../../components/DashboardLoading';
 import { logger } from '../../utils/logger';
@@ -73,7 +74,7 @@ export const TeamLeaderDashboard: React.FC = () => {
   const [showVolunteerModal, setShowVolunteerModal] = useState(false);
   const [loadingVolunteerDetails, setLoadingVolunteerDetails] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' | 'info' | 'warning' }>({ show: false, message: '', type: 'info' });
-
+  const [showProfile, setShowProfile] = useState(false);
   const MEMBERS_PER_PAGE = 50;
 
   // Navigation items
@@ -253,12 +254,12 @@ export const TeamLeaderDashboard: React.FC = () => {
     setSendingAnnouncement(true);
     try {
       const { error } = await supabase.rpc('send_team_announcement', {
-        p_event_id: 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5',
+        p_event_id: teamInfo.event_id,
         p_team_id: teamInfo.team_id,
         p_title: announcementTitle.trim(),
-        p_content: announcementContent.trim()
+        p_content: announcementContent.trim(),
+        p_announcement_type: 'team'
       });
-
       if (error) {
         logger.error('Error sending announcement:', error);
         setToast({ show: true, message: 'Failed to send announcement', type: 'error' });
@@ -553,6 +554,7 @@ export const TeamLeaderDashboard: React.FC = () => {
         activeItem={activeTab}
         onItemChange={(key) => setActiveTab(key as TabKey)}
         title="ASU Career Expo"
+        onProfileClick={() => setShowProfile(true)}
       >
         <AnimatePresence mode="wait">
           {activeTab === 'home' && renderHomeTab()}
@@ -596,7 +598,6 @@ export const TeamLeaderDashboard: React.FC = () => {
           }
         }}
       />
-
       {/* Toast */}
       <AnimatePresence>
         {toast.show && (
@@ -608,6 +609,12 @@ export const TeamLeaderDashboard: React.FC = () => {
           />
         )}
       </AnimatePresence>
+
+      {/* Volunteer Profile Modal */}
+      <VolunteerProfileModal
+        isOpen={showProfile}
+        onClose={() => setShowProfile(false)}
+      />
     </>
   );
 };
