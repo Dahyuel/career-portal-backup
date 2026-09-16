@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
 import AttendeeExperienceCard from './AttendeeExperienceCard';
+import { logger } from '../../utils/logger';
 
 // Simplified interface - no need for AttendeeProfile import
 interface Applicant {
@@ -9,14 +10,12 @@ interface Applicant {
     applied_at: string;
     cv_url: string;
     attendee_id: string;
+    status: string; // 'pending' | 'approved' | 'rejected'
     attendee: {
         user_id: string;
         university: string;
         faculty: string;
-        registration_status: string;
         department?: string;
-        student_id?: string;
-        is_asu_student: boolean;
         user_profile: {
             full_name: string;
             personal_id: string;
@@ -31,24 +30,35 @@ interface JobApplicantsModalProps {
     jobId: string;
     jobTitle: string;
     onClose: () => void;
+    isEmployer?: boolean; // When true, shows Approve/Reject buttons
 }
 
 // Configuration
 const ITEMS_PER_PAGE = 20;
 const DEBOUNCE_DELAY = 300;
 
-const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle, onClose }) => {
+const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle, onClose, isEmployer = false }) => {
     // Data state
     const [applicants, setApplicants] = useState<Applicant[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedApplicant, setSelectedApplicant] = useState<Applicant | null>(null);
+
+    // Approve / Reject state
+    const [updatingId, setUpdatingId] = useState<string | null>(null);
+    const [actionToast, setActionToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+    // Dismiss action toast after 3s
+    useEffect(() => {
+        if (!actionToast) return;
+        const t = setTimeout(() => setActionToast(null), 3000);
+        return () => clearTimeout(t);
+    }, [actionToast]);
 
     // Pagination & Filtering
     const [currentPage, setCurrentPage] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
-    const [filterStatus, setFilterStatus] = useState<string>('all');
     const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -62,128 +72,52 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
         return () => clearTimeout(timer);
     }, [searchQuery]);
 
-    // OPTIMIZED: Single query with all joins, filtering, and pagination
+    // Fetch applicants via RPC
     const fetchApplicants = useCallback(async () => {
         try {
             setLoading(true);
 
-            // Build the optimized query with proper joins
-            // Note: attendees.user_id -> auth.users -> user_profiles.id (same value)
-            let query = supabase
-                .from('job_applications')
-                .select(`
-                    id,
-                    applied_at,
-                    cv_url,
-                    attendee_id,
-                    attendees!inner (
-                        user_id,
-                        university,
-                        faculty,
-                        registration_status,
-                        department,
-                        student_id,
-                        is_asu_student
-                    )
-                `, { count: 'exact' })
-                .eq('job_position_id', jobId);
+            const offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
-            // Apply status filter
-            if (filterStatus !== 'all') {
-                query = query.eq('attendees.registration_status', filterStatus);
-            }
-
-            // Apply search filter on attendee fields (we'll search user_profiles separately)
-            if (debouncedSearch.trim()) {
-                query = query.or(`attendees.university.ilike.%${debouncedSearch}%,attendees.faculty.ilike.%${debouncedSearch}%`);
-            }
-
-            // Apply sorting
-            if (sortBy === 'date') {
-                query = query.order('applied_at', { ascending: sortOrder === 'asc' });
-            } else {
-                // For name sorting, we'll do it client-side since it's in a nested relation
-                query = query.order('applied_at', { ascending: false });
-            }
-
-            // Apply pagination
-            const from = (currentPage - 1) * ITEMS_PER_PAGE;
-            const to = from + ITEMS_PER_PAGE - 1;
-            query = query.range(from, to);
-
-            const { data, error, count } = await query;
+            const { data, error } = await supabase.rpc('employer_get_job_applicants', {
+                _job_id: jobId,
+                _limit: ITEMS_PER_PAGE,
+                _offset: offset
+            });
 
             if (error) throw error;
 
-            // Fetch user profiles separately
-            const userIds = (data || []).map((app: any) => app.attendees?.user_id).filter(Boolean);
+            const rpcResult = data as any;
+            const applicantsList: Applicant[] = rpcResult?.data || [];
+            const total: number = rpcResult?.total || 0;
 
-            let profileMap: Record<string, any> = {};
-            if (userIds.length > 0) {
-                const { data: profiles, error: profileError } = await supabase
-                    .from('user_profiles')
-                    .select('id, full_name, personal_id, email, phone, score')
-                    .in('id', userIds);
+            // Apply client-side filtering if needed
+            let filteredApplicants = applicantsList;
 
-                if (profileError) throw profileError;
-
-                profileMap = (profiles || []).reduce((acc: any, p) => {
-                    acc[p.id] = p;
-                    return acc;
-                }, {});
-            }
-
-            // Apply search filter on user profiles if needed
-            let filteredData = data || [];
-            if (debouncedSearch.trim() && userIds.length > 0) {
+            // Search filter
+            if (debouncedSearch.trim()) {
                 const lowerSearch = debouncedSearch.toLowerCase();
-                filteredData = filteredData.filter((app: any) => {
-                    const profile = profileMap[app.attendees?.user_id];
-                    if (!profile) return true; // Keep if no profile
-
+                filteredApplicants = filteredApplicants.filter(app => {
+                    const profile = app.attendee?.user_profile;
                     return (
-                        profile.full_name?.toLowerCase().includes(lowerSearch) ||
-                        profile.personal_id?.toLowerCase().includes(lowerSearch) ||
-                        app.attendees?.university?.toLowerCase().includes(lowerSearch) ||
-                        app.attendees?.faculty?.toLowerCase().includes(lowerSearch)
+                        profile?.full_name?.toLowerCase().includes(lowerSearch) ||
+                        profile?.personal_id?.toLowerCase().includes(lowerSearch) ||
+                        app.attendee?.university?.toLowerCase().includes(lowerSearch) ||
+                        app.attendee?.faculty?.toLowerCase().includes(lowerSearch)
                     );
                 });
             }
 
-            // Format the data with proper structure
-            const formattedApplicants: Applicant[] = filteredData.map((app: any) => ({
-                id: app.id,
-                applied_at: app.applied_at,
-                cv_url: app.cv_url,
-                attendee_id: app.attendee_id,
-                attendee: {
-                    user_id: app.attendees.user_id,
-                    university: app.attendees.university,
-                    faculty: app.attendees.faculty,
-                    registration_status: app.attendees.registration_status,
-                    department: app.attendees.department,
-                    student_id: app.attendees.student_id,
-                    is_asu_student: app.attendees.is_asu_student,
-                    user_profile: profileMap[app.attendees.user_id] || {
-                        full_name: 'Unknown',
-                        personal_id: 'N/A',
-                        email: '',
-                        phone: '',
-                        score: 0
-                    }
-                }
-            }));
-
-            setApplicants(formattedApplicants);
-            setTotalCount(count || 0);
+            setApplicants(filteredApplicants);
+            setTotalCount(total);
         } catch (err) {
-            console.error('Error fetching applicants:', err);
+            logger.error('Error fetching applicants:', err);
             setApplicants([]);
             setTotalCount(0);
         } finally {
             setLoading(false);
         }
-    }, [jobId, currentPage, filterStatus, debouncedSearch, sortBy, sortOrder]);
+    }, [jobId, currentPage, debouncedSearch]);
 
     // Fetch on mount and when dependencies change
     useEffect(() => {
@@ -192,17 +126,25 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
 
     // Client-side sorting by name if needed
     const sortedApplicants = useMemo(() => {
-        if (sortBy !== 'name') return applicants;
+        const sorted = [...applicants];
 
-        return [...applicants].sort((a, b) => {
-            const nameA = a.attendee.user_profile.full_name.toLowerCase();
-            const nameB = b.attendee.user_profile.full_name.toLowerCase();
+        if (sortBy === 'name') {
+            sorted.sort((a, b) => {
+                const nameA = a.attendee.user_profile.full_name.toLowerCase();
+                const nameB = b.attendee.user_profile.full_name.toLowerCase();
+                return sortOrder === 'asc'
+                    ? nameA.localeCompare(nameB)
+                    : nameB.localeCompare(nameA);
+            });
+        } else {
+            sorted.sort((a, b) => {
+                const dateA = new Date(a.applied_at).getTime();
+                const dateB = new Date(b.applied_at).getTime();
+                return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+            });
+        }
 
-            if (sortOrder === 'asc') {
-                return nameA.localeCompare(nameB);
-            }
-            return nameB.localeCompare(nameA);
-        });
+        return sorted;
     }, [applicants, sortBy, sortOrder]);
 
     // Pagination calculations
@@ -222,6 +164,31 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
         }
     }, [totalPages]);
 
+    // Approve / Reject handler
+    const handleUpdateStatus = useCallback(async (applicationId: string, newStatus: 'approved' | 'rejected' | 'pending') => {
+        setUpdatingId(applicationId);
+        try {
+            const { error } = await supabase.rpc('employer_update_application_status', {
+                _application_id: applicationId,
+                _status: newStatus
+            });
+            if (error) throw error;
+            // Optimistic update
+            setApplicants(prev =>
+                prev.map(a => a.id === applicationId ? { ...a, status: newStatus } : a)
+            );
+            setActionToast({
+                message: `Application ${newStatus === 'approved' ? 'approved' : newStatus === 'rejected' ? 'rejected' : 'reset'} successfully.`,
+                type: 'success'
+            });
+        } catch (err: any) {
+            logger.error('Error updating application status:', err);
+            setActionToast({ message: err?.message || 'Failed to update status.', type: 'error' });
+        } finally {
+            setUpdatingId(null);
+        }
+    }, []);
+
     const handleSortChange = useCallback((newSortBy: 'date' | 'name') => {
         if (sortBy === newSortBy) {
             setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -232,71 +199,29 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
         setCurrentPage(1);
     }, [sortBy]);
 
-    const handleFilterChange = useCallback((status: string) => {
-        setFilterStatus(status);
-        setCurrentPage(1);
-    }, []);
-
-    // Export to CSV
+    // Export to CSV via RPC
     const exportToCSV = useCallback(async () => {
         try {
-            // Fetch all applicants for export (no pagination)
-            const { data, error } = await supabase
-                .from('job_applications')
-                .select(`
-                    id,
-                    applied_at,
-                    cv_url,
-                    attendees!inner (
-                        user_id,
-                        university,
-                        faculty,
-                        registration_status,
-                        department,
-                        student_id,
-                        is_asu_student
-                    )
-                `)
-                .eq('job_position_id', jobId);
+            const { data, error } = await supabase.rpc('employer_export_job_applicants', {
+                _job_id: jobId
+            });
 
             if (error) throw error;
 
-            // Fetch user profiles
-            const userIds = (data || []).map((app: any) => app.attendees?.user_id).filter(Boolean);
+            const exportData = (data || []) as any[];
 
-            let profileMap: Record<string, any> = {};
-            if (userIds.length > 0) {
-                const { data: profiles, error: profileError } = await supabase
-                    .from('user_profiles')
-                    .select('id, full_name, personal_id, email, phone')
-                    .in('id', userIds);
-
-                if (profileError) throw profileError;
-
-                profileMap = (profiles || []).reduce((acc: any, p) => {
-                    acc[p.id] = p;
-                    return acc;
-                }, {});
-            }
-
-            const headers = ['Name', 'Personal ID', 'Email', 'Phone', 'University', 'Faculty', 'Department', 'Student ID', 'ASU Student', 'Status', 'Applied At', 'CV URL'];
-            const rows = (data || []).map((app: any) => {
-                const profile = profileMap[app.attendees.user_id] || {};
-                return [
-                    profile.full_name || 'Unknown',
-                    profile.personal_id || 'N/A',
-                    profile.email || '',
-                    profile.phone || '',
-                    app.attendees.university,
-                    app.attendees.faculty,
-                    app.attendees.department || '',
-                    app.attendees.student_id || '',
-                    app.attendees.is_asu_student ? 'Yes' : 'No',
-                    app.attendees.registration_status,
-                    new Date(app.applied_at).toLocaleString(),
-                    app.cv_url || ''
-                ];
-            });
+            const headers = ['Name', 'Personal ID', 'Email', 'Phone', 'University', 'Faculty', 'Department', 'Applied At', 'CV URL'];
+            const rows = exportData.map((app: any) => [
+                app.full_name || 'Unknown',
+                app.personal_id || 'N/A',
+                app.email || '',
+                app.phone || '',
+                app.university || '',
+                app.faculty || '',
+                app.department || '',
+                new Date(app.applied_at).toLocaleString(),
+                app.cv_url || ''
+            ]);
 
             const csvContent = [
                 headers.join(','),
@@ -310,7 +235,7 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
             link.click();
             URL.revokeObjectURL(link.href);
         } catch (error) {
-            console.error('Error exporting CSV:', error);
+            logger.error('Error exporting CSV:', error);
         }
     }, [jobId, jobTitle]);
 
@@ -410,25 +335,13 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                             />
                         </div>
 
-                        {/* Filter by Status */}
-                        <select
-                            value={filterStatus}
-                            onChange={(e) => handleFilterChange(e.target.value)}
-                            className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                        >
-                            <option value="all">All Status</option>
-                            <option value="approved">Approved</option>
-                            <option value="pending">Pending</option>
-                            <option value="rejected">Rejected</option>
-                        </select>
-
                         {/* Sort */}
                         <div className="flex gap-2">
                             <button
                                 onClick={() => handleSortChange('date')}
                                 className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors ${sortBy === 'date'
-                                        ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
-                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                    ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                                     }`}
                             >
                                 <span className="material-symbols-outlined text-lg">
@@ -439,8 +352,8 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                             <button
                                 onClick={() => handleSortChange('name')}
                                 className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors ${sortBy === 'name'
-                                        ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
-                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                    ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                                     }`}
                             >
                                 <span className="material-symbols-outlined text-lg">
@@ -482,23 +395,20 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                         <div className="flex flex-col items-center justify-center py-20 text-slate-400">
                             <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
                                 <span className="material-symbols-outlined text-4xl">
-                                    {searchQuery || filterStatus !== 'all' ? 'search_off' : 'person_off'}
+                                    {searchQuery ? 'search_off' : 'person_off'}
                                 </span>
                             </div>
                             <p className="font-medium text-sm">
-                                {searchQuery || filterStatus !== 'all'
-                                    ? 'No applicants match your filters'
+                                {searchQuery
+                                    ? 'No applicants match your search'
                                     : 'No applications received yet'}
                             </p>
-                            {(searchQuery || filterStatus !== 'all') && (
+                            {searchQuery && (
                                 <button
-                                    onClick={() => {
-                                        setSearchQuery('');
-                                        setFilterStatus('all');
-                                    }}
+                                    onClick={() => setSearchQuery('')}
                                     className="mt-4 text-indigo-600 hover:underline text-sm"
                                 >
-                                    Clear filters
+                                    Clear search
                                 </button>
                             )}
                         </div>
@@ -516,10 +426,10 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                                 Academic Info
                                             </th>
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-center">
-                                                Status
+                                                Applied
                                             </th>
                                             <th className="px-6 py-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-center">
-                                                Applied
+                                                Status
                                             </th>
                                             <th className="px-6 py-4 text-right text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
                                                 Actions
@@ -571,22 +481,26 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                                     </p>
                                                 </td>
                                                 <td className="px-6 py-4 text-center">
-                                                    <span className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${app.attendee.registration_status === 'approved'
-                                                            ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
-                                                            : app.attendee.registration_status === 'pending'
-                                                                ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
-                                                                : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                                                        }`}>
-                                                        {app.attendee.registration_status}
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4 text-center">
                                                     <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
                                                         {new Date(app.applied_at).toLocaleDateString(undefined, {
                                                             month: 'short',
                                                             day: 'numeric',
                                                             year: 'numeric'
                                                         })}
+                                                    </span>
+                                                </td>
+                                                {/* Status badge column */}
+                                                <td className="px-6 py-4 text-center">
+                                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${app.status === 'approved'
+                                                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                        : app.status === 'rejected'
+                                                            ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                                                            : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                                        }`}>
+                                                        <span className="material-symbols-outlined text-[12px]">
+                                                            {app.status === 'approved' ? 'check_circle' : app.status === 'rejected' ? 'cancel' : 'schedule'}
+                                                        </span>
+                                                        {app.status || 'pending'}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-right">
@@ -616,6 +530,37 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                                                 <span className="material-symbols-outlined text-lg">description</span>
                                                                 <span className="text-xs font-bold">CV</span>
                                                             </motion.a>
+                                                        )}
+                                                        {/* Approve / Reject — employer only */}
+                                                        {isEmployer && (
+                                                            <>
+                                                                <motion.button
+                                                                    whileHover={{ scale: 1.05 }}
+                                                                    whileTap={{ scale: 0.95 }}
+                                                                    disabled={app.status === 'approved' || updatingId === app.id}
+                                                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(app.id, 'approved'); }}
+                                                                    className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all flex items-center gap-1.5 px-3 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                    title="Approve"
+                                                                >
+                                                                    {updatingId === app.id ? (
+                                                                        <span className="material-symbols-outlined text-lg animate-spin">progress_activity</span>
+                                                                    ) : (
+                                                                        <span className="material-symbols-outlined text-lg">check_circle</span>
+                                                                    )}
+                                                                    <span className="text-xs font-bold">Approve</span>
+                                                                </motion.button>
+                                                                <motion.button
+                                                                    whileHover={{ scale: 1.05 }}
+                                                                    whileTap={{ scale: 0.95 }}
+                                                                    disabled={app.status === 'rejected' || updatingId === app.id}
+                                                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(app.id, 'rejected'); }}
+                                                                    className="p-2 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-all flex items-center gap-1.5 px-3 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                                    title="Reject"
+                                                                >
+                                                                    <span className="material-symbols-outlined text-lg">cancel</span>
+                                                                    <span className="text-xs font-bold">Reject</span>
+                                                                </motion.button>
+                                                            </>
                                                         )}
                                                     </div>
                                                 </td>
@@ -649,7 +594,7 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                         onClick={() => handleViewProfile(app)}
                                         className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 shadow-sm active:scale-[0.98] transition-all cursor-pointer"
                                     >
-                                        <div className="flex items-start justify-between mb-4">
+                                        <div className="flex items-start justify-between mb-3">
                                             <div className="flex items-center gap-3 min-w-0 flex-1">
                                                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-lg shadow-indigo-500/20 shadow-lg flex-shrink-0">
                                                     {app.attendee.user_profile.full_name.charAt(0).toUpperCase()}
@@ -658,34 +603,35 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                                     <h4 className="font-bold text-slate-900 dark:text-white truncate">
                                                         {app.attendee.user_profile.full_name}
                                                     </h4>
-                                                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                                                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-bold uppercase ${app.attendee.registration_status === 'approved'
-                                                                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
-                                                                : app.attendee.registration_status === 'pending'
-                                                                    ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
-                                                                    : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                                                            }`}>
-                                                            {app.attendee.registration_status}
-                                                        </span>
-                                                        <span className="text-[10px] text-slate-400 font-medium">
-                                                            {new Date(app.applied_at).toLocaleDateString()}
-                                                        </span>
-                                                    </div>
+                                                    <span className="text-[10px] text-slate-400 font-medium mt-1 block">
+                                                        {new Date(app.applied_at).toLocaleDateString()}
+                                                    </span>
                                                 </div>
                                             </div>
-                                            {app.cv_url && (
-                                                <motion.a
-                                                    whileHover={{ scale: 1.1 }}
-                                                    whileTap={{ scale: 0.9 }}
-                                                    href={app.cv_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700/50 flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm flex-shrink-0"
-                                                >
-                                                    <span className="material-symbols-outlined text-xl">description</span>
-                                                </motion.a>
-                                            )}
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                {/* Status badge */}
+                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${app.status === 'approved'
+                                                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                                                    : app.status === 'rejected'
+                                                        ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                                                        : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                                                    }`}>
+                                                    {app.status || 'pending'}
+                                                </span>
+                                                {app.cv_url && (
+                                                    <motion.a
+                                                        whileHover={{ scale: 1.1 }}
+                                                        whileTap={{ scale: 0.9 }}
+                                                        href={app.cv_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="w-10 h-10 rounded-xl bg-slate-50 dark:bg-slate-700/50 flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm flex-shrink-0"
+                                                    >
+                                                        <span className="material-symbols-outlined text-xl">description</span>
+                                                    </motion.a>
+                                                )}
+                                            </div>
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-50 dark:border-slate-700/50">
@@ -706,6 +652,28 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                                 </p>
                                             </div>
                                         </div>
+
+                                        {/* Approve / Reject — employer only */}
+                                        {isEmployer && (
+                                            <div className="flex gap-2 mt-3 pt-3 border-t border-slate-50 dark:border-slate-700/50">
+                                                <button
+                                                    disabled={app.status === 'approved' || updatingId === app.id}
+                                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(app.id, 'approved'); }}
+                                                    className="flex-1 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                                                >
+                                                    <span className="material-symbols-outlined text-sm">check_circle</span>
+                                                    Approve
+                                                </button>
+                                                <button
+                                                    disabled={app.status === 'rejected' || updatingId === app.id}
+                                                    onClick={(e) => { e.stopPropagation(); handleUpdateStatus(app.id, 'rejected'); }}
+                                                    className="flex-1 py-2 rounded-xl bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-bold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all"
+                                                >
+                                                    <span className="material-symbols-outlined text-sm">cancel</span>
+                                                    Reject
+                                                </button>
+                                            </div>
+                                        )}
                                     </motion.div>
                                 ))}
                             </motion.div>
@@ -737,8 +705,8 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                                             key={page}
                                             onClick={() => handlePageChange(page as number)}
                                             className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-medium transition-colors ${currentPage === page
-                                                    ? 'bg-indigo-600 text-white'
-                                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                                ? 'bg-indigo-600 text-white'
+                                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                                                 }`}
                                         >
                                             {page}
@@ -760,6 +728,26 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                 )}
             </motion.div>
 
+            {/* Action Toast  */}
+            <AnimatePresence>
+                {actionToast && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 20 }}
+                        className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-[10000] px-5 py-3 rounded-xl shadow-xl text-sm font-semibold flex items-center gap-2 ${actionToast.type === 'success'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-red-600 text-white'
+                            }`}
+                    >
+                        <span className="material-symbols-outlined text-lg">
+                            {actionToast.type === 'success' ? 'check_circle' : 'error'}
+                        </span>
+                        {actionToast.message}
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Profile Detail Modal */}
             <AnimatePresence>
                 {selectedApplicant && (
@@ -773,11 +761,6 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
                             university: selectedApplicant.attendee.university,
                             faculty: selectedApplicant.attendee.faculty,
                             department: selectedApplicant.attendee.department,
-                            student_id: selectedApplicant.attendee.student_id,
-                            registration_status: selectedApplicant.attendee.registration_status,
-                            preferred_language: 'en',
-                            score: selectedApplicant.attendee.user_profile.score || 0,
-                            created_at: selectedApplicant.applied_at,
                             cv_url: selectedApplicant.cv_url
                         }}
                         onClose={() => setSelectedApplicant(null)}

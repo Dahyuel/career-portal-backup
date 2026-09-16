@@ -14,6 +14,7 @@ import CancelBookingModal from '../../components/attendee/CancelBookingModal';
 import ViewAllActivitiesModal from '../../components/attendee/ViewAllActivitiesModal';
 import DashboardLoading from '../../components/DashboardLoading';
 import { motion, AnimatePresence } from 'framer-motion';
+import { QRCodeCanvas } from 'qrcode.react';
 
 // Animation Variants
 const containerVariants = {
@@ -40,11 +41,13 @@ const itemVariants = {
 
 import Toast from '../../components/shared/Toast';
 import { supabase } from '../../lib/supabase';
+import { logger } from '../../utils/logger';
 
 const AttendeeDashboard = () => {
   const { user, profile } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
   const [showProfile, setShowProfile] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
   const [userActivities, setUserActivities] = useState<any[]>([]);
@@ -63,7 +66,10 @@ const AttendeeDashboard = () => {
   const [showBookingConfirm, setShowBookingConfirm] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchQueryDraft, setSearchQueryDraft] = useState(''); // display-only; committed on Enter/blur
   const [dateFilter, setDateFilter] = useState<string>('');
+  const [sessionTypeFilter, setSessionTypeFilter] = useState('All');
+  const [sessionsTotalCount, setSessionsTotalCount] = useState(0);
   const [bookingToCancel, setBookingToCancel] = useState<{ id: string, title: string } | null>(null);
 
   // Companies state
@@ -75,14 +81,18 @@ const AttendeeDashboard = () => {
   const [partnerTypes, setPartnerTypes] = useState<string[]>([]);
 
   // Jobs state
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [filteredJobs, setFilteredJobs] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]); // current page's jobs
+  const [jobsTotalCount, setJobsTotalCount] = useState(0); // total across all pages
   const [jobSearch, setJobSearch] = useState('');
+  const [jobSearchDraft, setJobSearchDraft] = useState(''); // display-only; committed on Enter/blur
   const [jobTypeFilter, setJobTypeFilter] = useState('All');
+  const [jobExperienceFilter, setJobExperienceFilter] = useState('All');
+  const [jobModeFilter, setJobModeFilter] = useState('All');
   const [selectedJob, setSelectedJob] = useState<any>(null);
   const [jobToApply, setJobToApply] = useState<any>(null);
   const [jobToWithdraw, setJobToWithdraw] = useState<any>(null);
-  const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set());
+  // Map of job_id → application status ('pending' | 'approved' | 'rejected')
+  const [appliedJobIds, setAppliedJobIds] = useState<Map<string, string>>(new Map());
 
   // Lazy Loading States
   const [loadedTabs, setLoadedTabs] = useState<Set<string>>(new Set(['home']));
@@ -91,17 +101,27 @@ const AttendeeDashboard = () => {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [loadingCompanies, setLoadingCompanies] = useState(false);
 
+  const [jobFacultyFilter, setJobFacultyFilter] = useState('All');
+  const [availableFaculties, setAvailableFaculties] = useState<string[]>([]);
   const [isApplying, setIsApplying] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
 
+  // ── Pagination ────────────────────────────────────────────
+  const PAGE_SIZE = 30;
+  const [jobsPage, setJobsPage] = useState(1);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [schedulePage, setSchedulePage] = useState(1);
+
   // Full dashboard loading state - Blocks render until profile and critical data (schedule) are ready
   const [dashboardReady, setDashboardReady] = useState(false);
+  const [homeDataLoaded, setHomeDataLoaded] = useState(false);
 
-  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+  const EVENT_ID = profile?.event_id;
 
   // Get first name from full_name
   const attendeeProfile = useMemo(() => {
-    if (!profile) return null;
+    // Only build attendeeProfile once the full profile has loaded (not just cached routing data)
+    if (!profile || !profile.full_name) return null;
 
     return {
       // From user_profiles (already in profile)
@@ -117,10 +137,10 @@ const AttendeeDashboard = () => {
       // From attendees table (in profile.attendee)
       attendee_id: profile.id,
       is_asu_student: profile.attendee?.is_asu_student,
-      student_id: profile.attendee?.student_id,
       university: profile.attendee?.university,
       faculty: profile.attendee?.faculty,
       department: profile.attendee?.department,
+      year: profile.attendee?.year,
       cv_url: profile.attendee?.cv_url,
       enrollment_proof_url: profile.attendee?.enrollment_proof_url,
       registration_status: profile.attendee?.registration_status,
@@ -139,14 +159,10 @@ const AttendeeDashboard = () => {
     window.scrollTo(0, 0);
   }, [activeTab]);
 
-  // Initial dashboard load - wait for profile AND schedule (upcoming events)
+  // Initial dashboard load - wait for profile to be fully loaded
   useEffect(() => {
     if (profile && attendeeProfile) {
       setDashboardReady(true);
-      // Ensure we show loading state until schedule is fetched initially
-      if (!loadedTabs.has('schedule') && !loadingSchedule) {
-        setLoadingSchedule(true); // Pre-set loading
-      }
     }
   }, [profile, attendeeProfile]);
 
@@ -154,78 +170,58 @@ const AttendeeDashboard = () => {
   const fetchUserActivities = async () => {
     if (!user?.id) return;
     try {
-      const { data } = await supabase
-        .from('user_activities')
-        .select('id, activity_type, description, activity_timestamp, points_earned')
-        .eq('user_id', user.id)
-        .order('activity_timestamp', { ascending: false })
-        .limit(5); // Only need top 5 for dashboard view
+      const { data, error } = await supabase
+        .rpc('get_attendee_activities', { p_limit: 5 });
 
+      if (error) throw error;
       if (data) setUserActivities(data);
     } catch (err) {
-      console.error('Error fetching user activities:', err);
+      logger.error('Error fetching user activities:', err);
     }
   };
 
-  // COMPREHENSIVE INITIAL DATA LOAD: Parallelize all critical home-tab dependencies
   const fetchInitialDashboardData = useCallback(async () => {
-    if (!user?.id || !profile?.roles) return;
-
-    setLoadingSchedule(true);
+    if (!user?.id || !EVENT_ID) return;
 
     try {
+      // AFTER
       const [notificationsResult, activitiesResult, scheduleResult] = await Promise.all([
-        supabase
-          .from('notifications')
-          .select('id, title, content, publish_at, target_roles')
-          .eq('event_id', EVENT_ID)
-          .contains('target_roles', profile.roles) // Note: GIN index would be better, but composite index on (event_id, publish_at) helps
-          .order('publish_at', { ascending: false })
-          .limit(20), // Limit notifications
-        supabase
-          .from('user_activities')
-          .select('id, activity_type, description, activity_timestamp, points_earned')
-          .eq('user_id', user.id)
-          .order('activity_timestamp', { ascending: false })
-          .limit(10),
-        !loadedTabs.has('schedule')
-          ? supabase
-            .from('schedule')
-            .select('id, title, start_time, end_time, location, schedule_type, description')
-            .eq('event_id', EVENT_ID)
-            .order('start_time', { ascending: true })
-          : Promise.resolve({ data: scheduleEvents, error: null })
+        supabase.rpc('get_attendee_notifications', {
+          p_event_id: EVENT_ID,
+          p_roles: profile?.roles || []
+        }),
+        supabase.rpc('get_attendee_activities', { p_limit: 10 }),
+        supabase.rpc('get_attendee_schedule', { p_event_id: EVENT_ID })
       ]);
 
       if (notificationsResult.data) setNotifications(notificationsResult.data);
       if (activitiesResult.data) setUserActivities(activitiesResult.data);
-
-      if (!loadedTabs.has('schedule') && scheduleResult.data) {
+      if (scheduleResult.data) {
         setScheduleEvents(scheduleResult.data);
         const dates = Array.from(
           new Set(scheduleResult.data.map((event: any) =>
             new Date(event.start_time).toISOString().split('T')[0]
           ))
-        );
+        ) as string[];
         setUniqueDates(dates);
-        if (dates.length > 0 && !selectedDay) setSelectedDay(dates[0] as any);
-        setLoadedTabs(prev => new Set(prev).add('schedule'));
+        if (dates.length > 0) setSelectedDay(dates[0]);
       }
-      setLoadedTabs(prev => new Set(prev).add('schedule'));
+
+      setLoadedTabs(prev => new Set(prev).add('home').add('schedule'));
     } catch (error) {
-      console.error('Error fetching initial dashboard data:', error);
-      // Mark as loaded even on error to prevent infinite loading screen
-      setLoadedTabs(prev => new Set(prev).add('schedule'));
+      logger.error('Error fetching initial dashboard data:', error);
     } finally {
       setLoadingSchedule(false);
+      setHomeDataLoaded(true);
     }
-  }, [user?.id, profile?.roles, loadedTabs, scheduleEvents, selectedDay]);
+  }, [user?.id, EVENT_ID, profile?.roles?.length]);
+
 
   useEffect(() => {
-    if (dashboardReady) {
+    if (dashboardReady && EVENT_ID) {
       fetchInitialDashboardData();
     }
-  }, [dashboardReady]); // Only run once dashboard is ready
+  }, [dashboardReady, EVENT_ID, fetchInitialDashboardData]);
 
   // Derive upcoming events from scheduleEvents - optimized to use shared data
   useEffect(() => {
@@ -246,135 +242,74 @@ const AttendeeDashboard = () => {
       // This will be caught by the composite effect above, but kept as a safety guard for tab logic
     }
   }, [activeTab, loadedTabs]);
-  // Fetch booked sessions - Query from sessions table for better ordering
+  // ── Server-side sessions fetch with filters passed directly to RPC ──────────
+  const fetchSessionsPage = useCallback(async (
+    page: number,
+    search: string,
+    date: string,
+    sessionType: string
+  ) => {
+    if (!attendeeId) return;
+    setLoadingSessions(true);
+    try {
+      const params: Record<string, any> = {
+        p_event_id: EVENT_ID,
+        p_limit: PAGE_SIZE,
+        p_offset: (page - 1) * PAGE_SIZE,
+      };
+
+      if (search.trim()) params.p_search = search.trim();
+      if (date) params.p_date = date;
+      if (sessionType !== 'All') params.p_session_type = sessionType;
+
+      const { data, error } = await supabase
+        .rpc('get_attendee_available_sessions', params);
+
+      if (error) throw error;
+
+      if (data) {
+        setAvailableSessions(data.sessions || []);
+        setSessionsTotalCount(data.total_count ?? 0);
+        setLoadedTabs(prev => new Set(prev).add('sessions'));
+      }
+    } catch (error) {
+      logger.error('Error fetching sessions:', error);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [attendeeId]);
+
+  // Fetch booked sessions once when tab first opens
   useEffect(() => {
     const fetchBookedSessions = async () => {
-      if (!attendeeId) return;
-      if (activeTab !== 'sessions' && !loadedTabs.has('sessions')) return;
-
+      if (!attendeeId || activeTab !== 'sessions' || loadedTabs.has('sessions')) return;
       try {
-        // SINGLE OPTIMIZED QUERY with JS sorting for safety
-        const { data, error } = await supabase
-          .from('session_bookings')
-          .select(`
-            id,
-            booking_status,
-            checked_in,
-            checked_in_at,
-            booked_at,
-            session:sessions!inner (
-              id,
-              title,
-              start_time,
-              end_time,
-              room_name,
-              session_type,
-              status,
-              speaker:speaker_id (
-                first_name,
-                last_name,
-                photo_url
-              )
-            )
-          `)
-          .eq('attendee_id', attendeeId)
-          .eq('booking_status', 'confirmed')
-          .neq('session.status', 'cancelled')
-          .gte('session.start_time', new Date().toISOString())
-          .limit(50); // Fetch enough to sort
-
+        const { data, error } = await supabase.rpc('get_attendee_booked_sessions');
         if (error) throw error;
-
-        if (data) {
-          // Sort in JS to avoid complex joined ordering issues
-          const sorted = data.sort((a: any, b: any) =>
-            new Date(a.session.start_time).getTime() - new Date(b.session.start_time).getTime()
-          );
-
-          const formattedSessions = sorted.map((b: any) => ({
-            ...b.session,
-            booking_id: b.id,
-            booking_status: b.booking_status,
-            booked_at: b.booked_at,
-            checked_in: b.checked_in,
-            checked_in_at: b.checked_in_at,
-            speaker: Array.isArray(b.session.speaker) ? b.session.speaker[0] : (b.session.speaker || null)
-          }));
-
-          setBookedSessions(formattedSessions);
-        }
+        if (data) setBookedSessions(data);
       } catch (error) {
-        console.error('Error fetching booked sessions:', error);
+        logger.error('Error fetching booked sessions:', error);
       }
     };
-
     fetchBookedSessions();
   }, [attendeeId, activeTab, loadedTabs]);
 
-
+  // Trigger fetch when tab opens or page changes
   useEffect(() => {
-    const fetchAvailableSessions = async () => {
-      if (!attendeeId) return;
-      // Fixed: Load if NOT loaded yet (removed the activeTab check that was preventing load)
-      if (loadedTabs.has('sessions')) return;
+    if (activeTab !== 'sessions') return;
+    fetchSessionsPage(sessionsPage, searchQuery, dateFilter, sessionTypeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, sessionsPage]);
 
-      setLoadingSessions(true);
+  // Trigger fetch & reset to page 1 when filters change
+  useEffect(() => {
+    if (activeTab !== 'sessions') return;
+    setSessionsPage(1);
+    fetchSessionsPage(1, searchQuery, dateFilter, sessionTypeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, dateFilter, sessionTypeFilter]);
 
-      try {
-        // Fixed: Changed speaker!inner to left join and added description
-        const { data, error } = await supabase
-          .from('sessions')
-          .select(`
-          id,
-          title,
-          description,
-          start_time,
-          end_time,
-          room_name,
-          session_type,
-          max_attendees,
-          current_bookings,
-          is_full,
-          status,
-          speaker_id,
-          speaker:speaker_id (
-            first_name,
-            last_name,
-            photo_url
-          )
-        `)
-          .eq('event_id', EVENT_ID)
-          .in('status', ['scheduled', 'ongoing'])
-          .gte('start_time', new Date().toISOString())
-          .order('start_time', { ascending: true })
-          .limit(50);
-
-        if (error) throw error;
-
-        if (data) {
-          // RACE CONDITION FIX: Do NOT filter by bookedSessions here.
-          // Store ALL valid future sessions. Filter in renderSessionsTab.
-          const available = data.map((session: any) => ({
-            ...session,
-            speaker: session.speaker
-              ? (Array.isArray(session.speaker) ? session.speaker[0] : session.speaker)
-              : null
-          }));
-
-          setAvailableSessions(available);
-          setLoadedTabs(prev => new Set(prev).add('sessions'));
-        }
-      } catch (error) {
-        console.error('Error fetching available sessions:', error);
-      } finally {
-        setLoadingSessions(false);
-      }
-    };
-
-    fetchAvailableSessions();
-  }, [attendeeId, activeTab, loadedTabs]); // Removed bookedSessions dependency
-
-  // Fetch companies - optimized
+  // Fetch companies via RPC
   useEffect(() => {
     const fetchCompanies = async () => {
       if (activeTab !== 'companies' || loadedTabs.has('companies')) return;
@@ -383,26 +318,20 @@ const AttendeeDashboard = () => {
 
       try {
         const { data, error } = await supabase
-          .from('companies')
-          .select('id, company_name, industry, logo_url, partner_type, booth_number, description, email, website')
-          .eq('event_id', EVENT_ID)
-          .order('partner_type', { ascending: true }) // Show platinum first
-          .order('company_name', { ascending: true })
-          .limit(100); // Pagination
+          .rpc('get_attendee_companies', { p_event_id: EVENT_ID });
 
         if (error) throw error;
 
-        if (!error && data) {
+        if (data) {
           setCompanies(data);
           setFilteredCompanies(data);
-          // Extract unique partner types
-          const types = Array.from(new Set(data.map((c: any) => c.partner_type).filter(Boolean)));
+          const types = Array.from(new Set(data.map((c: any) => c.partner_type).filter(Boolean))) as string[];
           setPartnerTypes(['All', ...types]);
           setLoadedTabs(prev => new Set(prev).add('companies'));
         }
         setLoadingCompanies(false);
       } catch (error) {
-        console.error('Error fetching companies:', error);
+        logger.error('Error fetching companies:', error);
       } finally {
         setLoadingCompanies(false);
       }
@@ -411,87 +340,79 @@ const AttendeeDashboard = () => {
     fetchCompanies();
   }, [activeTab, loadedTabs]);
 
-  // Fetch Jobs - OPTIMIZED with minimal fields and pagination
-  useEffect(() => {
-    const fetchJobsData = async () => {
-      if (activeTab !== 'jobs' || loadedTabs.has('jobs')) return;
+  // ── Server-side jobs fetch with filters passed directly to RPC ───────────────
+  const fetchJobsPage = useCallback(async (
+    page: number,
+    search: string,
+    type: string,
+    faculty: string,
+    experience: string,
+    mode: string
+  ) => {
+    if (!attendeeId) return;
+    setLoadingJobs(true);
+    try {
+      const params: Record<string, any> = {
+        p_event_id: EVENT_ID,
+        p_limit: PAGE_SIZE,
+        p_offset: (page - 1) * PAGE_SIZE,
+      };
 
-      setLoadingJobs(true);
+      if (search.trim()) params.p_search = search.trim();
+      if (type !== 'All') params.p_job_type = type;
+      if (faculty !== 'All') params.p_faculty = faculty;
+      if (experience !== 'All') params.p_experience_level = experience;
+      if (mode !== 'All') params.p_employment_mode = mode;
 
-      try {
-        // Parallel fetch with optimized queries
-        const [jobsResult, applicationsResult] = await Promise.all([
-          supabase
-            .from('job_positions')
-            .select(`
-            id,
-            title,
-            job_type,
-            experience_level,
-            employment_mode,
-            location,
-            description,
-            posted_at,
-            no_of_applicants,
-            companies!inner (
-              company_name,
-              logo_url,
-              industry
+      const { data, error } = await supabase.rpc('get_attendee_jobs', params);
+
+      if (error) throw error;
+
+      if (data) {
+        setJobs(data.jobs || []);
+        setJobsTotalCount(data.total_count ?? 0);
+
+        // Build faculties list from the unfiltered first load
+        if (page === 1 && !search.trim() && type === 'All' && faculty === 'All' && experience === 'All' && mode === 'All') {
+          const faculties = Array.from(
+            new Set(
+              (data.jobs || []).flatMap((job: any) => job.companies?.faculties || []).filter(Boolean)
             )
-          `, { count: 'exact' })
-            .eq('event_id', EVENT_ID)
-            .eq('is_active', true)
-            .order('posted_at', { ascending: false })
-            .limit(50),
-          attendeeId ? supabase
-            .from('job_applications')
-            .select('job_position_id')
-            .eq('attendee_id', attendeeId)
-            : Promise.resolve({ data: null, error: null })
-        ]);
-
-        if (jobsResult.error) throw jobsResult.error;
-
-        if (jobsResult.data) {
-          setJobs(jobsResult.data);
-          setFilteredJobs(jobsResult.data);
+          ) as string[];
+          if (faculties.length > 0) setAvailableFaculties(faculties);
         }
 
-        if (applicationsResult.data) {
-          const appliedIds = new Set(applicationsResult.data.map((app: any) => app.job_position_id));
-          setAppliedJobIds(appliedIds);
+        // Applied jobs (always returned regardless of page)
+        if (data.applied_jobs && Array.isArray(data.applied_jobs)) {
+          const statusMap = new Map<string, string>();
+          (data.applied_jobs as { job_id: string; status: string }[]).forEach(a =>
+            statusMap.set(a.job_id, a.status || 'pending')
+          );
+          setAppliedJobIds(statusMap);
         }
-
         setLoadedTabs(prev => new Set(prev).add('jobs'));
-      } catch (error) {
-        console.error('Error fetching jobs:', error);
-      } finally {
-        setLoadingJobs(false);
       }
-    };
+    } catch (err) {
+      logger.error('Error fetching jobs:', err);
+    } finally {
+      setLoadingJobs(false);
+    }
+  }, [attendeeId]);
 
-    fetchJobsData();
-  }, [activeTab, loadedTabs, attendeeId]);
-
-  // Filter Jobs
+  // Trigger fetch when tab opens or page changes
   useEffect(() => {
-    let result = jobs;
+    if (activeTab !== 'jobs') return;
+    fetchJobsPage(jobsPage, jobSearch, jobTypeFilter, jobFacultyFilter, jobExperienceFilter, jobModeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, jobsPage]);
 
-    if (jobSearch) {
-      const query = jobSearch.toLowerCase();
-      result = result.filter((job: any) =>
-        job.title.toLowerCase().includes(query) ||
-        job.companies?.company_name?.toLowerCase().includes(query) ||
-        job.description?.toLowerCase().includes(query)
-      );
-    }
-
-    if (jobTypeFilter !== 'All') {
-      result = result.filter((job: any) => job.job_type === jobTypeFilter);
-    }
-
-    setFilteredJobs(result);
-  }, [jobSearch, jobTypeFilter, jobs]);
+  // Trigger fetch & reset to page 1 when filters change
+  useEffect(() => {
+    if (activeTab !== 'jobs') return;
+    setJobsPage(1);
+    fetchJobsPage(1, jobSearch, jobTypeFilter, jobFacultyFilter, jobExperienceFilter, jobModeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobSearch, jobTypeFilter, jobFacultyFilter, jobExperienceFilter, jobModeFilter]);
 
   // Filter companies
   useEffect(() => {
@@ -511,6 +432,11 @@ const AttendeeDashboard = () => {
 
     setFilteredCompanies(result);
   }, [companySearch, companyTypeFilter, companies]);
+
+  // (session page reset is now handled inside the filter-change useEffect above)
+
+  // Reset schedule page when selected day changes
+  useEffect(() => { setSchedulePage(1); }, [selectedDay]);
 
 
   // Define navigation tabs
@@ -556,151 +482,82 @@ const AttendeeDashboard = () => {
       'workshop': 'bg-blue-100 text-blue-800',
       'panel': 'bg-green-100 text-green-800',
       'networking': 'bg-amber-100 text-amber-800',
-      'competition': 'bg-red-100 text-red-800'
+      'competition': 'bg-red-100 text-red-800',
+      'mentorship_circle': 'bg-indigo-100 text-indigo-800',
+      'career_coaching': 'bg-teal-100 text-teal-800'
     };
     return colors[type.toLowerCase()] || 'bg-gray-100 text-gray-800';
   };
 
-  const handleBookSession = async () => {
-    if (!attendeeId || !sessionToBook) return;
+  // Frontend time-conflict guard: called before opening BookingConfirmationModal
+  const handleInitiateBooking = (session: any) => {
+    const newStart = new Date(session.start_time).getTime();
+    const conflict = bookedSessions.find((booked: any) =>
+      new Date(booked.start_time).getTime() === newStart
+    );
+    if (conflict) {
+      setToast({
+        message: `You already have "${conflict.title}" booked at this time. Please cancel it first.`,
+        type: 'error'
+      });
+      return;
+    }
+    setSessionToBook(session);
+    setShowBookingConfirm(true);
+  };
+
+  const handleBookSession = async (target?: any) => {
+    const session = target ?? sessionToBook;
+    if (!attendeeId || !session) {
+      logger.warn('handleBookSession: missing session or attendeeId');
+      return;
+    }
 
     try {
-      // 1. Verify current booking status and capacity
-      const { data: sessionData, error: sessionFetchError } = await supabase
-        .from('sessions')
-        .select('current_bookings, max_attendees')
-        .eq('id', sessionToBook.id)
-        .single();
+      // Single atomic RPC call handles capacity check, duplicate detection, and booking
+      const { data, error } = await supabase
+        .rpc('attendee_book_session', { p_session_id: session.id });
 
-      if (sessionFetchError) throw sessionFetchError;
+      if (error) throw error;
 
-      const currentBookings = sessionData.current_bookings || 0;
-      const maxAttendees = sessionData.max_attendees;
-
-      if (maxAttendees && currentBookings >= maxAttendees) {
-        setToast({ message: 'This session is full', type: 'error' });
+      if (data && !data.success) {
+        // Server returned a validation message (e.g., session full, already booked)
+        setToast({ message: data.message, type: data.message.includes('full') ? 'error' : 'warning' });
         setShowBookingConfirm(false);
         setSessionToBook(null);
         return;
       }
 
-      // 2. Check for existing booking (cancelled or not)
-      const { data: existingBooking, error: checkError } = await supabase
-        .from('session_bookings')
-        .select('id, booking_status')
-        .eq('session_id', sessionToBook.id)
-        .eq('attendee_id', attendeeId)
-        .maybeSingle();
+      // OPTIMISTIC UPDATE
+      const newBookedSession = {
+        ...session,
+        booking_id: data?.booking_id,
+        booking_status: 'confirmed',
+        booked_at: new Date().toISOString(),
+        checked_in: false,
+        checked_in_at: null
+      };
 
-      if (checkError) throw checkError;
+      setBookedSessions(prev => [...prev, newBookedSession].sort((a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      ));
+      setAvailableSessions(prev => prev.filter(s => s.id !== session.id));
 
-      if (existingBooking) {
-        if (existingBooking.booking_status === 'cancelled') {
-          // OPTIMISTIC UPDATE: Update local state immediately
-          const rebookedSession = {
-            ...sessionToBook,
-            booking_id: existingBooking.id,
-            booking_status: 'confirmed',
-            booked_at: new Date().toISOString(),
-            checked_in: false,
-            checked_in_at: null
-          };
+      setToast({ message: 'Session booked successfully!', type: 'success' });
+      setShowBookingConfirm(false);
+      setSessionToBook(null);
+      setSelectedSession(null);
 
-          // Update UI instantly
-          setBookedSessions(prev => [...prev, rebookedSession].sort((a, b) =>
-            new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-          ));
-          setAvailableSessions(prev => prev.filter(s => s.id !== sessionToBook.id));
-
-          setToast({ message: 'Session booked successfully!', type: 'success' });
-          setShowBookingConfirm(false);
-          setSessionToBook(null);
-          setSelectedSession(null);
-
-          // Perform actual update in background
-          const { error: updateError } = await supabase
-            .from('session_bookings')
-            .update({
-              booking_status: 'confirmed',
-              checked_in: false,
-              booked_at: new Date().toISOString()
-            })
-            .eq('id', existingBooking.id);
-
-          // ✅ TRIGGER HANDLES: current_bookings increment & is_full update automatically
-
-          if (updateError) {
-            // Revert on error
-            throw updateError;
-          }
-
-          // Invalidate cache for next refresh (background)
-          setLoadedTabs(prev => {
-            const next = new Set(prev);
-            next.delete('sessions');
-            return next;
-          });
-        } else {
-          setToast({ message: 'You already have a booking for this session.', type: 'warning' });
-          setShowBookingConfirm(false);
-          setSessionToBook(null);
-          return;
-        }
-      }
-      else {
-        // OPTIMISTIC UPDATE for New Booking
-        const newBookingId = crypto.randomUUID(); // Temporary ID for UI
-        const newBookedSession = {
-          ...sessionToBook,
-          booking_id: newBookingId,
-          booking_status: 'confirmed',
-          booked_at: new Date().toISOString(),
-          checked_in: false,
-          checked_in_at: null
-        };
-
-        // Update UI instantly
-        setBookedSessions(prev => [...prev, newBookedSession].sort((a, b) =>
-          new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
-        ));
-        setAvailableSessions(prev => prev.filter(s => s.id !== sessionToBook.id));
-
-        setToast({ message: 'Session booked successfully!', type: 'success' });
-        setShowBookingConfirm(false);
-        setSessionToBook(null);
-        setSelectedSession(null);
-
-        // Insert actual booking
-        const { error: bookingError } = await supabase
-          .from('session_bookings')
-          .insert({
-            session_id: sessionToBook.id,
-            attendee_id: attendeeId,
-            booking_status: 'confirmed',
-            checked_in: false
-          })
-          .select('id')
-          .single();
-
-        // ✅ TRIGGER HANDLES: current_bookings increment & is_full update automatically
-
-        if (bookingError) throw bookingError;
-
-        // Update the temporary ID with real one if needed, or let refresh handle it
-        setLoadedTabs(prev => {
-          const next = new Set(prev);
-          next.delete('sessions');
-          return next;
-        });
-      }
-
-      // ❌ REMOVED: Manual session statistics update
-      // The database trigger now handles this automatically when we insert/update session_bookings
+      // Invalidate cache for next refresh
+      setLoadedTabs(prev => {
+        const next = new Set(prev);
+        next.delete('sessions');
+        return next;
+      });
 
     } catch (err: any) {
-      console.error('Error booking session:', err);
+      logger.error('Error booking session:', err);
       setToast({ message: 'Failed to book session. Please try again.', type: 'error' });
-      // Revert optimistic updates if needed (simplified here by force reload on next visit)
       setLoadedTabs(prev => {
         const next = new Set(prev);
         next.delete('sessions');
@@ -720,8 +577,29 @@ const AttendeeDashboard = () => {
       if (cancelledSessionIndex > -1) {
         const cancelledSession = bookedSessions[cancelledSessionIndex];
 
+        // Normalize for the available list:
+        //  - guarantee `id` exists (booked sessions use `session_id` from the RPC)
+        //  - strip booking-only fields so it behaves like a fresh available session
+        const sessionId = cancelledSession.id ?? cancelledSession.session_id;
+        const normalizedForAvailable = {
+          id: sessionId,
+          session_id: sessionId,
+          title: cancelledSession.title,
+          session_type: cancelledSession.session_type,
+          description: cancelledSession.description,
+          start_time: cancelledSession.start_time,
+          end_time: cancelledSession.end_time,
+          room_name: cancelledSession.room_name,
+          room_capacity: cancelledSession.room_capacity ?? null,
+          max_attendees: cancelledSession.max_attendees ?? null,
+          current_bookings: cancelledSession.current_bookings ?? 0,
+          is_full: false,
+          status: cancelledSession.status ?? 'scheduled',
+          speaker: cancelledSession.speaker ?? null,
+        };
+
         setBookedSessions(prev => prev.filter(s => s.booking_id !== bookingId));
-        setAvailableSessions(prev => [...prev, cancelledSession].sort(
+        setAvailableSessions(prev => [...prev, normalizedForAvailable].sort(
           (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
         ));
 
@@ -729,17 +607,13 @@ const AttendeeDashboard = () => {
         setBookingToCancel(null);
         setSelectedSession(null);
 
-        // Perform actual update
+        // Perform actual cancel via RPC
         const { error } = await supabase
-          .from('session_bookings')
-          .update({ booking_status: 'cancelled' })
-          .eq('id', bookingId);
-
-        // ✅ TRIGGER HANDLES: current_bookings decrement & is_full update automatically
+          .rpc('attendee_cancel_booking', { p_booking_id: bookingId });
 
         if (error) throw error;
 
-        // Invalidate cache in background
+        // Invalidate cache in background so the next tab visit re-fetches fresh data
         setLoadedTabs(prev => {
           const next = new Set(prev);
           next.delete('sessions');
@@ -747,11 +621,8 @@ const AttendeeDashboard = () => {
         });
       }
 
-      // ❌ REMOVED: Manual session statistics decrement
-      // The database trigger now handles this automatically when we update booking_status
-
     } catch (error) {
-      console.error('Error cancelling booking:', error);
+      logger.error('Error cancelling booking:', error);
       setToast({ message: 'Failed to cancel booking.', type: 'error' });
       // Revert optimistic update by forcing reload
       setLoadedTabs(prev => {
@@ -785,21 +656,12 @@ const AttendeeDashboard = () => {
       setIsApplying(true);
 
       const { error } = await supabase
-        .from('job_applications')
-        .insert({
-          job_position_id: jobToApply.id,
-          attendee_id: attendeeId,
-          cv_url: attendeeProfile?.cv_url
-        });
+        .rpc('attendee_apply_job', { p_job_position_id: jobToApply.id });
 
       if (error) throw error;
 
-      // Update local state by invalidating loadedTabs
-      setLoadedTabs(prev => {
-        const next = new Set(prev);
-        next.delete('jobs');
-        return next;
-      });
+      // Refresh current jobs page to reflect new application status
+      fetchJobsPage(jobsPage, jobSearch, jobTypeFilter, jobFacultyFilter, jobExperienceFilter, jobModeFilter);
 
       setJobToApply(null);
       setSelectedJob(null); // Close detail modal too
@@ -807,8 +669,8 @@ const AttendeeDashboard = () => {
       fetchUserActivities(); // Refresh activities
 
     } catch (err: any) {
-      console.error('Error applying for job:', err);
-      setToast({ message: 'Failed to submit application.', type: 'error' });
+      logger.error('Error applying for job:', err);
+      setToast({ message: err?.message || 'Failed to submit application.', type: 'error' });
       setJobToApply(null);
       setSelectedJob(null);
     } finally {
@@ -824,27 +686,20 @@ const AttendeeDashboard = () => {
       setIsApplying(true);
 
       const { error } = await supabase
-        .from('job_applications')
-        .delete()
-        .eq('job_position_id', jobToWithdraw.id)
-        .eq('attendee_id', attendeeId);
+        .rpc('attendee_withdraw_job', { p_job_position_id: jobToWithdraw.id });
 
       if (error) throw error;
 
-      // Update local state by invalidating loadedTabs
-      setLoadedTabs(prev => {
-        const next = new Set(prev);
-        next.delete('jobs');
-        return next;
-      });
+      // Refresh current jobs page to reflect withdrawn application
+      fetchJobsPage(jobsPage, jobSearch, jobTypeFilter, jobFacultyFilter, jobExperienceFilter, jobModeFilter);
 
       setToast({ message: 'Application withdrawn successfully.', type: 'success' });
       setJobToWithdraw(null);
       setSelectedJob(null); // Close detail modal too
       fetchUserActivities(); // Refresh activities
     } catch (err: any) {
-      console.error('Error withdrawing application:', err);
-      setToast({ message: 'Failed to withdraw application.', type: 'error' });
+      logger.error('Error withdrawing application:', err);
+      setToast({ message: err?.message || 'Failed to withdraw application.', type: 'error' });
       setJobToWithdraw(null);
       setSelectedJob(null);
     } finally {
@@ -853,168 +708,176 @@ const AttendeeDashboard = () => {
   };
 
 
-  // Filter available sessions by search and filters
-  const filterSessions = (sessions: any[]) => {
-    return sessions.filter((session: any) => {
-      // Search filter
-      const matchesSearch = searchQuery === '' ||
-        session.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        session.description?.toLowerCase().includes(searchQuery.toLowerCase());
+  // (session filtering is now server-side via fetchSessionsPage)
 
-      // Date filter
-      const matchesDate = dateFilter === '' ||
-        new Date(session.start_time).toISOString().split('T')[0] === dateFilter;
-
-      return matchesSearch && matchesDate;
-    });
-  };
-
-  // Full Loading Screen - Waits for Profile & Schedule (Upcoming Events)
-  if (!dashboardReady || !attendeeProfile || !loadedTabs.has('schedule')) {
+  // Full Loading Screen - Waits for Profile to be fully loaded
+  if (!dashboardReady || !attendeeProfile) {
     return <DashboardLoading message="Loading Your Dashboard" subMessage="Preparing your experience..." />;
   }
 
-  const renderHomeTab = () => (
-    <motion.div
-      className="space-y-6"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-      exit="exit"
-    >
-      {/* Welcome Banner with Gradient Fade */}
+  const renderHomeTab = () => {
+    if (!homeDataLoaded) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800 rounded-full" />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-red-600 rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+          <p className="text-gray-500 dark:text-gray-400 font-medium">Loading your dashboard...</p>
+        </div>
+      );
+    }
+
+    return (
       <motion.div
-        variants={itemVariants}
-        className="bg-gradient-to-br from-red-600 to-red-700 rounded-3xl p-8 shadow-lg shadow-red-500/20 relative overflow-hidden group"
+        className="space-y-6"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        exit="exit"
       >
-        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
-          <span className="material-symbols-outlined text-9xl text-white transform rotate-12">
-            school
-          </span>
-        </div>
-        <div className="relative z-10">
-          <h2 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-            Welcome, {firstName || 'Attendee'}!
-          </h2>
-          <p className="text-red-100 text-lg mb-6 max-w-xl">
-            Ready to explore new opportunities? Check out the schedule and find your next career move.
-          </p>
-          <button
-            onClick={() => setShowProfile(true)}
-            className="bg-white text-red-600 hover:bg-red-50 px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg active:scale-95 flex items-center gap-2"
-          >
-            <span className="material-symbols-outlined">person</span>
-            My Profile
-          </button>
-        </div>
-      </motion.div>
+        {/* Welcome Banner with Gradient Fade */}
+        <motion.div
+          variants={itemVariants}
+          className="bg-gradient-to-br from-red-600 to-red-700 rounded-3xl p-8 shadow-lg shadow-red-500/20 relative overflow-hidden group"
+        >
+          <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
+            <span className="material-symbols-outlined text-9xl text-white transform rotate-12">
+              school
+            </span>
+          </div>
+          <div className="relative z-10">
+            <h2 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
+              Welcome, {firstName || 'Attendee'}!
+            </h2>
+            <p className="text-red-100 text-lg mb-6 max-w-xl">
+              Ready to explore new opportunities? Check out the schedule and find your next career move.
+            </p>
+            <button
+              onClick={() => setShowQRModal(true)}
+              className="bg-white text-red-600 hover:bg-red-50 px-6 py-2.5 rounded-xl font-bold transition-all shadow-lg active:scale-95 flex items-center gap-2"
+            >
+              <span className="material-symbols-outlined">qr_code_2</span>
+              Show QR Code
+            </button>
+          </div>
+        </motion.div>
 
 
 
-      {/* Recent Activity */}
-      <motion.div
-        variants={itemVariants}
-        className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <span className="material-symbols-outlined text-red-600">history</span>
-            Recent Activity
-          </h3>
-          <button
-            onClick={() => setShowAllActivitiesModal(true)}
-            className="text-sm font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
-          >
-            View All
-          </button>
-        </div>
-        <div className="space-y-4">
-          {userActivities.length > 0 ? (
-            userActivities.slice(0, 5).map((activity: any, idx: number) => (
-              <div key={idx} className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-slate-800 last:border-0 last:pb-0">
-                <div className="bg-red-100 dark:bg-red-900/30 p-2 rounded-lg flex-shrink-0">
-                  <span className="material-symbols-outlined text-red-600 dark:text-red-400">
-                    {activity.activity_type === 'session_attendance' ? 'event' :
-                      activity.activity_type === 'job_application' ? 'work' :
-                        activity.activity_type === 'company_visit' ? 'business' :
-                          'check_circle'}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 dark:text-white">{activity.activity_type?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</p>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description || 'No description'}</p>
-                  <div className="flex items-center gap-3 mt-1">
-                    <p className="text-xs text-gray-400">
-                      {new Date(activity.activity_timestamp).toLocaleString()}
-                    </p>
+        {/* Recent Activity */}
+        <motion.div
+          variants={itemVariants}
+          className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <span className="material-symbols-outlined text-red-600">history</span>
+              Recent Activity
+            </h3>
+            <button
+              onClick={() => setShowAllActivitiesModal(true)}
+              className="text-sm font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+            >
+              View All
+            </button>
+          </div>
+          <div className="space-y-4">
+            {userActivities.length > 0 ? (
+              userActivities.slice(0, 5).map((activity: any, idx: number) => (
+                <div key={idx} className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-slate-800 last:border-0 last:pb-0">
+                  <div className="bg-red-100 dark:bg-red-900/30 p-2 rounded-lg flex-shrink-0">
+                    <span className="material-symbols-outlined text-red-600 dark:text-red-400">
+                      {activity.activity_type === 'session_attendance' ? 'event' :
+                        activity.activity_type === 'job_application' ? 'work' :
+                          activity.activity_type === 'company_visit' ? 'business' :
+                            'check_circle'}
+                    </span>
                   </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">history</span>
-              <p className="text-sm">No recent activities</p>
-            </div>
-          )}
-        </div>
-      </motion.div>
-
-      {/* Upcoming Events */}
-      <motion.div
-        variants={itemVariants}
-        className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
-      >
-        <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-          <span className="material-symbols-outlined text-red-600 dark:text-red-400">event</span>
-          Upcoming Events
-        </h3>
-        <div className="space-y-3">
-          {upcomingEvents.length > 0 ? (
-            upcomingEvents.slice(0, 5).map((event: any) => (
-              <button
-                key={event.id}
-                onClick={() => setSelectedEvent(event)}
-                className="w-full border border-gray-200 rounded-xl p-4 hover:border-red-300 hover:bg-red-50/30 transition-all text-left"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900 dark:text-white">{event.title}</h4>
-                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-base">schedule</span>
-                        {new Date(event.start_time).toLocaleString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                      {event.location && (
-                        <span className="flex items-center gap-1">
-                          <span className="material-symbols-outlined text-base">location_on</span>
-                          {event.location}
-                        </span>
-                      )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-900 dark:text-white">{activity.activity_type?.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{activity.description || 'No description'}</p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <p className="text-xs text-gray-400">
+                        {new Date(activity.activity_timestamp).toLocaleString()}
+                      </p>
                     </div>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getTypeBadgeColor(event.schedule_type || event.type || 'Other')}`}>
-                    {event.schedule_type || event.type || 'Event'}
-                  </span>
                 </div>
-              </button>
-            ))
-          ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">event_busy</span>
-              <p className="text-sm">No upcoming events</p>
-            </div>
-          )}
-        </div>
-      </motion.div>
-    </motion.div>
-  );
+              ))
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">history</span>
+                <p className="text-sm">No recent activities</p>
+              </div>
+            )}
+          </div>
+        </motion.div>
 
+        {/* Upcoming Events */}
+        <motion.div
+          variants={itemVariants}
+          className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
+        >
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">event</span>
+            Upcoming Events
+          </h3>
+          <div className="space-y-3">
+            {upcomingEvents.length > 0 ? (
+              upcomingEvents.slice(0, 5).map((event: any) => (
+                <button
+                  key={event.id}
+                  onClick={() => setSelectedEvent(event)}
+                  className="w-full border border-gray-200 rounded-xl p-4 hover:border-red-300 hover:bg-red-50/30 transition-all text-left"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900 dark:text-white">{event.title}</h4>
+                      {event.speaker && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                          with {event.speaker.first_name} {event.speaker.last_name}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <span className="material-symbols-outlined text-base">schedule</span>
+                          {new Date(event.start_time).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                        {event.location && (
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-base">location_on</span>
+                            {event.location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getTypeBadgeColor(event.schedule_type || event.type || 'Other')}`}>
+                      {event.schedule_type || event.type || 'Event'}
+                    </span>
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">event_busy</span>
+                <p className="text-sm">No upcoming events</p>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </motion.div>
+    );
+  }
   const renderScheduleTab = () => {
     if (loadingSchedule) {
       return (
@@ -1048,19 +911,25 @@ const AttendeeDashboard = () => {
         animate="visible"
         exit="exit"
       >
-        <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-4">
           <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
             <span className="material-symbols-outlined text-red-600 dark:text-red-400">calendar_month</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Schedule</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Event Schedule</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Browse all sessions and plan your day</span>
+            </div>
+          </div>
         </div>
+
 
         {/* Date Cards */}
         <motion.div
           variants={itemVariants}
-          className="overflow-x-auto pb-2"
+          className="pb-4"
         >
-          <div className="flex gap-3 md:grid md:grid-cols-3 lg:grid-cols-5 min-w-min">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {uniqueDates.map((date, idx) => {
               const dateObj = new Date(date);
               const dayEvents = getScheduleForDate(date);
@@ -1070,18 +939,18 @@ const AttendeeDashboard = () => {
                 <button
                   key={date}
                   onClick={() => setSelectedDay(date as any)}
-                  className={`flex-shrink-0 w-40 md:w-auto p-4 rounded-xl border-2 transition-all ${isSelected
-                    ? 'border-red-600 bg-red-50 dark:bg-red-900/20'
-                    : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-red-300 dark:hover:border-red-700'
+                  className={`w-full p-3 sm:p-4 rounded-xl border-2 transition-all flex flex-col items-center sm:items-start text-center sm:text-left ${isSelected
+                    ? 'border-red-600 bg-red-50 dark:bg-red-900/20 shadow-sm'
+                    : 'border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-red-300 dark:hover:border-red-700 hover:shadow-md'
                     }`}
                 >
-                  <div className={`text-sm font-semibold mb-1 ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                  <div className={`text-sm font-bold mb-1 ${isSelected ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}`}>
                     Day {idx + 1}
                   </div>
-                  <div className={`text-lg font-bold mb-1 ${isSelected ? 'text-red-700 dark:text-red-300' : 'text-gray-900 dark:text-white'}`}>
+                  <div className={`text-lg sm:text-xl font-black mb-1 ${isSelected ? 'text-red-700 dark:text-red-300' : 'text-gray-900 dark:text-white'}`}>
                     {dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">
+                  <div className={`text-xs font-semibold ${isSelected ? 'text-red-500 dark:text-red-400/80' : 'text-gray-500 dark:text-gray-500'}`}>
                     {dayEvents.length} event{dayEvents.length !== 1 ? 's' : ''}
                   </div>
                 </button>
@@ -1090,46 +959,89 @@ const AttendeeDashboard = () => {
           </div>
         </motion.div>
 
-        {/* Events for Selected Date */}
+        {/* Events for Selected Date — paginated */}
         <motion.div
           variants={itemVariants}
           className="space-y-4"
         >
           {selectedDateEvents.length > 0 ? (
-            selectedDateEvents.map((event: any) => (
-              <button
-                key={event.id}
-                onClick={() => setSelectedEvent(event)}
-                className="w-full border border-gray-200 dark:border-slate-800 rounded-xl p-4 hover:border-red-300 dark:hover:border-red-500/50 hover:bg-red-50/30 dark:hover:bg-red-900/10 transition-all text-left"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
-                    <h4 className="font-semibold text-gray-900 dark:text-white">{event.title}</h4>
-                    <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-base">schedule</span>
-                        {new Date(event.start_time).toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })} - {new Date(event.end_time).toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </span>
-                      {event.location && (
-                        <span className="flex items-center gap-1">
-                          <span className="material-symbols-outlined text-base">location_on</span>
-                          {event.location}
-                        </span>
+            <>
+              {selectedDateEvents.slice((schedulePage - 1) * PAGE_SIZE, schedulePage * PAGE_SIZE).map((event: any) => (
+                <button
+                  key={event.id}
+                  onClick={() => setSelectedEvent(event)}
+                  className="w-full border border-gray-200 dark:border-slate-800 rounded-xl p-4 hover:border-red-300 dark:hover:border-red-500/50 hover:bg-red-50/30 dark:hover:bg-red-900/10 transition-all text-left"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-gray-900 dark:text-white">{event.title}</h4>
+                      {event.speaker && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                          with {event.speaker.first_name} {event.speaker.last_name}
+                        </p>
                       )}
+                      <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <span className="material-symbols-outlined text-base">schedule</span>
+                          {new Date(event.start_time).toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })} - {new Date(event.end_time).toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </span>
+                        {event.location && (
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-base">location_on</span>
+                            {event.location}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getTypeBadgeColor(event.schedule_type || 'other')}`}>
+                      {event.schedule_type || 'Event'}
+                    </span>
                   </div>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getTypeBadgeColor(event.schedule_type || 'other')}`}>
-                    {event.schedule_type || 'Event'}
-                  </span>
+                </button>
+              ))}
+              {/* Schedule Pagination */}
+              {Math.ceil(selectedDateEvents.length / PAGE_SIZE) > 1 && (
+                <div className="flex flex-col flex-wrap sm:flex-row items-center justify-between pt-4 gap-4 sm:gap-0">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 shrink-0 text-center sm:text-left">
+                    Showing {(schedulePage - 1) * PAGE_SIZE + 1}–{Math.min(schedulePage * PAGE_SIZE, selectedDateEvents.length)} of {selectedDateEvents.length} events
+                  </p>
+                  <div className="flex flex-wrap justify-center sm:justify-end gap-2">
+                    <button
+                      onClick={() => setSchedulePage(p => Math.max(1, p - 1))}
+                      disabled={schedulePage === 1}
+                      className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">chevron_left</span>
+                    </button>
+                    {Array.from({ length: Math.ceil(selectedDateEvents.length / PAGE_SIZE) }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setSchedulePage(page)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${schedulePage === page
+                          ? 'bg-red-600 text-white shadow-md'
+                          : 'border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                          }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setSchedulePage(p => Math.min(Math.ceil(selectedDateEvents.length / PAGE_SIZE), p + 1))}
+                      disabled={schedulePage === Math.ceil(selectedDateEvents.length / PAGE_SIZE)}
+                      className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">chevron_right</span>
+                    </button>
+                  </div>
                 </div>
-              </button>
-            ))
+              )}
+            </>
           ) : (
             <div className="text-center py-12 text-gray-500 dark:text-gray-400">
               <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-gray-700 mb-3 block">event_busy</span>
@@ -1143,11 +1055,7 @@ const AttendeeDashboard = () => {
   };
 
   const renderSessionsTab = () => {
-    // RACE CONDITION FIX: Filter booked sessions at RENDER time
-    // This ensures that as soon as bookedSessions loads, they disappear from available list
-    const bookedIds = new Set(bookedSessions.map((s: any) => s.id));
-    const reallyAvailableSessions = availableSessions.filter(s => !bookedIds.has(s.id));
-    const filteredAvailable = filterSessions(reallyAvailableSessions);
+    const totalPages = Math.ceil(sessionsTotalCount / PAGE_SIZE);
 
     if (loadingSessions) {
       return (
@@ -1173,11 +1081,16 @@ const AttendeeDashboard = () => {
         animate="visible"
         exit="exit"
       >
-        <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-4">
           <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
             <span className="material-symbols-outlined text-red-600 dark:text-red-400">event</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sessions</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Sessions</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Book and manage your session reservations</span>
+            </div>
+          </div>
         </div>
 
         {/* My Booked Sessions */}
@@ -1216,7 +1129,7 @@ const AttendeeDashboard = () => {
                     {/* Attended / Status Badge */}
                     <div className="absolute bottom-3 left-3 flex gap-2">
                       <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getTypeBadgeColor(session.session_type)} shadow-sm`}>
-                        {session.session_type}
+                        {session.session_type.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                       </span>
                       {session.checked_in && (
                         <span className="inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-500 text-white shadow-sm flex items-center gap-1">
@@ -1300,127 +1213,210 @@ const AttendeeDashboard = () => {
           </h3>
 
           {/* Search and Filters */}
-          <div className="flex flex-col md:flex-row gap-3">
-            <div className="flex-1 relative">
+          <div className="flex flex-col gap-3">
+            {/* Search Row */}
+            <div className="relative">
               <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
               <input
                 type="text"
-                placeholder="Search sessions..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
+                placeholder="Search by title, speaker, description..."
+                value={searchQueryDraft}
+                onChange={(e) => setSearchQueryDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                    setSearchQuery(searchQueryDraft);
+                  }
+                }}
+                onBlur={() => setSearchQuery(searchQueryDraft)}
+                className="w-full pl-12 pr-12 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
               />
+              {searchQueryDraft && (
+                <button
+                  onClick={() => { setSearchQueryDraft(''); setSearchQuery(''); }}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                  aria-label="Clear search"
+                >
+                  <span className="material-symbols-outlined text-lg">close</span>
+                </button>
+              )}
             </div>
-            <select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600"
-            >
-              <option value="">All Days</option>
-              {/* Generate dates dynamically from available sessions */}
-              {Array.from(new Set(availableSessions.map((s: any) =>
-                new Date(s.start_time).toISOString().split('T')[0]
-              ))).sort().map((date: string) => (
-                <option key={date} value={date}>
-                  {new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </option>
-              ))}
-            </select>
+
+            {/* Filter Row */}
+            <div className="flex flex-wrap gap-3">
+              {/* Date filter */}
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+              />
+
+              {/* Session Type filter */}
+              <select
+                value={sessionTypeFilter}
+                onChange={(e) => setSessionTypeFilter(e.target.value)}
+                className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+              >
+                <option value="All">All Types</option>
+                <option value="keynote">Keynote</option>
+                <option value="workshop">Workshop</option>
+                <option value="panel">Panel</option>
+                <option value="networking">Networking</option>
+                <option value="competition">Competition</option>
+                <option value="mentorship_circle">Mentorship Circle</option>
+                <option value="career_coaching">Career Coaching</option>
+                <option value="other">Other</option>
+              </select>
+
+              {/* Clear Filters */}
+              {(searchQueryDraft || dateFilter || sessionTypeFilter !== 'All') && (
+                <button
+                  onClick={() => {
+                    setSearchQueryDraft('');
+                    setSearchQuery('');
+                    setDateFilter('');
+                    setSessionTypeFilter('All');
+                  }}
+                  className="px-4 py-2.5 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm font-semibold hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-sm">filter_alt_off</span>
+                  Clear Filters
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Available Sessions Grid */}
-          {filteredAvailable.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredAvailable.map((session: any) => (
-                <motion.div
-                  key={session.id}
-                  whileHover={{ y: -5 }}
-                  onClick={() => setSelectedSession(session)}
-                  className="group bg-white dark:bg-slate-800 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden cursor-pointer border border-slate-100 dark:border-slate-700 flex flex-col h-full"
-                >
-                  {/* Image Header with Glassmorphism Badge */}
-                  <div className="relative h-64 overflow-hidden">
-                    <img
-                      src={session.speaker?.photo_url || 'https://images.unsplash.com/photo-1544531320-98514ea28924?auto=format&fit=crop&w=800&q=80'}
-                      alt={session.speaker?.first_name || 'Speaker'}
-                      className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-110"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-90" />
+          {/* Available Sessions Grid — server-side paginated */}
+          {availableSessions.length > 0 ? (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {availableSessions.map((session: any) => (
+                  <motion.div
+                    key={session.id}
+                    whileHover={{ y: -5 }}
+                    onClick={() => setSelectedSession(session)}
+                    className="group bg-white dark:bg-slate-800 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden cursor-pointer border border-slate-100 dark:border-slate-700 flex flex-col h-full"
+                  >
+                    {/* Image Header with Glassmorphism Badge */}
+                    <div className="relative h-64 overflow-hidden">
+                      <img
+                        src={session.speaker?.photo_url || 'https://images.unsplash.com/photo-1544531320-98514ea28924?auto=format&fit=crop&w=800&q=80'}
+                        alt={session.speaker?.first_name || 'Speaker'}
+                        className="w-full h-full object-cover object-top transition-transform duration-500 group-hover:scale-110"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-90" />
 
-                    {/* Date/Time Badge */}
-                    <div className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/20 backdrop-blur-md border border-white/20 text-white text-xs font-bold tracking-wide shadow-sm">
-                      {new Date(session.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                    </div>
+                      {/* Date/Time Badge */}
+                      <div className="absolute top-3 right-3 px-3 py-1.5 rounded-full bg-white/20 backdrop-blur-md border border-white/20 text-white text-xs font-bold tracking-wide shadow-sm">
+                        {new Date(session.start_time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
 
-                    {/* Category Badge */}
-                    <div className="absolute bottom-3 left-3">
-                      <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getTypeBadgeColor(session.session_type)} shadow-sm`}>
-                        {session.session_type}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Content Body */}
-                  <div className="p-5 flex flex-col flex-1">
-                    <div className="flex-1">
-                      <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-2 line-clamp-2 leading-tight">
-                        {session.title}
-                      </h4>
-
-                      {session.speaker && (
-                        <div className="flex items-center gap-2 mb-4">
-                          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                            with <span className="text-slate-700 dark:text-slate-300">{session.speaker.first_name} {session.speaker.last_name}</span>
-                          </p>
-                        </div>
-                      )}
-
-                      <div className="space-y-2.5">
-                        <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                          <span className="material-symbols-outlined text-sm text-red-500">calendar_today</span>
-                          {new Date(session.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </div>
-
-                        {session.room_name && (
-                          <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                            <span className="material-symbols-outlined text-sm text-red-500">location_on</span>
-                            {session.room_name}
-                          </div>
-                        )}
+                      {/* Category Badge */}
+                      <div className="absolute bottom-3 left-3">
+                        <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${getTypeBadgeColor(session.session_type)} shadow-sm`}>
+                          {session.session_type.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                        </span>
                       </div>
                     </div>
 
-                    {/* Footer Actions */}
-                    <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                      {session.max_attendees && (
-                        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-                          <span className="material-symbols-outlined text-sm">group</span>
-                          {session.current_bookings}/{session.max_attendees}
-                        </div>
-                      )}
+                    {/* Content Body */}
+                    <div className="p-5 flex flex-col flex-1">
+                      <div className="flex-1">
+                        <h4 className="font-bold text-lg text-slate-900 dark:text-white mb-2 line-clamp-2 leading-tight">
+                          {session.title}
+                        </h4>
 
+                        {session.speaker && (
+                          <div className="flex items-center gap-2 mb-4">
+                            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                              with <span className="text-slate-700 dark:text-slate-300">{session.speaker.first_name} {session.speaker.last_name}</span>
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="space-y-2.5">
+                          <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                            <span className="material-symbols-outlined text-sm text-red-500">calendar_today</span>
+                            {new Date(session.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </div>
+
+                          {session.room_name && (
+                            <div className="flex items-center gap-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                              <span className="material-symbols-outlined text-sm text-red-500">location_on</span>
+                              {session.room_name}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Footer Actions */}
+                      <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+                        {session.max_attendees && (
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+                            <span className="material-symbols-outlined text-sm">group</span>
+                            {session.current_bookings}/{session.max_attendees}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!session.is_full) {
+                              handleInitiateBooking(session);
+                            }
+                          }}
+                          disabled={session.is_full}
+                          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${session.is_full
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : 'bg-red-600 hover:bg-red-700 text-white hover:shadow-md active:scale-95'
+                            }`}
+                        >
+                          {session.is_full ? 'Full' : 'Book Now'}
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+
+              </div>
+              {/* Sessions Pagination — server-side */}
+              {totalPages > 1 && (
+                <div className="flex flex-col flex-wrap sm:flex-row items-center justify-between pt-4 gap-4 sm:gap-0">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 shrink-0 text-center sm:text-left">
+                    Showing {(sessionsPage - 1) * PAGE_SIZE + 1}–{Math.min(sessionsPage * PAGE_SIZE, sessionsTotalCount)} of {sessionsTotalCount} sessions
+                  </p>
+                  <div className="flex flex-wrap justify-center sm:justify-end gap-2">
+                    <button
+                      onClick={() => setSessionsPage(p => Math.max(1, p - 1))}
+                      disabled={sessionsPage === 1}
+                      className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">chevron_left</span>
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!session.is_full) {
-                            setSessionToBook(session);
-                            setShowBookingConfirm(true);
-                          }
-                        }}
-                        disabled={session.is_full}
-                        className={`px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm ${session.is_full
-                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                          : 'bg-red-600 hover:bg-red-700 text-white hover:shadow-md active:scale-95'
+                        key={page}
+                        onClick={() => setSessionsPage(page)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${sessionsPage === page
+                          ? 'bg-red-600 text-white shadow-md'
+                          : 'border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
                           }`}
                       >
-                        {session.is_full ? 'Full' : 'Book Now'}
+                        {page}
                       </button>
-                    </div>
+                    ))}
+                    <button
+                      onClick={() => setSessionsPage(p => Math.min(totalPages, p + 1))}
+                      disabled={sessionsPage === totalPages}
+                      className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">chevron_right</span>
+                    </button>
                   </div>
-                </motion.div>
-              ))}
-
-            </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border border-gray-100 dark:border-slate-800">
               <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-gray-700 mb-3 block">search_off</span>
@@ -1451,6 +1447,172 @@ const AttendeeDashboard = () => {
       );
     }
 
+    // Split current page's jobs into applied and new
+    const appliedJobs = jobs.filter((job) => appliedJobIds.has(job.id));
+    const newJobs = jobs.filter((job) => !appliedJobIds.has(job.id));
+    // Server-side total pages (based on full result set)
+    const totalPages = Math.ceil(jobsTotalCount / PAGE_SIZE);
+
+    const renderJobCard = (job: any) => {
+      const applicationStatus = appliedJobIds.get(job.id);
+      const hasApplied = applicationStatus !== undefined;
+      const isLocked = applicationStatus === 'approved' || applicationStatus === 'rejected';
+
+      return (
+        <motion.div
+          key={job.id}
+          variants={itemVariants}
+          whileHover={{ y: -5 }}
+          onClick={() => setSelectedJob(job)}
+          className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-xl transition-all duration-300 cursor-pointer flex flex-col h-full group relative overflow-hidden"
+        >
+          <div className="flex items-start gap-4 mb-4">
+            {/* Company Logo */}
+            <div className="w-16 h-16 rounded-xl bg-white dark:bg-white p-2 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center flex-shrink-0 group-hover:border-red-100 dark:group-hover:border-red-500 transition-colors">
+              {job.companies?.logo_url ? (
+                <img
+                  src={job.companies.logo_url}
+                  alt={job.companies.company_name}
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <span className="material-symbols-outlined text-slate-300 text-3xl">business</span>
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <h3 className="font-bold text-lg text-slate-900 dark:text-white truncate group-hover:text-red-600 transition-colors">
+                {job.title}
+              </h3>
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-sm font-medium text-slate-500 dark:text-slate-400 truncate">
+                  {job.companies?.company_name}
+                </p>
+                {job.companies?.industry && (
+                  <>
+                    <span className="text-slate-300 dark:text-slate-600">•</span>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
+                      {job.companies.industry}
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Application Status Badge */}
+            {hasApplied && (
+              <span className={`flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-md border ${applicationStatus === 'approved'
+                ? 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-900/50'
+                : applicationStatus === 'rejected'
+                  ? 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-900/50'
+                  : 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/50'
+                }`}>
+                <span className="material-symbols-outlined text-sm">
+                  {applicationStatus === 'approved' ? 'check_circle' : applicationStatus === 'rejected' ? 'cancel' : 'schedule'}
+                </span>
+                {applicationStatus === 'approved' ? 'Approved' : applicationStatus === 'rejected' ? 'Rejected' : 'Pending'}
+              </span>
+            )}
+          </div>
+
+          {/* Badges Row */}
+          <div className="space-y-3 flex-1 mb-4">
+            <div className="flex flex-wrap gap-2">
+              {/* Job Type Badge */}
+              <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${getTypeBadgeColor(job.job_type)}`}>
+                {job.job_type}
+              </span>
+
+              {/* Experience Level Badge */}
+              {job.experience_level && (
+                <span className="px-2.5 py-1 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[12px]">workspace_premium</span>
+                  {job.experience_level}
+                </span>
+              )}
+
+              {/* Employment Mode Badge */}
+              {job.employment_mode && (
+                <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${job.employment_mode === 'remote'
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                  : job.employment_mode === 'hybrid'
+                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                    : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                  }`}>
+                  <span className="material-symbols-outlined text-[12px]">
+                    {job.employment_mode === 'remote' ? 'home' : job.employment_mode === 'hybrid' ? 'autorenew' : 'apartment'}
+                  </span>
+                  {job.employment_mode}
+                </span>
+              )}
+
+              {/* Location Badge */}
+              {job.location && (
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[12px]">location_on</span>
+                  {job.location}
+                </span>
+              )}
+            </div>
+
+            {/* ── NEW: Faculty Badges ── */}
+            {job.companies?.faculties && job.companies.faculties.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {job.companies.faculties.map((faculty: string) => (
+                  <span
+                    key={faculty}
+                    className="px-2.5 py-1 rounded-md bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 text-xs font-semibold flex items-center gap-1 border border-indigo-100 dark:border-indigo-800/40"
+                  >
+                    <span className="material-symbols-outlined text-[11px]">school</span>
+                    {faculty}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Description Snippet */}
+            {job.description && (
+              <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                {job.description}
+              </p>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
+            <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
+              <span className="flex items-center gap-1 font-medium">
+                <span className="material-symbols-outlined text-sm">schedule</span>
+                Posted {new Date(job.posted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              </span>
+              {job.no_of_applicants !== null && job.no_of_applicants !== undefined && (
+                <span className="flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
+                  <span className="material-symbols-outlined text-sm">group</span>
+                  {job.no_of_applicants} {job.no_of_applicants === 1 ? 'applicant' : 'applicants'}
+                </span>
+              )}
+            </div>
+
+            {!hasApplied ? (
+              <span className="text-red-600 dark:text-red-400 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
+                View Details
+                <span className="material-symbols-outlined text-sm">arrow_forward</span>
+              </span>
+            ) : isLocked ? (
+              <span className="text-xs text-slate-400 dark:text-slate-500 italic">
+                {applicationStatus === 'approved' ? 'Offer received 🎉' : 'Application closed'}
+              </span>
+            ) : (
+              <span className="text-amber-600 dark:text-amber-400 text-xs font-semibold flex items-center gap-1">
+                <span className="material-symbols-outlined text-sm">pending</span>
+                Under review
+              </span>
+            )}
+          </div>
+        </motion.div>
+      );
+    };
+
     return (
       <motion.div
         className="space-y-6"
@@ -1459,189 +1621,221 @@ const AttendeeDashboard = () => {
         animate="visible"
         exit="exit"
       >
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-              <span className="material-symbols-outlined text-red-600 dark:text-red-400">work</span>
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Job Opportunities</h2>
+        <div className="flex items-center gap-4 pt-4">
+          <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">work</span>
           </div>
-          <span className="text-sm text-gray-500 dark:text-gray-400">{filteredJobs.length} Jobs Found</span>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Job Opportunities</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Explore and apply for open positions</span>
+            </div>
+          </div>
         </div>
 
         {/* Search and Filters */}
-        <div className="flex flex-col md:flex-row gap-3">
-          <div className="flex-1 relative">
+        <div className="flex flex-col gap-3">
+          {/* Search Row */}
+          <div className="relative">
             <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">search</span>
             <input
               type="text"
-              placeholder="Search jobs..."
-              value={jobSearch}
-              onChange={(e) => setJobSearch(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+              placeholder="Search by title, company, skills..."
+              value={jobSearchDraft}
+              onChange={(e) => setJobSearchDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.currentTarget.blur();
+                  setJobSearch(jobSearchDraft);
+                }
+              }}
+              onBlur={() => setJobSearch(jobSearchDraft)}
+              className="w-full pl-12 pr-12 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
             />
+            {jobSearchDraft && (
+              <button
+                onClick={() => { setJobSearchDraft(''); setJobSearch(''); }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                aria-label="Clear search"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            )}
           </div>
-          <select
-            value={jobTypeFilter}
-            onChange={(e) => setJobTypeFilter(e.target.value)}
-            className="px-4 py-3 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
-          >
-            <option value="All">All Types</option>
-            <option value="full-time">Full Time</option>
-            <option value="part-time">Part Time</option>
-            <option value="internship">Internship</option>
-            <option value="contract">Contract</option>
-          </select>
+
+          {/* Filter Chips Row */}
+          <div className="flex flex-wrap gap-3">
+            {/* Job Type filter */}
+            <select
+              value={jobTypeFilter}
+              onChange={(e) => setJobTypeFilter(e.target.value)}
+              className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+            >
+              <option value="All">All Types</option>
+              <option value="full-time">Full Time</option>
+              <option value="part-time">Part Time</option>
+              <option value="internship">Internship</option>
+              <option value="contract">Contract</option>
+              <option value="freelance">Freelance</option>
+            </select>
+
+            {/* Experience Level filter */}
+            <select
+              value={jobExperienceFilter}
+              onChange={(e) => setJobExperienceFilter(e.target.value)}
+              className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+            >
+              <option value="All">All Levels</option>
+              <option value="entry">Entry</option>
+              <option value="junior">Junior</option>
+              <option value="mid">Mid</option>
+              <option value="senior">Senior</option>
+              <option value="lead">Lead</option>
+              <option value="executive">Executive</option>
+            </select>
+
+            {/* Employment Mode filter */}
+            <select
+              value={jobModeFilter}
+              onChange={(e) => setJobModeFilter(e.target.value)}
+              className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+            >
+              <option value="All">All Modes</option>
+              <option value="on-site">On-Site</option>
+              <option value="remote">Remote</option>
+              <option value="hybrid">Hybrid</option>
+            </select>
+
+            {/* Faculty filter (populated from data) */}
+            {availableFaculties.length > 0 && (
+              <select
+                value={jobFacultyFilter}
+                onChange={(e) => setJobFacultyFilter(e.target.value)}
+                className="px-4 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-red-600 shadow-sm"
+              >
+                <option value="All">All Faculties</option>
+                {availableFaculties.map((faculty) => (
+                  <option key={faculty} value={faculty}>{faculty}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Clear Filters button — only show when any filter is active */}
+            {(jobSearchDraft || jobTypeFilter !== 'All' || jobExperienceFilter !== 'All' || jobModeFilter !== 'All' || jobFacultyFilter !== 'All') && (
+              <button
+                onClick={() => {
+                  setJobSearchDraft('');
+                  setJobSearch('');
+                  setJobTypeFilter('All');
+                  setJobExperienceFilter('All');
+                  setJobModeFilter('All');
+                  setJobFacultyFilter('All');
+                }}
+                className="px-4 py-2.5 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm font-semibold hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-sm">filter_alt_off</span>
+                Clear Filters
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Job Listings */}
-        <motion.div
-          variants={itemVariants}
-          className="space-y-4"
-        >
-          {filteredJobs.length > 0 ? (
-            filteredJobs.map((job) => {
-              const hasApplied = appliedJobIds.has(job.id);
-              return (
-                <motion.div
-                  key={job.id}
-                  variants={itemVariants}
-                  whileHover={{ y: -5 }}
-                  onClick={() => setSelectedJob(job)}
-                  className="bg-white dark:bg-slate-800 rounded-xl p-6 shadow-sm border border-slate-100 dark:border-slate-700 hover:shadow-xl transition-all duration-300 cursor-pointer flex flex-col h-full group relative overflow-hidden"
-                >
-                  <div className="flex items-start gap-4 mb-4">
-                    {/* Company Logo - Left Aligned */}
-                    <div className="w-16 h-16 rounded-xl bg-white dark:bg-white p-2 shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-center flex-shrink-0 group-hover:border-red-100 dark:group-hover:border-red-500 transition-colors">
-                      {job.companies?.logo_url ? (
-                        <img
-                          src={job.companies.logo_url}
-                          alt={job.companies.company_name}
-                          className="w-full h-full object-contain"
-                        />
-                      ) : (
-                        <span className="material-symbols-outlined text-slate-300 text-3xl">business</span>
-                      )}
-                    </div>
+        {/* ── SECTION 1: Applied Jobs ── */}
+        {appliedJobs.length > 0 && (
+          <motion.div variants={itemVariants} className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-1.5 bg-amber-100 dark:bg-amber-900/30 rounded-lg">
+                <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-xl">send</span>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Applied Jobs</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{appliedJobs.length} application{appliedJobs.length !== 1 ? 's' : ''} submitted</p>
+              </div>
+            </div>
 
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-lg text-slate-900 dark:text-white truncate group-hover:text-red-600 transition-colors">
-                        {job.title}
-                      </h3>
-                      <div className="flex items-center gap-2 mt-1">
-                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400 truncate">
-                          {job.companies?.company_name}
-                        </p>
-                        {job.companies?.industry && (
-                          <>
-                            <span className="text-slate-300 dark:text-slate-600">•</span>
-                            <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
-                              {job.companies.industry}
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    </div>
+            <div className="space-y-4">
+              {appliedJobs.map((job) => renderJobCard(job))}
+            </div>
 
-                    {/* Applied Status Badge - Top Right */}
-                    {hasApplied && (
-                      <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-xs font-bold bg-green-50 dark:bg-green-900/20 px-2.5 py-1 rounded-md border border-green-200 dark:border-green-900/50">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        Applied
-                      </span>
-                    )}
+            {/* Divider before New Jobs */}
+            {newJobs.length > 0 && (
+              <div className="relative py-2">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200 dark:border-slate-700" />
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* ── SECTION 2: New Opportunities ── */}
+        <motion.div variants={itemVariants} className="space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg">
+              <span className="material-symbols-outlined text-emerald-600 dark:text-emerald-400 text-xl">explore</span>
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">New Opportunities</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{jobsTotalCount} position{jobsTotalCount !== 1 ? 's' : ''} available</p>
+            </div>
+          </div>
+
+          {newJobs.length > 0 || jobsTotalCount > 0 ? (
+            <>
+              <div className="space-y-4">
+                {newJobs.map((job) => renderJobCard(job))}
+              </div>
+              {/* Server-side Pagination */}
+              {totalPages > 1 && (
+                <div className="flex flex-col flex-wrap sm:flex-row items-center justify-between pt-4 gap-4 sm:gap-0">
+                  <p className="text-sm text-slate-500 dark:text-slate-400 shrink-0 text-center sm:text-left">
+                    Showing {(jobsPage - 1) * PAGE_SIZE + 1}–{Math.min(jobsPage * PAGE_SIZE, jobsTotalCount)} of {jobsTotalCount} positions
+                  </p>
+                  <div className="flex flex-wrap justify-center sm:justify-end gap-2">
+                    <button
+                      onClick={() => setJobsPage(p => Math.max(1, p - 1))}
+                      disabled={jobsPage === 1}
+                      className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">chevron_left</span>
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                      <button
+                        key={page}
+                        onClick={() => setJobsPage(page)}
+                        className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${jobsPage === page
+                          ? 'bg-red-600 text-white shadow-md'
+                          : 'border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700'
+                          }`}
+                      >
+                        {page}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setJobsPage(p => Math.min(totalPages, p + 1))}
+                      disabled={jobsPage === totalPages}
+                      className="px-4 py-2 rounded-xl text-sm font-bold border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">chevron_right</span>
+                    </button>
                   </div>
-
-                  {/* Enhanced Badge Row - Now includes Experience + Employment Mode */}
-                  <div className="space-y-3 flex-1 mb-4">
-                    <div className="flex flex-wrap gap-2">
-                      {/* Job Type Badge */}
-                      <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider ${getTypeBadgeColor(job.job_type)}`}>
-                        {job.job_type}
-                      </span>
-
-                      {/* Experience Level Badge - NEW */}
-                      {job.experience_level && (
-                        <span className="px-2.5 py-1 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs font-bold uppercase tracking-wider flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[12px]">workspace_premium</span>
-                          {job.experience_level}
-                        </span>
-                      )}
-
-                      {/* Employment Mode Badge - NEW */}
-                      {job.employment_mode && (
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase tracking-wider flex items-center gap-1 ${job.employment_mode === 'remote'
-                          ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
-                          : job.employment_mode === 'hybrid'
-                            ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                            : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                          }`}>
-                          <span className="material-symbols-outlined text-[12px]">
-                            {job.employment_mode === 'remote' ? 'home' : job.employment_mode === 'hybrid' ? 'autorenew' : 'apartment'}
-                          </span>
-                          {job.employment_mode}
-                        </span>
-                      )}
-
-                      {/* Location Badge */}
-                      {job.location && (
-                        <span className="px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-xs font-bold flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[12px]">location_on</span>
-                          {job.location}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Description Snippet */}
-                    {job.description && (
-                      <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                        {job.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Footer - Enhanced with Applicant Count */}
-                  <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between">
-                    <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
-                      {/* Posted Date */}
-                      <span className="flex items-center gap-1 font-medium">
-                        <span className="material-symbols-outlined text-sm">schedule</span>
-                        Posted {new Date(job.posted_at).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric'
-                        })}
-                      </span>
-
-                      {/* Applicant Count - NEW with Social Proof */}
-                      {job.no_of_applicants !== null && job.no_of_applicants !== undefined && (
-                        <span className="flex items-center gap-1 font-medium text-slate-500 dark:text-slate-400">
-                          <span className="material-symbols-outlined text-sm">group</span>
-                          {job.no_of_applicants} {job.no_of_applicants === 1 ? 'applicant' : 'applicants'}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* View Details Arrow */}
-                    {!hasApplied && (
-                      <span className="text-red-600 dark:text-red-400 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
-                        View Details
-                        <span className="material-symbols-outlined text-sm">arrow_forward</span>
-                      </span>
-                    )}
-                  </div>
-                </motion.div>
-              );
-            })
+                </div>
+              )}
+            </>
           ) : (
             <div className="text-center py-12 bg-gray-50 dark:bg-slate-900/50 rounded-xl border-dashed border-2 border-gray-200 dark:border-slate-700">
               <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-700 mb-2 block">work_off</span>
-              <p className="text-gray-600 dark:text-gray-400 font-medium">No matching jobs found</p>
-              <button
-                onClick={() => { setJobSearch(''); setJobTypeFilter('All'); }}
-                className="mt-2 text-red-600 dark:text-red-400 text-sm font-bold hover:underline"
-              >
-                Clear Filters
-              </button>
+              <p className="text-gray-600 dark:text-gray-400 font-medium">
+                {jobs.length === 0 ? 'No matching jobs found' : 'You\'ve applied to all on this page!'}
+              </p>
+              {(jobSearch || jobTypeFilter !== 'All' || jobFacultyFilter !== 'All') && (
+                <button
+                  onClick={() => { setJobSearch(''); setJobTypeFilter('All'); setJobFacultyFilter('All'); }}
+                  className="mt-2 text-red-600 dark:text-red-400 text-sm font-bold hover:underline"
+                >
+                  Clear Filters
+                </button>
+              )}
             </div>
           )}
         </motion.div>
@@ -1674,12 +1868,15 @@ const AttendeeDashboard = () => {
         animate="visible"
         exit="exit"
       >
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-              <span className="material-symbols-outlined text-red-600 dark:text-red-400">business</span>
-            </div>
+        <div className="flex items-center gap-4">
+          <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+            <span className="material-symbols-outlined text-red-600 dark:text-red-400">business</span>
+          </div>
+          <div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Participating Companies</h2>
+            <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 mt-1">
+              <span>Discover companies and explore their booths</span>
+            </div>
           </div>
         </div>
 
@@ -1707,7 +1904,7 @@ const AttendeeDashboard = () => {
             >
               {partnerTypes.map((type) => (
                 <option key={type} value={type}>
-                  {type === 'All' ? 'All Partner Types' : type}
+                  {type === 'All' ? 'All Partner Types' : type.split('_').map((w) => w === 'a' || w === 'b' ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                 </option>
               ))}
             </select>
@@ -1717,78 +1914,108 @@ const AttendeeDashboard = () => {
           </div>
         </motion.div>
 
-        {/* Grid */}
-        <motion.div
-          variants={itemVariants}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-        >
-          {filteredCompanies.length > 0 ? (
-            filteredCompanies.map((company) => (
-              <motion.div
-                key={company.id}
-                variants={itemVariants}
-                whileHover={{ y: -5 }}
-                onClick={() => setSelectedCompany(company)}
-                className="group bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm hover:shadow-xl border border-gray-100 dark:border-slate-700/50 cursor-pointer transition-all duration-300 relative overflow-hidden"
-              >
-                {/* Partner Badge */}
-                <div className="absolute top-4 right-4 z-10">
-                  <span className={`inline-block px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700' :
-                    company.partner_type === 'gold' ? 'bg-amber-50 text-amber-700' :
-                      'bg-gray-50 text-gray-500'
-                    }`}>
-                    {company.partner_type}
-                  </span>
-                </div>
+        {/* Grouped by Partner Type */}
+        {(() => {
+          const groups = ['diamond', 'platinum', 'gold', 'silver', 'exhibitor_a', 'exhibitor_b', 'student_activity_partner', 'community_partner', 'catering_partner', 'career_coaching_partner'];
+          const labelMap: Record<string, string> = {
+            diamond: 'Diamond Partners',
+            platinum: 'Platinum Partners',
+            gold: 'Gold Partners',
+            silver: 'Silver Partners',
+            exhibitor_a: 'Exhibitors A',
+            exhibitor_b: 'Exhibitors B',
+            student_activity_partner: 'Student Activity Partners',
+            community_partner: 'Community Partners',
+            catering_partner: 'Catering Partners',
+            career_coaching_partner: 'Career Coaching Partners',
+          };
+          return groups.map((partnerType) => {
+            const grouped = filteredCompanies.filter((c) => c.partner_type === partnerType);
+            if (grouped.length === 0) return null;
+            return (
+              <motion.div key={partnerType} variants={itemVariants} className="space-y-4">
+                <h3 className="text-lg font-bold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-slate-700 pb-2">
+                  {labelMap[partnerType]}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {grouped.map((company) => (
+                    <motion.div
+                      key={company.id}
+                      variants={itemVariants}
+                      whileHover={{ y: -5 }}
+                      onClick={() => setSelectedCompany(company)}
+                      className="group bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-sm hover:shadow-xl border border-gray-100 dark:border-slate-700/50 cursor-pointer transition-all duration-300 relative overflow-hidden"
+                    >
+                      {/* Partner Badge */}
+                      <div className="absolute top-4 right-4 z-10">
+                        <span className={`inline-block px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${company.partner_type === 'diamond' ? 'bg-cyan-100 text-cyan-700' :
+                          company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700' :
+                            company.partner_type === 'gold' ? 'bg-amber-50 text-amber-700' :
+                              company.partner_type === 'silver' ? 'bg-gray-100 text-gray-700' :
+                                company.partner_type === 'exhibitor_a' ? 'bg-indigo-100 text-indigo-700' :
+                                  company.partner_type === 'exhibitor_b' ? 'bg-teal-100 text-teal-700' :
+                                    company.partner_type === 'student_activity_partner' ? 'bg-violet-100 text-violet-700' :
+                                      company.partner_type === 'community_partner' ? 'bg-emerald-100 text-emerald-700' :
+                                        company.partner_type === 'catering_partner' ? 'bg-orange-100 text-orange-700' :
+                                          company.partner_type === 'career_coaching_partner' ? 'bg-sky-100 text-sky-700' :
+                                            'bg-slate-100 text-slate-600'}`}>
+                          {company.partner_type.split('&').map((part: string) => part.split('_').map((w: string) => w === 'a' || w === 'b' ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(' ')).join(' & ')}
+                        </span>
+                      </div>
 
-                {/* Logo Area */}
-                <div className="h-32 mb-6 flex items-center justify-center p-4 bg-gray-50 dark:bg-slate-900/50 rounded-2xl group-hover:bg-gray-100 dark:group-hover:bg-slate-900 transition-colors">
-                  {company.logo_url ? (
-                    <img
-                      src={company.logo_url}
-                      alt={company.company_name}
-                      className="max-w-full max-h-full object-contain filter grayscale group-hover:grayscale-0 transition-all duration-300 transform group-hover:scale-110"
-                    />
-                  ) : (
-                    <span className="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600">business</span>
-                  )}
-                </div>
+                      {/* Logo Area */}
+                      <div className="h-32 mb-6 flex items-center justify-center p-4 bg-gray-50 dark:bg-slate-900/50 rounded-2xl group-hover:bg-gray-100 dark:group-hover:bg-slate-900 transition-colors">
+                        {company.logo_url ? (
+                          <img
+                            src={company.logo_url}
+                            alt={company.company_name}
+                            className="max-w-full max-h-full object-contain filter grayscale group-hover:grayscale-0 transition-all duration-300 transform group-hover:scale-110"
+                          />
+                        ) : (
+                          <span className="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600">business</span>
+                        )}
+                      </div>
 
-                {/* Content */}
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 group-hover:text-red-600 transition-colors truncate">
-                    {company.company_name}
-                  </h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-3 truncate">
-                    {company.industry}
-                  </p>
-
-                  <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-slate-700 pt-3">
-                    <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-sm">storefront</span>
-                      Booth {company.booth_number || 'TBA'}
-                    </span>
-                    <span className="group-hover:translate-x-1 transition-transform text-red-500 font-bold flex items-center">
-                      View Details
-                      <span className="material-symbols-outlined text-sm">chevron_right</span>
-                    </span>
-                  </div>
+                      {/* Content */}
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1 group-hover:text-red-600 transition-colors truncate">
+                          {company.company_name}
+                        </h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium mb-3 truncate">
+                          {company.industry}
+                        </p>
+                        <div className="flex items-center justify-between text-xs text-gray-400 dark:text-gray-500 border-t border-gray-100 dark:border-slate-700 pt-3">
+                          <span className="flex items-center gap-1">
+                            <span className="material-symbols-outlined text-sm">storefront</span>
+                            Booth {company.booth_number || 'TBA'}
+                          </span>
+                          <span className="group-hover:translate-x-1 transition-transform text-red-500 font-bold flex items-center">
+                            View Details
+                            <span className="material-symbols-outlined text-sm">chevron_right</span>
+                          </span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </motion.div>
-            ))
-          ) : (
-            <div className="col-span-full text-center py-12 bg-gray-50 dark:bg-slate-800/50 rounded-3xl border-2 border-dashed border-gray-200 dark:border-slate-700">
-              <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-600 mb-2 block">business_center</span>
-              <p className="text-gray-500 dark:text-gray-400 font-medium">No matching companies found</p>
-              <button
-                onClick={() => { setCompanySearch(''); setCompanyTypeFilter('All'); }}
-                className="mt-2 text-red-600 font-bold hover:underline text-sm"
-              >
-                Clear Filters
-              </button>
-            </div>
-          )}
-        </motion.div>
+            );
+          });
+        })()}
+
+        {/* Empty state */}
+        {filteredCompanies.length === 0 && (
+          <div className="col-span-full text-center py-12 bg-gray-50 dark:bg-slate-800/50 rounded-3xl border-2 border-dashed border-gray-200 dark:border-slate-700">
+            <span className="material-symbols-outlined text-5xl text-gray-300 dark:text-gray-600 mb-2 block">business_center</span>
+            <p className="text-gray-500 dark:text-gray-400 font-medium">No matching companies found</p>
+            <button
+              onClick={() => { setCompanySearch(''); setCompanyTypeFilter('All'); }}
+              className="mt-2 text-red-600 font-bold hover:underline text-sm"
+            >
+              Clear Filters
+            </button>
+          </div>
+        )}
       </motion.div>
     );
   };
@@ -1837,6 +2064,41 @@ const AttendeeDashboard = () => {
         )}
       </AnimatePresence>
 
+      {/* QR Code Modal border */}
+      <AnimatePresence>
+        {showQRModal && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-gray-100 dark:border-slate-800"
+            >
+              <div className="flex justify-between items-center p-4 border-b border-gray-100 dark:border-slate-800">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <span className="material-symbols-outlined text-red-600">qr_code_2</span>
+                  Your QR Code
+                </h3>
+                <button
+                  onClick={() => setShowQRModal(false)}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                >
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+              <div className="p-8 flex flex-col items-center justify-center">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+                  <QRCodeCanvas value={profile?.id || ''} size={200} level="H" />
+                </div>
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+                  Use this code to check in at events, sessions, and booths.
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Notification Modal */}
       <AnimatePresence>
         {selectedNotification && (
@@ -1868,9 +2130,8 @@ const AttendeeDashboard = () => {
             isBooked={bookedSessions.some((s: any) => s.id === selectedSession.id)}
             onClose={() => setSelectedSession(null)}
             onBook={() => {
-              setSessionToBook(selectedSession);
-              setShowBookingConfirm(true);
               setSelectedSession(null);
+              handleInitiateBooking(selectedSession);
             }}
             onCancel={async () => {
               const booking = bookedSessions.find((s: any) => s.id === selectedSession.id);
@@ -1884,14 +2145,15 @@ const AttendeeDashboard = () => {
       </AnimatePresence>
 
       {/* Booking Confirmation Modal */}
-      {/* Booking Confirmation Modal */}
       <AnimatePresence>
         {showBookingConfirm && sessionToBook && (
           <BookingConfirmationModal
             key="booking-modal"
             session={sessionToBook}
             onConfirm={async () => {
-              await handleBookSession();
+              if (sessionToBook) {
+                await handleBookSession(sessionToBook);
+              }
               setShowBookingConfirm(false);
               setSessionToBook(null);
             }}

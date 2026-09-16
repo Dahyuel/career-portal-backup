@@ -11,6 +11,7 @@ import { Variants } from 'framer-motion';
 import JobManagementModal from '../../components/employer/JobManagementModal';
 import Toast from '../../components/shared/Toast';
 import NotificationModal from '../../components/NotificationModal';
+import { logger } from '../../utils/logger';
 
 const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -113,6 +114,7 @@ export const EmployerDashboard: React.FC = () => {
             job_title: profile.employer.job_title,
             company_name: profile.company?.company_name || '',
             company_logo: profile.company?.logo_url || '',
+            target_faculties: profile.company?.faculties || [],
             company_website: profile.company?.website || '',
             event_id: profile.event_id || EVENT_ID,
             full_name: profile.full_name,
@@ -121,28 +123,20 @@ export const EmployerDashboard: React.FC = () => {
         };
     }, [profile, user]);
 
-    // Fetch Jobs - OPTIMIZED with useCallback
+    // Fetch Jobs - via RPC
     const fetchJobs = useCallback(async () => {
         if (!employerData?.employer_id) return;
 
         setLoadingJobs(true);
         try {
-            // Use a more efficient query with aggregate
-            const { data, error } = await supabase
-                .from('job_positions')
-                .select(`
-                    *,
-                    job_applications(count)
-                `)
-                .eq('employer_id', employerData.employer_id)
-                .order('posted_at', { ascending: false });
+            const { data, error } = await supabase.rpc('employer_get_my_jobs');
 
             if (error) throw error;
 
-            const jobsWithCounts = data?.map(job => ({
+            const jobsWithCounts: Job[] = (data || []).map((job: any) => ({
                 ...job,
-                no_of_applicants: job.job_applications?.[0]?.count || 0
-            })) || [];
+                no_of_applicants: Number(job.no_of_applicants) || 0
+            }));
 
             setJobs(jobsWithCounts);
             setLoadedTabs(prev => new Set(prev).add('jobs').add('cvs'));
@@ -151,7 +145,7 @@ export const EmployerDashboard: React.FC = () => {
             const totalApplicants = jobsWithCounts.reduce((acc, job) => acc + (job.no_of_applicants || 0), 0);
             setStats({ totalJobs: jobsWithCounts.length, totalApplicants });
         } catch (error) {
-            console.error('Error fetching jobs:', error);
+            logger.error('Error fetching jobs:', error);
             setToast({
                 message: 'Failed to load jobs. Please try again.',
                 type: 'error'
@@ -161,7 +155,7 @@ export const EmployerDashboard: React.FC = () => {
         }
     }, [employerData?.employer_id]);
 
-    // Initial Data Load - OPTIMIZED
+    // Initial Data Load - via RPC
     useEffect(() => {
         if (!profile || !employerData?.employer_id) {
             setIsInitializing(false);
@@ -171,51 +165,24 @@ export const EmployerDashboard: React.FC = () => {
         const fetchInitialData = async () => {
             try {
                 // Parallel fetch for better performance
-                const [notificationsResult, jobsCountResult] = await Promise.all([
-                    supabase
-                        .from('notifications')
-                        .select('id, title, content, publish_at, announcement_type, target_roles')
-                        .eq('event_id', EVENT_ID)
-                        .contains('target_roles', ['employer'])
-                        .order('publish_at', { ascending: false })
-                        .limit(10),
-
-                    // Count jobs efficiently
-                    supabase
-                        .from('job_positions')
-                        .select('id', { count: 'exact', head: true })
-                        .eq('employer_id', employerData.employer_id)
+                const [notificationsResult, jobsResult] = await Promise.all([
+                    supabase.rpc('get_employer_notifications', { p_event_id: EVENT_ID }),
+                    supabase.rpc('employer_get_my_jobs')
                 ]);
 
                 if (notificationsResult.data) {
-                    setNotifications(notificationsResult.data.map(n => ({
-                        ...n,
-                        type: n.announcement_type
-                    })));
+                    const notifs = Array.isArray(notificationsResult.data) ? notificationsResult.data : [];
+                    setNotifications(notifs);
                 }
 
-                const totalJobs = jobsCountResult.count || 0;
-
-                // Get total applicants efficiently if there are jobs
-                let totalApplicants = 0;
-                if (totalJobs > 0) {
-                    const { data: jobIds } = await supabase
-                        .from('job_positions')
-                        .select('id')
-                        .eq('employer_id', employerData.employer_id);
-
-                    if (jobIds && jobIds.length > 0) {
-                        const { count } = await supabase
-                            .from('job_applications')
-                            .select('id', { count: 'exact', head: true })
-                            .in('job_position_id', jobIds.map(j => j.id));
-                        totalApplicants = count || 0;
-                    }
+                if (jobsResult.data) {
+                    const jobsList = Array.isArray(jobsResult.data) ? jobsResult.data : [];
+                    const totalJobs = jobsList.length;
+                    const totalApplicants = jobsList.reduce((acc: number, j: any) => acc + (Number(j.no_of_applicants) || 0), 0);
+                    setStats({ totalJobs, totalApplicants });
                 }
-
-                setStats({ totalJobs, totalApplicants });
             } catch (error) {
-                console.error('Error in initial data fetch:', error);
+                logger.error('Error in initial data fetch:', error);
             } finally {
                 setIsInitializing(false);
             }
@@ -268,10 +235,7 @@ export const EmployerDashboard: React.FC = () => {
         if (!deleteJobId) return;
 
         try {
-            const { error } = await supabase
-                .from('job_positions')
-                .delete()
-                .eq('id', deleteJobId);
+            const { error } = await supabase.rpc('employer_delete_job', { _job_id: deleteJobId });
 
             if (error) throw error;
 
@@ -283,7 +247,7 @@ export const EmployerDashboard: React.FC = () => {
             fetchJobs();
             setDeleteJobId(null);
         } catch (error) {
-            console.error('Error deleting job:', error);
+            logger.error('Error deleting job:', error);
             setToast({
                 message: 'Failed to delete job',
                 type: 'error'
@@ -581,8 +545,9 @@ export const EmployerDashboard: React.FC = () => {
         return <DashboardLoading />;
     }
 
-    // Check if user has employer role
-    if (!profile.roles.includes('employer') && !employerData) {
+    // Check if user has employer role (sadmin/super_admin bypasses)
+    const isSuperAdmin = profile.role === 'sadmin' || profile.role === 'super_admin';
+    if (!isSuperAdmin && !profile.roles.includes('employer') && !employerData) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="text-center">
@@ -603,7 +568,7 @@ export const EmployerDashboard: React.FC = () => {
             navItems={navItems}
             activeItem={activeTab}
             onItemChange={setActiveTab}
-            title="ASU Employment Fair"
+            title="ASU Career Expo"
             notifications={notifications}
             onNotificationClick={(notification) => setSelectedNotification(notification)}
             onProfileClick={() => setShowProfile(true)}
@@ -672,6 +637,7 @@ export const EmployerDashboard: React.FC = () => {
                         jobId={selectedJobForApplicants.id}
                         jobTitle={selectedJobForApplicants.title}
                         onClose={() => setShowApplicantsModal(false)}
+                        isEmployer={true}
                     />
                 )}
             </AnimatePresence>

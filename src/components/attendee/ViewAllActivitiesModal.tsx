@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { X } from '../icons';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { logger } from '../../utils/logger';
 
 interface ViewAllActivitiesModalProps {
     onClose: () => void;
@@ -19,16 +20,12 @@ const ViewAllActivitiesModal: React.FC<ViewAllActivitiesModalProps> = ({ onClose
 
             try {
                 const { data, error } = await supabase
-                    .from('user_activities')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .order('activity_timestamp', { ascending: false })
-                    .limit(100); // Limit to last 100 for now
+                    .rpc('get_all_user_activities', { p_limit: 100 });
 
                 if (error) throw error;
                 setActivities(data || []);
             } catch (err) {
-                console.error('Error fetching activities:', err);
+                logger.error('Error fetching activities:', err);
             } finally {
                 setLoading(false);
             }

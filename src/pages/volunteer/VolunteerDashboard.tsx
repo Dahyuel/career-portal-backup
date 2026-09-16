@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, Variants, AnimatePresence } from 'framer-motion';
-import { User } from 'lucide-react';
+import { User } from '../../components/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import SharedNavigation from '../../components/shared/SharedNavigation';
@@ -8,7 +8,8 @@ import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileMo
 import DashboardLoading from '../../components/DashboardLoading';
 import ViewAllActivitiesModal from '../../components/attendee/ViewAllActivitiesModal';
 import NotificationModal from '../../components/NotificationModal';
-import { getVolunteerStatsRPC, supabase } from '../../lib/supabase';
+import { getVolunteerStatsRPC, getVolunteerNotificationsRPC, getVolunteerRecentActivitiesRPC } from '../../lib/supabase';
+import { logger } from '../../utils/logger';
 
 // --- Animation Variants ---
 const containerVariants: Variants = {
@@ -40,31 +41,16 @@ export const VolunteerDashboard: React.FC = () => {
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
   const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
-
   const fetchNotifications = useCallback(async () => {
-    if (!profile?.id || !profile?.roles) return;
+    if (!profile?.id) return;
     try {
-      const { data: volunteerData } = await supabase
-        .from('volunteers')
-        .select('team_id')
-        .eq('user_id', profile.id)
-        .maybeSingle();
-      const teamId = volunteerData?.team_id;
-
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
-        .eq('event_id', EVENT_ID)
-        .contains('target_roles', profile.roles)
-        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
-        .order('publish_at', { ascending: false })
-        .limit(20);
-      if (error) throw error;
+      const { data, error } = await getVolunteerNotificationsRPC(EVENT_ID);
+      if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      logger.error('Error fetching notifications:', error);
     }
-  }, [profile?.id, profile?.roles]);
+  }, [profile?.id]);
 
   useEffect(() => {
     fetchNotifications();
@@ -94,29 +80,23 @@ export const VolunteerDashboard: React.FC = () => {
     activity_timestamp: string;
   }[]>([]);
 
-  // Fetch Volunteer Stats & Activities
   useEffect(() => {
     const fetchVolunteerData = async () => {
       const userId = profile?.id;
       if (!userId) return;
 
-      console.log('📊 [VOLUNTEER] Fetching stats for:', userId);
+      logger.log('📊 [VOLUNTEER] Fetching stats for:', userId);
       setUserStats(prev => ({ ...prev, loading: true }));
 
       try {
         const [statsResult, activitiesResult] = await Promise.all([
           getVolunteerStatsRPC(userId),
-          supabase
-            .from('user_activities')
-            .select('id, activity_type, description, points_earned, activity_timestamp')
-            .eq('user_id', userId)
-            .order('activity_timestamp', { ascending: false })
-            .limit(3)
+          getVolunteerRecentActivitiesRPC(3)
         ]);
 
         // Process Stats
         if (statsResult.error || !statsResult.data) {
-          console.error('❌ [VOLUNTEER] Failed to fetch stats:', statsResult.error);
+          logger.error('❌ [VOLUNTEER] Failed to fetch stats:', statsResult.error);
         } else {
           setUserStats(prev => ({
             ...prev,
@@ -128,13 +108,13 @@ export const VolunteerDashboard: React.FC = () => {
 
         // Process Activities
         if (activitiesResult.error) {
-          console.error('Error fetching activities:', activitiesResult.error);
+          logger.error('Error fetching activities:', activitiesResult.error);
         } else {
           setUserActivities(activitiesResult.data || []);
         }
 
       } catch (error) {
-        console.error('💥 [VOLUNTEER] Exception fetching data:', error);
+        logger.error('💥 [VOLUNTEER] Exception fetching data:', error);
       } finally {
         setUserStats(prev => ({ ...prev, loading: false }));
       }
@@ -153,7 +133,7 @@ export const VolunteerDashboard: React.FC = () => {
       navItems={[]} // No extra nav items for basic volunteer view
       activeItem=""
       onItemChange={() => { }}
-      title="Volunteer"
+      title="ASU Career Expo"
       onProfileClick={() => setShowProfile(true)}
       notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}

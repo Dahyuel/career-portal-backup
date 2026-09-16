@@ -5,17 +5,26 @@ import { motion, AnimatePresence, Variants } from "framer-motion";
 import {
   Calendar, QrCode, Search, Clock, User, X,
   CheckCircle, BookOpen, BookX, Phone, Mail, GraduationCap, Building2, UserCircle,
-} from "lucide-react";
+} from '../../components/icons';
 import SharedNavigation, { NavItem } from "../../components/shared/SharedNavigation";
 import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
-import { supabase, searchAttendeesByPersonalId, getAttendeeByUUID } from "../../lib/supabase";
+import {
+  searchAttendeesByPersonalId,
+  getAttendeeByUUID,
+  getBuildingNotificationsRPC,
+  getInfoDeskStatsRPC,
+  getInfoDeskSessionsRPC,
+  checkSessionBookingRPC,
+  infodeskBookSessionAndLogRPC
+} from "../../lib/supabase";
 import { QRScanner } from "../../components/shared/QRScanner";
 import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileModal";
 import Toast from "../../components/shared/Toast";
 import DashboardLoading from "../../components/DashboardLoading";
 import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
 import NotificationModal from "../../components/NotificationModal";
+import { logger } from '../../utils/logger';
 // --- Animation Variants (matching BuildTeamDashboard) ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -94,7 +103,6 @@ export const InfoDeskDashboard: React.FC = () => {
   const [sessionAttendee, setSessionAttendee] = useState<ScannedAttendee | null>(null);
   const [showSessionCard, setShowSessionCard] = useState(false);
   const [hasBooking, setHasBooking] = useState(false);
-  const [bookingId, setBookingId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCardLoading, setIsCardLoading] = useState(false);
 
@@ -126,25 +134,11 @@ export const InfoDeskDashboard: React.FC = () => {
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id || !profile?.roles) return;
     try {
-      const { data: volunteerData } = await supabase
-        .from('volunteers')
-        .select('team_id')
-        .eq('user_id', profile.id)
-        .maybeSingle();
-      const teamId = volunteerData?.team_id;
-
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
-        .eq('event_id', EVENT_ID)
-        .contains('target_roles', profile.roles)
-        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
-        .order('publish_at', { ascending: false })
-        .limit(20);
-      if (error) throw error;
+      const { data, error } = await getBuildingNotificationsRPC(EVENT_ID);
+      if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      logger.error('Error fetching notifications:', error);
     }
   }, [profile?.id, profile?.roles]);
 
@@ -170,61 +164,7 @@ export const InfoDeskDashboard: React.FC = () => {
     ]);
   };
 
-  const logUserActivity = async (
-    activityType: string,
-    description: string,
-    points: number = 1
-  ) => {
-    try {
-      if (!profile?.id || !currentEventId) return;
 
-      const { error } = await supabase
-        .from("user_activities")
-        .insert({
-          user_id: profile.id,
-          event_id: currentEventId,
-          activity_type: activityType,
-          description: description,
-          points_earned: points,
-          activity_timestamp: new Date().toISOString()
-        });
-
-      if (error) throw error;
-
-      // Also add to local recent activity state
-      addActivity(description, activityType);
-
-    } catch (err) {
-      console.error("Error logging activity:", err);
-    }
-  };
-
-  const incrementVolunteerPoints = async (points: number) => {
-    try {
-      if (!profile?.id) return;
-
-      // First get current points
-      const { data: volunteerData, error: fetchError } = await supabase
-        .from('volunteers')
-        .select('points, id')
-        .eq('user_id', profile.id)
-        .single();
-
-      if (fetchError || !volunteerData) return;
-
-      // Update points
-      const { error: updateError } = await supabase
-        .from('volunteers')
-        .update({ points: (volunteerData.points || 0) + points })
-        .eq('id', volunteerData.id);
-
-      if (updateError) {
-        console.error('Error updating points:', updateError);
-      }
-    } catch (err) {
-      console.error('Error in incrementVolunteerPoints:', err);
-    }
-  };
 
   // --- Initial Data Load ---
   useEffect(() => {
@@ -232,54 +172,22 @@ export const InfoDeskDashboard: React.FC = () => {
       try {
         if (!currentEventId) return;
 
-        // 1. Get Sessions Count
-        const { count: sessionsCount } = await supabase
-          .from("sessions")
-          .select("*", { count: "exact", head: true })
-          .eq("event_id", currentEventId);
+        const { data, error } = await getInfoDeskStatsRPC(currentEventId);
 
-        // 2. Get Bookings Count (Valid confirmed bookings for this event)
-        // First get session IDs for this event to filter bookings
-        const { data: eventSessions } = await supabase
-          .from("sessions")
-          .select("id")
-          .eq("event_id", currentEventId);
-
-        let bookingsCount = 0;
-        if (eventSessions && eventSessions.length > 0) {
-          const sessionIds = eventSessions.map(s => s.id);
-          const { count } = await supabase
-            .from("session_bookings")
-            .select("*", { count: "exact", head: true })
-            .in("session_id", sessionIds)
-            .eq("booking_status", "confirmed");
-          bookingsCount = count || 0;
+        if (error || !data) {
+          logger.error('Error loading stats:', error);
+          showToast("Failed to load dashboard statistics", "error");
+          return;
         }
 
-        // 3. Get Actions Today Count
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const { count: actionsCount } = await supabase
-          .from("user_activities")
-          .select("*", { count: "exact", head: true })
-          .gte("activity_timestamp", today.toISOString())
-          .eq("user_id", profile?.id);
-
         setStats({
-          totalSessions: sessionsCount || 0,
-          totalBookings: bookingsCount,
-          actionsToday: actionsCount || 0
+          totalSessions: data.totalSessions || 0,
+          totalBookings: data.totalBookings || 0,
+          actionsToday: data.actionsToday || 0
         });
 
-        // 4. Fetch Recent Activity for display (Last 3)
-        const { data: activityData } = await supabase.from("user_activities")
-          .select("id, description, activity_timestamp, activity_type")
-          .eq("user_id", profile?.id)
-          .order("activity_timestamp", { ascending: false })
-          .limit(3);
-
-        if (activityData) {
-          setRecentActivity(activityData.map((a: any) => ({
+        if (data.recentActivities) {
+          setRecentActivity((data.recentActivities as any[]).map((a: any) => ({
             id: a.id,
             description: a.description,
             timestamp: a.activity_timestamp,
@@ -287,7 +195,7 @@ export const InfoDeskDashboard: React.FC = () => {
           })));
         }
       } catch (e) {
-        console.error("Initial load error", e);
+        logger.error("Initial load error", e);
         showToast("Failed to load dashboard statistics", "error");
       } finally {
         setIsInitialLoading(false);
@@ -298,32 +206,19 @@ export const InfoDeskDashboard: React.FC = () => {
   // --- OPTIMIZED: Fetch sessions with event filter ---
   const fetchSessions = useCallback(async () => {
     if (!currentEventId) {
-      console.warn("No event ID available");
+      logger.warn("No event ID available");
       return;
     }
 
     setIsLoadingSessions(true);
     try {
-      const { data, error } = await supabase
-        .from("sessions")
-        .select(`
-          id, title, description, session_type, start_time, end_time, room_name,
-          max_attendees, current_bookings, is_full, status,
-          speaker:speaker_id (id, first_name, last_name, title)
-        `)
-        .eq("event_id", currentEventId) // CRITICAL: Filter by event
-        .order("start_time", { ascending: true });
+      const { data, error } = await getInfoDeskSessionsRPC(currentEventId);
 
-      if (error) throw error;
+      if (error) throw new Error(error.message);
 
-      const normalised = (data || []).map((s: any) => ({
-        ...s,
-        speaker: Array.isArray(s.speaker) ? s.speaker[0] : s.speaker,
-      }));
-
-      setSessions(normalised);
+      setSessions((data as any[]) || []);
     } catch (err) {
-      console.error("Error fetching sessions:", err);
+      logger.error("Error fetching sessions:", err);
       showToast("Failed to load sessions", "error");
     } finally {
       setIsLoadingSessions(false);
@@ -342,12 +237,12 @@ export const InfoDeskDashboard: React.FC = () => {
       const { data, error } = await getAttendeeByUUID(uuid);
 
       if (error || !data) {
-        console.error("Error fetching attendee:", error);
+        logger.error("Error fetching attendee:", error);
         return null;
       }
 
       // Debug log confirmed data has user_id, not id
-      console.log("fetchAttendeeByUUID data:", data);
+      logger.log("fetchAttendeeByUUID data:", data);
 
       return {
         id: data.id || data.user_id, // Fix: Use user_id if id is missing
@@ -359,48 +254,39 @@ export const InfoDeskDashboard: React.FC = () => {
         faculty: data.faculty
       };
     } catch (err) {
-      console.error("Exception fetching attendee:", err);
+      logger.error("Exception fetching attendee:", err);
       return null;
     }
   };
 
-  // --- OPTIMIZED: Live search with better query approach ---
-  useEffect(() => {
+  // --- Search by Personal ID: only fires on Enter or button click ---
+  const handleSessionSearch = async () => {
     if (!sessionSearchTerm.trim()) {
       setSessionSearchResults([]);
       return;
     }
-
-    const timeout = setTimeout(async () => {
-      setIsSessionSearching(true);
-      try {
-        const { data, error } = await searchAttendeesByPersonalId(sessionSearchTerm.trim());
-
-        if (error) {
-          console.error("Search error:", error);
-          setSessionSearchResults([]);
-        } else if (data) {
-          // Helper returns data in correct format, but we need to map to local state shape if strictly needed.
-          // The helper returns: id, full_name, etc.
-          // Local state expects: id, full_name, phone, email, personal_id
-          setSessionSearchResults(data.map((d: any) => ({
-            id: d.id,
-            full_name: d.full_name || "Unknown",
-            phone: d.phone || "N/A",
-            email: d.email || "N/A",
-            personal_id: d.personal_id,
-          })));
-        }
-      } catch (err) {
-        console.error("Search exception:", err);
+    setIsSessionSearching(true);
+    try {
+      const { data, error } = await searchAttendeesByPersonalId(sessionSearchTerm.trim());
+      if (error) {
+        logger.error("Search error:", error);
         setSessionSearchResults([]);
-      } finally {
-        setIsSessionSearching(false);
+      } else if (data) {
+        setSessionSearchResults(data.map((d: any) => ({
+          id: d.id,
+          full_name: d.full_name || "Unknown",
+          phone: d.phone || "N/A",
+          email: d.email || "N/A",
+          personal_id: d.personal_id,
+        })));
       }
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [sessionSearchTerm]);
+    } catch (err) {
+      logger.error("Search exception:", err);
+      setSessionSearchResults([]);
+    } finally {
+      setIsSessionSearching(false);
+    }
+  };
 
   // --- OPTIMIZED: Check booking & show attendee card ---
   const lookupAndShowCard = async (uuid: string) => {
@@ -414,33 +300,25 @@ export const InfoDeskDashboard: React.FC = () => {
     // Reset previous data
     setSessionAttendee(null);
     setHasBooking(false);
-    setBookingId(null);
 
     try {
-      // 2. Parallelize fetches: Attendee details + Booking status
-      // getAttendeeByUUID already validates the user exists and has 'attendee' role
-      const [attendee, { data: bookings }] = await Promise.all([
+      // Parallelize fetches: Attendee details + Booking status
+      const [attendee, bookingResult] = await Promise.all([
         fetchAttendeeByUUID(uuid),
-        supabase
-          .from("session_bookings")
-          .select("id")
-          .eq("session_id", selectedSessionForScan.id)
-          .eq("attendee_id", uuid)
-          .eq("booking_status", "confirmed")
-          .maybeSingle()
+        checkSessionBookingRPC(selectedSessionForScan.id, uuid)
       ]);
 
       if (!attendee) {
         showToast("Attendee not found", "error");
-        setShowSessionCard(false); // Hide if not found
+        setShowSessionCard(false);
         return;
       }
 
       setSessionAttendee(attendee);
-      setHasBooking(!!bookings);
-      setBookingId(bookings?.id || null);
+      const bookingData = bookingResult.data as any;
+      setHasBooking(bookingData?.has_booking || false);
     } catch (err) {
-      console.error("Error looking up attendee:", err);
+      logger.error("Error looking up attendee:", err);
       showToast("Failed to load attendee details", "error");
       setShowSessionCard(false);
     } finally {
@@ -485,101 +363,43 @@ export const InfoDeskDashboard: React.FC = () => {
   };
 
   const handleBook = async () => {
-    if (!sessionAttendee || !selectedSessionForScan) return;
+    if (!sessionAttendee || !selectedSessionForScan || !currentEventId || !profile?.id) return;
 
     setIsProcessing(true);
     try {
-      // 1. Verify capacity
-      const { data: sessionData, error: sessionError } = await supabase
-        .from("sessions")
-        .select("current_bookings, max_attendees, title")
-        .eq("id", selectedSessionForScan.id)
-        .single();
+      const { data, error } = await infodeskBookSessionAndLogRPC(
+        selectedSessionForScan.id,
+        sessionAttendee.id,
+        profile.id,        // p_volunteer_id
+        currentEventId,    // p_event_id
+        'book'             // p_action
+      );
 
-      if (sessionError) throw sessionError;
+      if (error) throw new Error(error.message);
 
-      const currentBookings = sessionData.current_bookings || 0;
-      const maxAttendees = sessionData.max_attendees;
-
-      if (maxAttendees && currentBookings >= maxAttendees) {
-        showToast("This session is full", "error");
-        setIsProcessing(false);
+      const result = data as any;
+      if (!result.success) {
+        showToast(result.error || 'Booking failed', 'error');
         return;
       }
 
-      // 2. Check for existing booking (cancelled or not)
-      const { data: existingBooking, error: checkError } = await supabase
-        .from("session_bookings")
-        .select("id, booking_status")
-        .eq("session_id", selectedSessionForScan.id)
-        .eq("attendee_id", sessionAttendee.id)
-        .maybeSingle();
+      // Add to local activity feed
+      addActivity(
+        `Booked ${sessionAttendee.full_name} for session: ${selectedSessionForScan.title}`,
+        'booking'
+      );
 
-      if (checkError) throw checkError;
+      // Refresh Auth Profile (score updated by RPC)
+      await refreshProfile(currentEventId, profile.id, undefined, true);
 
-      let bookingSuccess = false;
-
-      if (existingBooking) {
-        if (existingBooking.booking_status === "confirmed") {
-          showToast("Already booked", "error");
-          setIsProcessing(false);
-          return;
-        }
-
-        // Reactivate cancelled booking
-        const { error: updateError } = await supabase
-          .from("session_bookings")
-          .update({
-            booking_status: "confirmed",
-            booked_at: new Date().toISOString()
-          })
-          .eq("id", existingBooking.id);
-
-        if (updateError) throw updateError;
-        bookingSuccess = true;
-      } else {
-        // Create new booking
-        const { error: insertError } = await supabase
-          .from("session_bookings")
-          .insert({
-            session_id: selectedSessionForScan.id,
-            attendee_id: sessionAttendee.id,
-            booking_status: "confirmed",
-            checked_in: false
-          });
-
-        if (insertError) throw insertError;
-        bookingSuccess = true;
-      }
-
-      if (bookingSuccess) {
-        // Log the activity with 1 point
-        await logUserActivity(
-          "booking",
-          `Booked ${sessionAttendee.full_name} for session: ${selectedSessionForScan.title}`,
-          1
-        );
-
-        // Optional: Update volunteer points if you want to track points for volunteer profiles
-        await incrementVolunteerPoints(1);
-
-        // Refresh Auth Profile (Global Score)
-        // Refresh Auth Profile (Global Score)
-        if (profile?.event_id && profile?.id) {
-          await refreshProfile(profile.event_id, profile.id, undefined, true);
-        }
-
-        showToast(`${sessionAttendee.full_name} booked successfully!`, "success");
-        setShowSessionCard(false);
-        setSelectedSessionForScan(null);
-        setSessionAttendee(null);
-        // Refresh sessions to update counts
-        fetchSessions();
-        // Refresh Home stats
-        setRefreshTrigger(prev => prev + 1);
-      }
+      showToast(`${sessionAttendee.full_name} booked successfully! (+${result.points}pts)`, "success");
+      setShowSessionCard(false);
+      setSelectedSessionForScan(null);
+      setSessionAttendee(null);
+      fetchSessions();
+      setRefreshTrigger(prev => prev + 1);
     } catch (err) {
-      console.error("Booking error:", err);
+      logger.error("Booking error:", err);
       showToast("Failed to book attendee", "error");
     } finally {
       setIsProcessing(false);
@@ -587,58 +407,43 @@ export const InfoDeskDashboard: React.FC = () => {
   };
 
   const handleUnbook = async () => {
-    if (!sessionAttendee || !selectedSessionForScan || !bookingId) return;
+    if (!sessionAttendee || !selectedSessionForScan || !currentEventId || !profile?.id) return;
 
     setIsProcessing(true);
     try {
-      // 1. Check if user is checked in
-      const { data: bookingData, error: checkError } = await supabase
-        .from("session_bookings")
-        .select("checked_in")
-        .eq("id", bookingId)
-        .single();
+      const { data, error } = await infodeskBookSessionAndLogRPC(
+        selectedSessionForScan.id,
+        sessionAttendee.id,
+        profile.id,        // p_volunteer_id
+        currentEventId,    // p_event_id
+        'unbook'           // p_action
+      );
 
-      if (checkError) throw checkError;
+      if (error) throw new Error(error.message);
 
-      if (bookingData.checked_in) {
-        showToast("Cannot cancel: User is already checked in!", "error");
-        setIsProcessing(false);
+      const result = data as any;
+      if (!result.success) {
+        showToast(result.error || 'Cancellation failed', 'error');
         return;
       }
 
-      // 2. Cancel booking
-      const { error: updateError } = await supabase
-        .from("session_bookings")
-        .update({ booking_status: "cancelled" })
-        .eq("id", bookingId);
-
-      if (updateError) throw updateError;
-
-      // Log the activity with 1 point
-      await logUserActivity(
-        "unbooking",
+      // Add to local activity feed
+      addActivity(
         `Cancelled booking for ${sessionAttendee.full_name} from session: ${selectedSessionForScan.title}`,
-        1
+        'unbooking'
       );
 
-      // Optional: Update volunteer points (you might want different point values for cancellation)
-      await incrementVolunteerPoints(1);
-
-      // Refresh Auth Profile (Global Score)
-      // Refresh Auth Profile (Global Score)
-      if (profile?.event_id && profile?.id) {
-        await refreshProfile(profile.event_id, profile.id, undefined, true);
-      }
+      // Refresh Auth Profile (score updated by RPC)
+      await refreshProfile(currentEventId, profile.id, undefined, true);
 
       showToast("Booking cancelled", "success");
       setShowSessionCard(false);
       setSelectedSessionForScan(null);
       setSessionAttendee(null);
       fetchSessions();
-      // Refresh Home stats
       setRefreshTrigger(prev => prev + 1);
     } catch (err) {
-      console.error("Cancellation error:", err);
+      logger.error("Cancellation error:", err);
       showToast("Failed to cancel booking", "error");
     } finally {
       setIsProcessing(false);
@@ -776,7 +581,7 @@ export const InfoDeskDashboard: React.FC = () => {
             <div className="w-12 h-12 rounded-xl bg-amber-100 dark:bg-amber-900/20 flex items-center justify-center mb-4">
               <span className="material-symbols-outlined text-amber-500">history</span>
             </div>
-            <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions Today</p>
+            <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Total Actions</p>
             <p className="text-4xl font-bold text-slate-800 dark:text-white mt-1">{stats.actionsToday}</p>
           </motion.div>
         </div>
@@ -907,7 +712,7 @@ export const InfoDeskDashboard: React.FC = () => {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="Info Desk"
+      title="ASU Career Expo"
       onProfileClick={() => setShowVolunteerProfile(true)}
       notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}
@@ -1096,25 +901,34 @@ export const InfoDeskDashboard: React.FC = () => {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="relative mb-6"
+                className="relative mb-6 flex items-center gap-2"
               >
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-orange-500 shadow-sm dark:text-white placeholder:text-slate-400"
-                  placeholder="Enter Personal ID"
-                  value={sessionSearchTerm}
-                  onChange={(e) => setSessionSearchTerm(e.target.value)}
-                  autoFocus
-                />
-                {isSessionSearching && (
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input
+                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-orange-500 shadow-sm dark:text-white placeholder:text-slate-400"
+                    placeholder="Enter Personal ID"
+                    value={sessionSearchTerm}
+                    onChange={(e) => setSessionSearchTerm(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSessionSearch()}
+                    autoFocus
+                  />
+                </div>
+                <button
+                  onClick={handleSessionSearch}
+                  disabled={isSessionSearching}
+                  className="shrink-0 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white p-4 rounded-2xl transition-colors shadow-sm"
+                >
+                  {isSessionSearching ? (
                     <motion.div
                       animate={{ rotate: 360 }}
                       transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      className="rounded-full h-5 w-5 border-b-2 border-orange-500"
+                      className="rounded-full h-5 w-5 border-b-2 border-white"
                     />
-                  </div>
-                )}
+                  ) : (
+                    <Search className="w-5 h-5" />
+                  )}
+                </button>
               </motion.div>
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {sessionSearchResults.map((result, index) => (

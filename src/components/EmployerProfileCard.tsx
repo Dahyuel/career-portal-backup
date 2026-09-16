@@ -35,8 +35,8 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
             company_website: profile.company.website,
             industry: profile.company.industry,
             description: profile.company.description,
-            booth_number: profile.company.booth_number,
-            partner_type: profile.company.partner_type
+            partner_type: profile.company.partner_type,
+            target_faculties: profile.company.faculties || []
         };
     }, [profile]);
 
@@ -90,13 +90,19 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
                             transition={{ delay: 0.3 }}
                             className="absolute top-4 left-4"
                         >
-                            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider shadow-lg ${employerData.partner_type === 'platinum' ? 'bg-slate-200 text-slate-800' :
-                                employerData.partner_type === 'gold' ? 'bg-yellow-400 text-yellow-900' :
-                                    employerData.partner_type === 'silver' ? 'bg-slate-300 text-slate-700' :
-                                        employerData.partner_type === 'bronze' ? 'bg-amber-600 text-white' :
-                                            'bg-blue-500 text-white'
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider shadow-lg ${employerData.partner_type === 'diamond' ? 'bg-cyan-200 text-cyan-800' :
+                                employerData.partner_type === 'platinum' ? 'bg-slate-200 text-slate-800' :
+                                    employerData.partner_type === 'gold' ? 'bg-yellow-400 text-yellow-900' :
+                                        employerData.partner_type === 'silver' ? 'bg-slate-300 text-slate-700' :
+                                            employerData.partner_type === 'exhibitor_a' ? 'bg-purple-200 text-purple-800' :
+                                                employerData.partner_type === 'exhibitor_b' ? 'bg-blue-200 text-blue-800' :
+                                                    employerData.partner_type === 'student_activity_partner' ? 'bg-violet-200 text-violet-800' :
+                                                        employerData.partner_type === 'community_partner' ? 'bg-emerald-200 text-emerald-800' :
+                                                            employerData.partner_type === 'catering_partner' ? 'bg-orange-200 text-orange-800' :
+                                                                employerData.partner_type === 'career_coaching_partner' ? 'bg-sky-200 text-sky-800' :
+                                                                    'bg-blue-500 text-white'
                                 }`}>
-                                {employerData.partner_type}
+                                {employerData.partner_type.replace('_', ' ')}
                             </span>
                         </motion.div>
                     )}
@@ -285,8 +291,13 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
                                             { label: 'Industry', value: employerData.industry || 'N/A' },
                                             { label: 'Partner Type', value: employerData.partner_type?.toUpperCase() || 'N/A', isBadge: true },
                                             { label: 'Website', value: employerData.company_website, isLink: true },
-                                            { label: 'Booth Number', value: employerData.booth_number || 'N/A' },
-                                            { label: 'Description', value: employerData.description || 'No description available', isTextarea: true }
+                                            { label: 'Description', value: employerData.description || 'No description available', isTextarea: true },
+                                            {
+                                                label: 'Target Faculties',
+                                                value: employerData.target_faculties?.length
+                                                    ? employerData.target_faculties.join(', ')
+                                                    : 'All Faculties'
+                                            }
                                         ].map((item, index) => (
                                             <motion.div
                                                 key={item.label}
@@ -306,13 +317,19 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
                                                         <span className="material-symbols-outlined text-xs">open_in_new</span>
                                                     </a>
                                                 ) : item.isBadge && item.value && item.value !== 'N/A' ? (
-                                                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${item.value === 'PLATINUM' ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200' :
-                                                        item.value === 'GOLD' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                            item.value === 'SILVER' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' :
-                                                                item.value === 'BRONZE' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' :
-                                                                    'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+                                                    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${item.value === 'DIAMOND' ? 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400' :
+                                                        item.value === 'PLATINUM' ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200' :
+                                                            item.value === 'GOLD' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                                item.value === 'SILVER' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' :
+                                                                    item.value === 'EXHIBITOR_A' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400' :
+                                                                        item.value === 'EXHIBITOR_B' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                                                                            item.value === 'STUDENT_ACTIVITY_PARTNER' ? 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400' :
+                                                                                item.value === 'COMMUNITY_PARTNER' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                                                                                    item.value === 'CATERING_PARTNER' ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400' :
+                                                                                        item.value === 'CAREER_COACHING_PARTNER' ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400' :
+                                                                                            'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
                                                         }`}>
-                                                        {item.value}
+                                                        {item.value.replace('_', ' ')}
                                                     </span>
                                                 ) : (
                                                     <p className={`text-sm font-medium text-gray-900 dark:text-white ${item.isTextarea ? 'whitespace-pre-wrap leading-relaxed' : ''}`}>
@@ -339,7 +356,7 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
                             website: employerData.company_website || '',
                             description: employerData.description || '',
                             logo_url: employerData.company_logo || '',
-                            booth_number: employerData.booth_number || ''
+                            target_faculties: employerData.target_faculties || []
                         }}
                         onClose={() => setShowEditCompany(false)}
                         onSave={handleCompanyUpdate}

@@ -4,7 +4,9 @@ import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import SettingsModal from './SettingsModal';
 import LeaderboardModal from './LeaderboardModal';
-import { SmartAssistant } from './SmartAssistant';
+
+import { logger } from '../../utils/logger';
+import { DEFAULT_EVENT_ID } from '../../lib/supabase';
 
 // Navigation item type
 export interface NavItem {
@@ -23,6 +25,8 @@ interface SharedNavigationProps {
     onNotificationClick?: (notification: any) => void;
     onProfileClick?: () => void;
     hideDock?: boolean;
+    hideNotifications?: boolean;
+    eventId?: string;
 }
 
 // --- Memoized Sub-Components for Performance ---
@@ -35,12 +39,12 @@ const SidebarLogo = memo(({ animate }: { animate: boolean }) => (
         transition={{ duration: 0.4, ease: "easeOut" }}
     >
         <img
-            src="/images/logo.png"
+            src="/images/logo2.png"
             alt="Logo"
             className="w-12 h-12 object-contain shrink-0"
         />
         <span className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
-            ASU Employment Fair
+            ASU Career Expo
         </span>
     </motion.div>
 ));
@@ -179,14 +183,16 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
     navItems,
     activeItem,
     onItemChange,
-    title = "ASU Employment Fair",
+    title = "ASU Career Expo",
     notifications = [],
     onNotificationClick,
     onProfileClick,
-    hideDock = false
+    hideDock = false,
+    hideNotifications = false,
+    eventId,
 }, ref) => {
     const navigate = useNavigate();
-    const { signOut, hasAnyRole } = useAuth();
+    const { signOut, hasAnyRole, profile } = useAuth();
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
     const [showMobileProfileDropdown, setShowMobileProfileDropdown] = useState(false);
     const [showNotificationDropdown, setShowNotificationDropdown] = useState(false);
@@ -217,7 +223,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
 
     // Determine if user has volunteer-style profile view
     const hasVolunteerProfile = hasAnyRole([
-        'volunteer', 'registration', 'building', 'info_desk', 'verification'
+        'volunteer', 'registration', 'building', 'info_desk', 'verification', 'tech_support'
     ]);
 
     // Click outside to close dropdowns
@@ -252,7 +258,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
             await signOut();
             navigate('/login', { replace: true });
         } catch (error) {
-            console.error('Logout error:', error);
+            logger.error('Logout error:', error);
             window.location.href = '/login';
         } finally {
             setTimeout(() => {
@@ -405,23 +411,10 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
 
             {/* Main Content Area */}
             <main className="flex-1 min-w-0">
-                {/* Desktop Header */}
-                <header className={`hidden lg:flex ${navItems.length === 0 ? 'justify-between' : 'justify-end'} items-center px-8 py-4 lg:py-6 gap-4 bg-transparent sticky top-0 z-40`}>
-                    {navItems.length === 0 && (
-                        <motion.div
-                            className="flex items-center gap-3"
-                            initial={shouldAnimate ? { opacity: 0, x: -20 } : false}
-                            animate={{ opacity: 1, x: 0 }}
-                        >
-                            <img src="/images/logo.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
-                            <span className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
-                                {title}
-                            </span>
-                        </motion.div>
-                    )}
-
-                    <div className="flex items-center gap-4">
-                        {/* Notification Icon with Dropdown */}
+                {/* Desktop Floating Icons - Top Right */}
+                <div className="hidden lg:flex items-center gap-3 fixed top-5 right-8 z-50">
+                    {/* Notification Icon with Dropdown */}
+                    {!hideNotifications && (
                         <div className="relative">
                             <TopBarIcon
                                 icon="notifications"
@@ -447,50 +440,53 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                                 )}
                             </AnimatePresence>
                         </div>
-                        {/* Profile Icon with Dropdown */}
-                        <div className="relative">
-                            <TopBarIcon
-                                icon="person"
-                                onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                                isActive={showProfileDropdown}
-                            />
+                    )}
 
-                            <AnimatePresence>
-                                {showProfileDropdown && (
-                                    <div ref={profileDropdownRef}>
-                                        <motion.div
-                                            key="profile-dropdown"
-                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] min-w-[180px]"
-                                        >
-                                            <ProfileMenu onItemClick={() => setShowProfileDropdown(false)} />
-                                        </motion.div>
-                                    </div>
-                                )}
-                            </AnimatePresence>
-                        </div>
+                    {/* Profile Icon with Dropdown */}
+                    <div className="relative">
+                        <TopBarIcon
+                            icon="person"
+                            onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                            isActive={showProfileDropdown}
+                        />
+
+                        <AnimatePresence>
+                            {showProfileDropdown && (
+                                <div ref={profileDropdownRef}>
+                                    <motion.div
+                                        key="profile-dropdown"
+                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="absolute top-14 right-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] min-w-[180px]"
+                                    >
+                                        <ProfileMenu onItemClick={() => setShowProfileDropdown(false)} />
+                                    </motion.div>
+                                </div>
+                            )}
+                        </AnimatePresence>
                     </div>
-                </header>
+                </div>
 
                 {/* Mobile Header */}
-                <header className="lg:hidden bg-slate-50 dark:bg-slate-950 px-6 py-4 flex items-center justify-between z-40 sticky top-0">
+                <header className="lg:hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border border-slate-200/50 dark:border-slate-700/50 px-6 py-4 flex items-center justify-between z-40 fixed top-4 left-4 right-4 shadow-sm rounded-[28px]">
                     <div className="flex items-center gap-3">
-                        <img src="/images/logo.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
+                        <img src="/images/logo2.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
                         <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
                             {title}
                         </h1>
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <TopBarIcon
-                            icon="notifications"
-                            onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
-                            badgeCount={unreadCount}
-                            isActive={showNotificationDropdown}
-                        />
+                        {!hideNotifications && (
+                            <TopBarIcon
+                                icon="notifications"
+                                onClick={() => setShowNotificationDropdown(!showNotificationDropdown)}
+                                badgeCount={unreadCount}
+                                isActive={showNotificationDropdown}
+                            />
+                        )}
 
                         <TopBarIcon
                             icon="person"
@@ -500,24 +496,25 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                     </div>
 
                     {/* Mobile Notification Dropdown */}
-                    <AnimatePresence>
-                        {showNotificationDropdown && (
-                            <div ref={mobileNotificationDropdownRef} className="absolute left-0 top-0 w-full">
-                                <motion.div
-                                    key="mobile-notification-dropdown"
-                                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                    transition={{ duration: 0.2 }}
-                                    className="absolute top-[73px] right-6 left-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] max-h-96 overflow-y-auto"
-                                >
-                                    <NotificationsContent />
-                                </motion.div>
-                            </div>
-                        )}
-                    </AnimatePresence>
+                    {!hideNotifications && (
+                        <AnimatePresence>
+                            {showNotificationDropdown && (
+                                <div ref={mobileNotificationDropdownRef} className="absolute left-0 top-0 w-full">
+                                    <motion.div
+                                        key="mobile-notification-dropdown"
+                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="absolute top-[73px] right-6 left-6 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-[60] max-h-96 overflow-y-auto"
+                                    >
+                                        <NotificationsContent />
+                                    </motion.div>
+                                </div>
+                            )}
+                        </AnimatePresence>
+                    )}
 
-                    {/* Mobile Profile Dropdown */}
                     {/* Mobile Profile Dropdown */}
                     <AnimatePresence>
                         {showMobileProfileDropdown && (
@@ -538,7 +535,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                 </header>
 
                 {/* Content */}
-                <div className="p-6 lg:p-8 pb-32 lg:pb-8">
+                <div className="p-6 lg:p-8 pb-32 lg:pb-8 pt-32 lg:pt-16">
                     {children}
                 </div>
             </main>
@@ -554,6 +551,7 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
             <LeaderboardModal
                 isOpen={showLeaderboardModal}
                 onClose={() => setShowLeaderboardModal(false)}
+                eventId={eventId ?? profile?.event_id}
             />
 
             {/* Mobile Bottom Navigation - Floating Dock */}
@@ -576,8 +574,8 @@ const SharedNavigation = forwardRef<HTMLDivElement, SharedNavigationProps>(({
                     </motion.nav>
                 </div>
             )}
-            {/* Smart Assistant */}
-            <SmartAssistant />
+
+
         </div>
     );
 });

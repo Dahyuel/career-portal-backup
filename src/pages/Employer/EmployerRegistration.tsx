@@ -1,83 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Mail, Lock, User, Building2, CheckCircle, AlertCircle, ArrowLeft, Briefcase, Phone, FileText, X, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, User, Building2, CheckCircle, AlertCircle, ArrowLeft, Briefcase, Phone, FileText, Eye, EyeOff } from '../../components/icons';
 import { motion, AnimatePresence } from 'framer-motion';
-import { registerEmployer } from '../../lib/supabase';
+import { registerUser } from '../../lib/supabase';
+import Toast from '../../components/shared/Toast';
 import { validateEmail, validatePassword, validateConfirmPassword, validateName, validatePhone, validatePersonalId } from '../../utils/validation';
-
-const ErrorPopup: React.FC<{
-    message: string;
-    onClose: () => void;
-    type?: 'error' | 'warning' | 'success';
-}> = ({ message, onClose, type = 'error' }) => {
-    React.useEffect(() => {
-        const timer = setTimeout(onClose, 5000);
-        return () => clearTimeout(timer);
-    }, [onClose]);
-
-    const getStyles = () => {
-        switch (type) {
-            case 'success':
-                return {
-                    container: 'bg-green-50 border-green-200 dark:bg-green-900/30 dark:border-green-800',
-                    icon: 'text-green-600 dark:text-green-400',
-                    text: 'text-green-800 dark:text-green-200',
-                    button: 'text-green-600 dark:text-green-400'
-                };
-            case 'warning':
-                return {
-                    container: 'bg-yellow-50 border-yellow-200 dark:bg-yellow-900/30 dark:border-yellow-800',
-                    icon: 'text-yellow-600 dark:text-yellow-400',
-                    text: 'text-yellow-800 dark:text-yellow-200',
-                    button: 'text-yellow-600 dark:text-yellow-400'
-                };
-            case 'error':
-            default:
-                return {
-                    container: 'bg-red-50 border-red-200 dark:bg-red-900/30 dark:border-red-800',
-                    icon: 'text-red-600 dark:text-red-400',
-                    text: 'text-red-800 dark:text-red-200',
-                    button: 'text-red-600 dark:text-red-400'
-                };
-        }
-    };
-
-    const styles = getStyles();
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: -50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -50, scale: 0.9 }}
-            transition={{ type: "spring", duration: 0.5 }}
-            className="fixed top-4 right-4 z-50"
-        >
-            <div className={`rounded-lg shadow-lg border p-4 max-w-sm ${styles.container}`}>
-                <div className="flex items-start space-x-3">
-                    <div className={`flex-shrink-0 ${styles.icon}`}>
-                        {type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-                    </div>
-                    <div className="flex-1">
-                        <p className={`text-sm font-medium ${styles.text}`}>
-                            {message}
-                        </p>
-                    </div>
-                    <motion.button
-                        whileHover={{ scale: 1.1, rotate: 90 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={onClose}
-                        className={`flex-shrink-0 hover:opacity-70 transition-opacity ${styles.button}`}
-                    >
-                        <X className="w-4 h-4" />
-                    </motion.button>
-                </div>
-            </div>
-        </motion.div>
-    );
-};
+import { logger } from '../../utils/logger';
+import { sanitizeName, sanitizeEmail, sanitizePhone, sanitizeNumeric } from '../../utils/sanitize';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const EmployerRegistration: React.FC = () => {
     const navigate = useNavigate();
+    const { isAuthenticated, profile, sessionLoaded, getRoleBasedRedirect } = useAuth();
+
+    // Redirect if already logged in
+    useEffect(() => {
+        if (isAuthenticated && profile?.role && sessionLoaded) {
+            const redirectPath = getRoleBasedRedirect(profile.role);
+            navigate(redirectPath, { replace: true });
+        }
+    }, [isAuthenticated, profile, sessionLoaded, navigate, getRoleBasedRedirect]);
 
     const [formData, setFormData] = useState({
         firstName: '',
@@ -94,7 +36,7 @@ export const EmployerRegistration: React.FC = () => {
     const [errors, setErrors] = useState<{ field: string; message: string }[]>([]);
     const [loading, setLoading] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
-    const [errorPopup, setErrorPopup] = useState<{ message: string; type?: 'error' | 'warning' | 'success' } | null>(null);
+    const [toast, setToast] = useState<{ message: string; type: 'error' | 'warning' | 'success' } | null>(null);
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
@@ -103,12 +45,8 @@ export const EmployerRegistration: React.FC = () => {
         setErrors(prev => prev.filter(error => error.field !== field));
     };
 
-    const showErrorPopup = (message: string, type: 'error' | 'warning' | 'success' = 'error') => {
-        setErrorPopup({ message, type });
-    };
-
-    const closeErrorPopup = () => {
-        setErrorPopup(null);
+    const showToast = (message: string, type: 'error' | 'warning' | 'success' = 'error') => {
+        setToast({ message, type });
     };
 
     const validateForm = (): boolean => {
@@ -153,14 +91,14 @@ export const EmployerRegistration: React.FC = () => {
         setErrors(validationErrors);
 
         if (validationErrors.length > 0) {
-            showErrorPopup(validationErrors[0].message, 'error');
+            showToast(validationErrors[0].message, 'error');
         }
 
         return validationErrors.length === 0;
     };
 
     // Use effect for redirection to ensure it handles component lifecycle correctly
-    React.useEffect(() => {
+    useEffect(() => {
         if (showSuccess) {
             const timer = setTimeout(() => {
                 navigate('/login', { replace: true });
@@ -178,46 +116,46 @@ export const EmployerRegistration: React.FC = () => {
         setErrors([]);
 
         try {
-            console.log('Starting employer registration...');
+            logger.log('Starting employer registration...');
 
-            const result = await registerEmployer({
-                email: formData.email,
+            const result = await registerUser('employer', {
+                email: sanitizeEmail(formData.email) || formData.email.trim(),
                 password: formData.password,
-                fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
-                phone: formData.phone,
-                personalId: formData.personalId,
-                jobTitle: formData.jobTitle,
-                companyKey: formData.companyKey
+                fullName: `${sanitizeName(formData.firstName)} ${sanitizeName(formData.lastName)}`,
+                phone: sanitizePhone(formData.phone),
+                personalId: sanitizeNumeric(formData.personalId).substring(0, 14),
+                jobTitle: formData.jobTitle.trim().substring(0, 200),
+                companyKey: formData.companyKey.trim().substring(0, 50)
             });
 
-            console.log('Registration result:', result);
+            logger.log('Registration result:', result);
 
             if (!result.success || result.error) {
                 if (result.error?.validationErrors) {
                     setErrors(result.error.validationErrors);
-                    showErrorPopup(result.error.validationErrors[0]?.message || 'Registration failed', 'error');
+                    showToast(result.error.validationErrors[0]?.message || 'Registration failed', 'error');
                 } else {
                     const errorMessage = result.error?.message || 'Registration failed';
                     setErrors([{ field: 'root', message: errorMessage }]);
-                    showErrorPopup(errorMessage, 'error');
+                    showToast(errorMessage, 'error');
                 }
                 setLoading(false);
                 return;
             }
 
-            console.log('Registration successful, showing success message...');
-            showErrorPopup('Registration successful! Redirecting...', 'success');
+            logger.log('Registration successful, showing success message...');
+            showToast('Registration successful! Redirecting...', 'success');
             setShowSuccess(true);
             // Redirection is now handled by useEffect
 
         } catch (error: any) {
-            console.error('Unexpected registration error:', error);
+            logger.error('Unexpected registration error:', error);
             const errorMessage = 'An unexpected error occurred. Please try again.';
             setErrors([{
                 field: 'general',
                 message: errorMessage
             }]);
-            showErrorPopup(errorMessage, 'error');
+            showToast(errorMessage, 'error');
             setShowSuccess(false);
         } finally {
             if (!showSuccess) {
@@ -233,15 +171,14 @@ export const EmployerRegistration: React.FC = () => {
     if (showSuccess) {
         return (
             <div className="min-h-screen relative bg-white dark:bg-gray-950 transition-colors duration-300">
-                <AnimatePresence>
-                    {errorPopup && (
-                        <ErrorPopup
-                            message={errorPopup.message}
-                            type={errorPopup.type}
-                            onClose={closeErrorPopup}
-                        />
-                    )}
-                </AnimatePresence>
+                {/* Toast Notification */}
+                {toast && (
+                    <Toast
+                        message={toast.message}
+                        type={toast.type}
+                        onClose={() => setToast(null)}
+                    />
+                )}
 
                 <div
                     className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
@@ -298,15 +235,14 @@ export const EmployerRegistration: React.FC = () => {
 
     return (
         <div className="min-h-screen relative bg-white dark:bg-gray-950 transition-colors duration-300">
-            <AnimatePresence>
-                {errorPopup && (
-                    <ErrorPopup
-                        message={errorPopup.message}
-                        type={errorPopup.type}
-                        onClose={closeErrorPopup}
-                    />
-                )}
-            </AnimatePresence>
+            {/* Toast Notification */}
+            {toast && (
+                <Toast
+                    message={toast.message}
+                    type={toast.type}
+                    onClose={() => setToast(null)}
+                />
+            )}
 
             <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
@@ -333,7 +269,7 @@ export const EmployerRegistration: React.FC = () => {
                         whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
                         onClick={() => navigate('/login')}
-                        className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 transition-all duration-300 shadow-sm group"
+                        className="absolute top-4 left-4 z-20 flex items-center bg-red-50 dark:bg-red-900/30 text-asu-red dark:text-red-400 rounded-full p-2 hover:px-4 hover:bg-red-100 dark:hover:bg-red-900/50 transition-all duration-300 shadow-sm group"
                         aria-label="Go back"
                     >
                         <ArrowLeft className="h-5 w-5" />
@@ -348,7 +284,7 @@ export const EmployerRegistration: React.FC = () => {
                             transition={{ delay: 0.1, type: "spring", stiffness: 200 }}
                             className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mx-auto mb-4"
                         >
-                            <Building2 className="w-8 h-8 text-red-600 dark:text-red-400" />
+                            <Building2 className="w-8 h-8 text-asu-red dark:text-red-400" />
                         </motion.div>
                         <motion.h1
                             initial={{ opacity: 0, y: 10 }}
@@ -379,7 +315,7 @@ export const EmployerRegistration: React.FC = () => {
                                 className="mb-6 p-4 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg"
                             >
                                 <div className="flex items-center">
-                                    <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 mr-2" />
+                                    <AlertCircle className="w-5 h-5 text-asu-red dark:text-red-400 mr-2" />
                                     <p className="text-red-800 dark:text-red-200 text-sm">
                                         {getFieldError('general') || getFieldError('root')}
                                     </p>
@@ -405,7 +341,7 @@ export const EmployerRegistration: React.FC = () => {
                                         type="text"
                                         value={formData.firstName}
                                         onChange={(e) => updateField('firstName', e.target.value)}
-                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('firstName') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('firstName') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                             }`}
                                         placeholder="First name"
                                     />
@@ -416,7 +352,7 @@ export const EmployerRegistration: React.FC = () => {
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -5 }}
-                                            className="mt-1 text-sm text-red-600"
+                                            className="mt-1 text-sm text-asu-red"
                                         >
                                             {getFieldError('firstName')}
                                         </motion.p>
@@ -438,7 +374,7 @@ export const EmployerRegistration: React.FC = () => {
                                         type="text"
                                         value={formData.lastName}
                                         onChange={(e) => updateField('lastName', e.target.value)}
-                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('lastName') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('lastName') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                             }`}
                                         placeholder="Last name"
                                     />
@@ -449,7 +385,7 @@ export const EmployerRegistration: React.FC = () => {
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -5 }}
-                                            className="mt-1 text-sm text-red-600"
+                                            className="mt-1 text-sm text-asu-red"
                                         >
                                             {getFieldError('lastName')}
                                         </motion.p>
@@ -474,7 +410,7 @@ export const EmployerRegistration: React.FC = () => {
                                         type="tel"
                                         value={formData.phone}
                                         onChange={(e) => updateField('phone', e.target.value)}
-                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('phone') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('phone') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                             }`}
                                         placeholder="01XXXXXXXXX"
                                     />
@@ -485,7 +421,7 @@ export const EmployerRegistration: React.FC = () => {
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -5 }}
-                                            className="mt-1 text-sm text-red-600"
+                                            className="mt-1 text-sm text-asu-red"
                                         >
                                             {getFieldError('phone')}
                                         </motion.p>
@@ -507,7 +443,7 @@ export const EmployerRegistration: React.FC = () => {
                                         type="text"
                                         value={formData.personalId}
                                         onChange={(e) => updateField('personalId', e.target.value)}
-                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('personalId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('personalId') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                             }`}
                                         placeholder="14 digit ID"
                                     />
@@ -518,7 +454,7 @@ export const EmployerRegistration: React.FC = () => {
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -5 }}
-                                            className="mt-1 text-sm text-red-600"
+                                            className="mt-1 text-sm text-asu-red"
                                         >
                                             {getFieldError('personalId')}
                                         </motion.p>
@@ -542,7 +478,7 @@ export const EmployerRegistration: React.FC = () => {
                                     type="email"
                                     value={formData.email}
                                     onChange={(e) => updateField('email', e.target.value)}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('email') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('email') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                         }`}
                                     placeholder="Enter your email"
                                 />
@@ -553,7 +489,7 @@ export const EmployerRegistration: React.FC = () => {
                                         initial={{ opacity: 0, y: -5 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -5 }}
-                                        className="mt-1 text-sm text-red-600"
+                                        className="mt-1 text-sm text-asu-red"
                                     >
                                         {getFieldError('email')}
                                     </motion.p>
@@ -576,7 +512,7 @@ export const EmployerRegistration: React.FC = () => {
                                     type="text"
                                     value={formData.jobTitle}
                                     onChange={(e) => updateField('jobTitle', e.target.value)}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('jobTitle') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('jobTitle') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                         }`}
                                     placeholder="e.g. HR Manager"
                                 />
@@ -587,7 +523,7 @@ export const EmployerRegistration: React.FC = () => {
                                         initial={{ opacity: 0, y: -5 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -5 }}
-                                        className="mt-1 text-sm text-red-600"
+                                        className="mt-1 text-sm text-asu-red"
                                     >
                                         {getFieldError('jobTitle')}
                                     </motion.p>
@@ -611,7 +547,7 @@ export const EmployerRegistration: React.FC = () => {
                                     type="text"
                                     value={formData.companyKey}
                                     onChange={(e) => updateField('companyKey', e.target.value)}
-                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('companyKey') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                    className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('companyKey') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                         }`}
                                     placeholder="Enter your Company ID"
                                 />
@@ -622,7 +558,7 @@ export const EmployerRegistration: React.FC = () => {
                                         initial={{ opacity: 0, y: -5 }}
                                         animate={{ opacity: 1, y: 0 }}
                                         exit={{ opacity: 0, y: -5 }}
-                                        className="mt-1 text-sm text-red-600"
+                                        className="mt-1 text-sm text-asu-red"
                                     >
                                         {getFieldError('companyKey')}
                                     </motion.p>
@@ -654,7 +590,7 @@ export const EmployerRegistration: React.FC = () => {
                                         type={showPassword ? 'text' : 'password'}
                                         value={formData.password}
                                         onChange={(e) => updateField('password', e.target.value)}
-                                        className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('password') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                             }`}
                                         placeholder="Create a password"
                                     />
@@ -672,7 +608,7 @@ export const EmployerRegistration: React.FC = () => {
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -5 }}
-                                            className="mt-1 text-sm text-red-600"
+                                            className="mt-1 text-sm text-asu-red"
                                         >
                                             {getFieldError('password')}
                                         </motion.p>
@@ -694,7 +630,7 @@ export const EmployerRegistration: React.FC = () => {
                                         type={showConfirmPassword ? 'text' : 'password'}
                                         value={formData.confirmPassword}
                                         onChange={(e) => updateField('confirmPassword', e.target.value)}
-                                        className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('confirmPassword') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
+                                        className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('confirmPassword') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'
                                             }`}
                                         placeholder="Confirm your password"
                                     />
@@ -712,7 +648,7 @@ export const EmployerRegistration: React.FC = () => {
                                             initial={{ opacity: 0, y: -5 }}
                                             animate={{ opacity: 1, y: 0 }}
                                             exit={{ opacity: 0, y: -5 }}
-                                            className="mt-1 text-sm text-red-600"
+                                            className="mt-1 text-sm text-asu-red"
                                         >
                                             {getFieldError('confirmPassword')}
                                         </motion.p>
@@ -730,7 +666,7 @@ export const EmployerRegistration: React.FC = () => {
                             whileTap={{ scale: 0.98 }}
                             type="submit"
                             disabled={loading}
-                            className="w-full py-3 px-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-lg font-medium hover:from-red-600 hover:to-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg"
+                            className="w-full py-3 px-4 bg-gradient-to-r from-asu-red to-asu-red-light text-white rounded-lg font-medium hover:from-asu-red-dark hover:to-asu-red focus:outline-none focus:ring-2 focus:ring-asu-red focus:ring-offset-2 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-lg"
                         >
                             {loading ? (
                                 <span className="flex items-center justify-center">
@@ -752,7 +688,7 @@ export const EmployerRegistration: React.FC = () => {
                     >
                         <p className="text-gray-600 dark:text-gray-400">
                             Already have an account?{' '}
-                            <Link to="/login" className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 font-medium">
+                            <Link to="/login" className="text-asu-red dark:text-red-400 hover:text-asu-red-dark dark:hover:text-red-300 font-medium">
                                 Sign in
                             </Link>
                         </p>

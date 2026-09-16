@@ -1,9 +1,10 @@
 // components/volunteer/VolunteerProfileModal.tsx
 import React, { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { QRCodeSVG } from 'qrcode.react';
+import { QRCodeCanvas } from 'qrcode.react';
 import LeaderboardModal from '../shared/LeaderboardModal';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 interface VolunteerProfileModalProps {
     isOpen: boolean;
@@ -21,7 +22,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
     const qrRef = useRef<HTMLDivElement>(null);
     const [activeTab, setActiveTab] = useState<'details' | 'qrcode'>('details');
     const [showLeaderboard, setShowLeaderboard] = useState(false);
-
+    const navigate = useNavigate();
     // Check if loading (no profile yet)
     const loading = !authProfile;
 
@@ -55,35 +56,32 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
     };
 
     const downloadQRCode = () => {
-        const svg = qrRef.current?.querySelector('svg');
-        if (!svg) return;
+        const qrCanvas = qrRef.current?.querySelector('canvas');
+        if (!qrCanvas) return;
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const svgData = new XMLSerializer().serializeToString(svg);
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(svgBlob);
+        const padding = 24;
+        canvas.width = qrCanvas.width + padding * 2;
+        canvas.height = qrCanvas.height + padding * 2;
 
-        const img = new Image();
-        img.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+        // White background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            canvas.toBlob((blob) => {
-                if (blob) {
-                    const link = document.createElement('a');
-                    link.download = `volunteer-qr-${authProfile?.volunteer?.volunteer_id || 'code'}.png`;
-                    link.href = URL.createObjectURL(blob);
-                    link.click();
-                    URL.revokeObjectURL(link.href);
-                }
-            });
-            URL.revokeObjectURL(url);
-        };
-        img.src = url;
+        ctx.drawImage(qrCanvas, padding, padding);
+
+        canvas.toBlob((blob) => {
+            if (blob) {
+                const link = document.createElement('a');
+                link.download = `volunteer-qr-${authProfile?.volunteer?.volunteer_id || 'code'}.png`;
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                URL.revokeObjectURL(link.href);
+            }
+        });
     };
 
     // Volunteer ID display - use volunteer_id (not UUID)
@@ -273,6 +271,19 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                             </p>
                                                         </div>
                                                     )}
+                                                    {/* Go to Attendee Dashboard */}
+                                                    {showLeaderboardButton && (
+                                                        <button
+                                                            onClick={() => {
+                                                                onClose?.();
+                                                                navigate('/attendee');
+                                                            }}
+                                                            className="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                                        >
+                                                            <span className="material-symbols-outlined">person</span>
+                                                            Go to Attendee Dashboard
+                                                        </button>
+                                                    )}
 
                                                     {/* Leaderboard Button */}
                                                     {showLeaderboardButton && (
@@ -304,7 +315,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                         ref={qrRef}
                                                         className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mx-auto"
                                                     >
-                                                        <QRCodeSVG value={authProfile.id || user?.id || ''} size={200} level="H" />
+                                                        <QRCodeCanvas value={authProfile.id || user?.id || ''} size={200} level="H" />
                                                     </div>
 
                                                     <motion.button

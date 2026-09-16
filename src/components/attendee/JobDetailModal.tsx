@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface JobDetailModalProps {
     job: any;
@@ -12,196 +12,242 @@ interface JobDetailModalProps {
 const JobDetailModal: React.FC<JobDetailModalProps> = ({ job, onClose, onApply, hasApplied, onWithdraw }) => {
     if (!job) return null;
 
+    const modalVariants = {
+        hidden: { opacity: 0, scale: 0.95 },
+        visible: {
+            opacity: 1,
+            scale: 1,
+            transition: {
+                type: "spring" as const,
+                stiffness: 300,
+                damping: 25
+            }
+        },
+        exit: {
+            opacity: 0,
+            scale: 0.95,
+            transition: { duration: 0.2 }
+        }
+    };
+
+    const backdropVariants = {
+        hidden: { opacity: 0 },
+        visible: { opacity: 1 },
+        exit: { opacity: 0 }
+    };
+
+    const details = [
+        { icon: 'work', label: 'Type', text: job.job_type },
+        { icon: 'layers', label: 'Level', text: job.experience_level },
+        { icon: 'hub', label: 'Mode', text: job.employment_mode },
+        { icon: 'location_on', label: 'Location', text: job.location || 'Remote' },
+        { icon: 'schedule', label: 'Posted', text: new Date(job.posted_at).toLocaleDateString() },
+    ];
+
+    const skills = job.required_skills
+        ? job.required_skills.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [];
+
     return (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-                onClick={onClose}
-            />
+        <AnimatePresence>
+            <>
+                {/* Backdrop */}
+                <motion.div
+                    variants={backdropVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="exit"
+                    className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998]"
+                    onClick={onClose}
+                />
 
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                transition={{ type: "spring", duration: 0.5 }}
-                className="bg-white dark:bg-slate-900 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] relative z-10"
-            >
-                {/* Header Background */}
-                <div className="h-32 bg-gradient-to-r from-red-600 to-red-800 relative">
-                    <motion.button
-                        initial={{ opacity: 0, scale: 0 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: 0.2 }}
-                        whileHover={{ scale: 1.1, rotate: 90 }}
-                        whileTap={{ scale: 0.9 }}
-                        onClick={onClose}
-                        className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full backdrop-blur-sm transition-all"
+                {/* Modal */}
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+                    <motion.div
+                        variants={modalVariants}
+                        initial="hidden"
+                        animate="visible"
+                        exit="exit"
+                        className="bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-zinc-800 w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+                        onClick={(e) => e.stopPropagation()}
                     >
-                        <span className="material-symbols-outlined">close</span>
-                    </motion.button>
-                </div>
+                        {/* Header */}
+                        <div className="bg-gradient-to-br from-red-600 to-red-700 p-6 relative overflow-hidden flex-shrink-0">
+                            {/* Decorative background icon */}
+                            <div className="absolute top-0 right-0 p-4 opacity-10">
+                                <span className="material-symbols-outlined text-7xl text-white">
+                                    work
+                                </span>
+                            </div>
 
-                {/* Content Container */}
-                <div className="px-8 pb-8 -mt-6 flex-1 overflow-y-auto custom-scrollbar">
-                    <div className="flex flex-col gap-6">
-                        {/* Header Info */}
-                        <div className="flex items-end gap-6">
-                            <motion.div
-                                initial={{ scale: 0, rotate: -180 }}
-                                animate={{ scale: 1, rotate: 0 }}
-                                transition={{ delay: 0.1, type: "spring" }}
-                                className="w-24 h-24 rounded-2xl bg-white p-2 shadow-lg border-2 border-white dark:border-slate-800 flex items-center justify-center shrink-0 relative z-10"
-                            >
-                                {job.companies?.logo_url ? (
-                                    <img
-                                        src={job.companies.logo_url}
-                                        alt={job.companies.company_name}
-                                        className="w-full h-full object-contain"
-                                    />
-                                ) : (
-                                    <span className="material-symbols-outlined text-4xl text-slate-300">business</span>
-                                )}
-                            </motion.div>
-                            <motion.div
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                transition={{ delay: 0.2 }}
-                                className="flex-1 relative z-10"
-                            >
-                                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">
-                                    {job.title}
-                                </h2>
-                                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 font-medium">
-                                    <span className="material-symbols-outlined text-lg">apartment</span>
-                                    {job.companies?.company_name || 'Unknown Company'}
+                            <div className="relative z-10">
+                                <div className="flex items-start justify-between mb-3">
+                                    {/* Company logo + info */}
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-11 h-11 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center overflow-hidden shrink-0">
+                                            {job.companies?.logo_url ? (
+                                                <img
+                                                    src={job.companies.logo_url}
+                                                    alt={job.companies.company_name}
+                                                    className="w-full h-full object-contain"
+                                                />
+                                            ) : (
+                                                <span className="material-symbols-outlined text-xl text-white/70">business</span>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <motion.p
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: 0.1 }}
+                                                className="text-red-100 text-xs font-semibold uppercase tracking-wider mb-0.5"
+                                            >
+                                                {job.companies?.company_name || 'Unknown Company'}
+                                            </motion.p>
+                                            <motion.h2
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: 0.15 }}
+                                                className="text-xl font-bold text-white leading-tight"
+                                            >
+                                                {job.title}
+                                            </motion.h2>
+                                        </div>
+                                    </div>
+
+                                    {/* Close button */}
+                                    <motion.button
+                                        initial={{ opacity: 0, scale: 0 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        transition={{ delay: 0.2 }}
+                                        whileHover={{ scale: 1.1, rotate: 90 }}
+                                        whileTap={{ scale: 0.9 }}
+                                        onClick={onClose}
+                                        className="p-2 hover:bg-white/10 rounded-full transition-colors ml-2 shrink-0"
+                                    >
+                                        <span className="material-symbols-outlined text-white">close</span>
+                                    </motion.button>
                                 </div>
-                            </motion.div>
+
+
+                            </div>
                         </div>
 
-                        {/* Badges */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.3 }}
-                            className="flex flex-wrap gap-2"
-                        >
-                            {[
-                                { icon: 'work', text: job.job_type, color: 'red' },
-                                { icon: 'layers', text: job.experience_level, color: 'slate' },
-                                { icon: 'pnp', text: job.employment_mode, color: 'slate' },
-                                { icon: 'location_on', text: job.location || 'Remote', color: 'slate' },
-                                { icon: 'schedule', text: new Date(job.posted_at).toLocaleDateString(), color: 'slate' }
-                            ].map((badge, index) => (
-                                <motion.span
-                                    key={index}
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: 1 }}
-                                    transition={{ delay: 0.4 + index * 0.1, type: "spring" }}
-                                    className={`px-3 py-1.5 rounded-lg ${badge.color === 'red'
-                                        ? 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400'
-                                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                                        } text-[10px] font-bold uppercase flex items-center gap-1.5`}
-                                >
-                                    <span className="material-symbols-outlined text-lg">{badge.icon}</span>
-                                    {badge.text}
-                                </motion.span>
-                            ))}
-                        </motion.div>
+                        {/* Scrollable Content */}
+                        <div className="p-6 overflow-y-auto custom-scrollbar flex-1 space-y-4">
 
-                        <div className="w-full h-px bg-slate-200 dark:bg-slate-800" />
-
-                        {/* Description */}
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: 0.7 }}
-                        >
-                            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-                                <motion.span
-                                    animate={{ rotate: [0, -10, 10, -10, 0] }}
-                                    transition={{ delay: 0.8, duration: 0.5 }}
-                                    className="material-symbols-outlined text-red-600"
-                                >
-                                    description
-                                </motion.span>
-                                About the Role
-                            </h3>
-                            <div className="prose dark:prose-invert max-w-none text-slate-600 dark:text-slate-300 leading-relaxed">
-                                <p className="whitespace-pre-wrap">{job.description}</p>
+                            {/* Detail Cards */}
+                            <div className="grid gap-3">
+                                {details.map((item, i) => (
+                                    <motion.div
+                                        key={i}
+                                        initial={{ opacity: 0, y: 8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ delay: 0.1 + i * 0.05 }}
+                                        className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl"
+                                    >
+                                        <span className="material-symbols-outlined text-red-600">{item.icon}</span>
+                                        <div className="flex-1">
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">{item.label}</p>
+                                            <p className="font-semibold text-gray-900 dark:text-white">{item.text}</p>
+                                        </div>
+                                    </motion.div>
+                                ))}
                             </div>
-                        </motion.div>
 
-                        {/* Requirements */}
-                        {job.required_skills && (
+                            {/* About the Role */}
                             <motion.div
-                                initial={{ opacity: 0, y: 20 }}
+                                initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                transition={{ delay: 0.9 }}
+                                transition={{ delay: 0.2 }}
                             >
-                                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
-                                    <span className="material-symbols-outlined text-red-600">checklist</span>
-                                    Requirements & Skills
-                                </h3>
-                                <div className="flex flex-wrap gap-2">
-                                    {job.required_skills.split(',').map((skill: string, index: number) => (
-                                        <motion.span
-                                            key={index}
-                                            initial={{ scale: 0, opacity: 0 }}
-                                            animate={{ scale: 1, opacity: 1 }}
-                                            transition={{ delay: 1 + index * 0.05, type: "spring" }}
-                                            className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-sm font-medium border border-slate-200 dark:border-slate-700"
-                                        >
-                                            {skill.trim()}
-                                        </motion.span>
-                                    ))}
+                                <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
+                                    <span className="material-symbols-outlined text-red-600">description</span>
+                                    <div className="flex-1">
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">About the Role</p>
+                                        <p className="text-sm font-medium text-gray-900 dark:text-white leading-relaxed whitespace-pre-wrap">
+                                            {job.description}
+                                        </p>
+                                    </div>
                                 </div>
                             </motion.div>
-                        )}
-                    </div>
-                </div>
 
-                {/* Footer Actions */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 1.1 }}
-                    className="p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-end items-center gap-3"
-                >
-                    <motion.button
-                        whileHover={{ scale: 1.05 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={onClose}
-                        className="px-6 py-2.5 rounded-xl text-slate-600 dark:text-slate-400 font-bold hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
-                    >
-                        Close
-                    </motion.button>
-                    {hasApplied ? (
-                        <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={onWithdraw}
-                            className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-                        >
-                            <span className="material-symbols-outlined">cancel</span>
-                            Withdraw
-                        </motion.button>
-                    ) : (
-                        <motion.button
-                            whileHover={{ scale: 1.05, y: -2 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={onApply}
-                            className="bg-red-600 hover:bg-red-700 text-white px-8 py-2.5 rounded-xl font-bold shadow-lg shadow-red-600/20 hover:shadow-red-600/30 transition-all flex items-center gap-2"
-                        >
-                            Apply Now
-                            <span className="material-symbols-outlined text-lg">arrow_forward</span>
-                        </motion.button>
-                    )}
-                </motion.div>
-            </motion.div>
-        </div>
+                            {/* Skills */}
+                            {skills.length > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.3 }}
+                                >
+                                    <div className="p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <span className="material-symbols-outlined text-red-600">psychology</span>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Required Skills</p>
+                                        </div>
+                                        <p className="text-sm font-medium text-gray-900 dark:text-white leading-relaxed">
+                                            {skills.join(', ')}
+                                        </p>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {/* Faculties */}
+                            {job.companies?.faculties && job.companies.faculties.length > 0 && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.35 }}
+                                >
+                                    <div className="p-4 bg-gray-50 dark:bg-zinc-800 rounded-xl">
+                                        <div className="flex items-center gap-2 mb-3">
+                                            <span className="material-symbols-outlined text-red-600">school</span>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Target Faculties</p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {job.companies.faculties.map((faculty: string, i: number) => (
+                                                <motion.span
+                                                    key={i}
+                                                    initial={{ opacity: 0, scale: 0.85 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    transition={{ delay: 0.37 + i * 0.04, type: 'spring' }}
+                                                    className="px-3 py-1.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400 border border-blue-100 dark:border-blue-500/20"
+                                                >
+                                                    {faculty}
+                                                </motion.span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+                            {/* Apply / Withdraw Button */}
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.4 }}
+                            >
+                                {hasApplied ? (
+                                    <button
+                                        onClick={onWithdraw}
+                                        className="w-full mt-2 bg-gray-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-500/10 text-gray-600 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 py-3 rounded-xl font-bold shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2 border border-gray-200 dark:border-zinc-700"
+                                    >
+                                        <span className="material-symbols-outlined">cancel</span>
+                                        Withdraw Application
+                                    </button>
+                                ) : (
+                                    <button
+                                        onClick={onApply}
+                                        className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-red-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        Apply Now
+                                        <span className="material-symbols-outlined">arrow_forward</span>
+                                    </button>
+                                )}
+                            </motion.div>
+                        </div>
+                    </motion.div>
+                </div>
+            </>
+        </AnimatePresence>
     );
 };
 

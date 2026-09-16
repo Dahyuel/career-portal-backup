@@ -126,17 +126,23 @@
 
 /* 3D Flip Card Styles */
 .perspective-1000 {
+  -webkit-perspective: 1000px;
   perspective: 1000px;
 }
 
 .transform-style-3d {
+  -webkit-transform-style: preserve-3d;
   transform-style: preserve-3d;
 }
 
 .backface-hidden {
+  -webkit-backface-visibility: hidden;
   backface-visibility: hidden;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
 }
 
 .rotate-y-180 {
+  -webkit-transform: rotateY(180deg);
   transform: rotateY(180deg);
 }

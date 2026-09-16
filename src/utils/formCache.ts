@@ -1,3 +1,4 @@
+import { logger } from './logger';
 const CACHE_PREFIX = 'form_cache_';
 const CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -14,7 +15,7 @@ export const saveFormCache = <T>(formId: string, data: T): void => {
     };
     localStorage.setItem(`${CACHE_PREFIX}${formId}`, JSON.stringify(cacheData));
   } catch (error) {
-    console.error('Failed to save form cache:', error);
+    logger.error('Failed to save form cache:', error);
   }
 };
 
@@ -33,7 +34,7 @@ export const loadFormCache = <T>(formId: string): T | null => {
 
     return cacheData.data;
   } catch (error) {
-    console.error('Failed to load form cache:', error);
+    logger.error('Failed to load form cache:', error);
     return null;
   }
 };
@@ -42,7 +43,7 @@ export const clearFormCache = (formId: string): void => {
   try {
     localStorage.removeItem(`${CACHE_PREFIX}${formId}`);
   } catch (error) {
-    console.error('Failed to clear form cache:', error);
+    logger.error('Failed to clear form cache:', error);
   }
 };
 
@@ -54,6 +55,6 @@ export const clearAllFormCaches = (): void => {
       }
     });
   } catch (error) {
-    console.error('Failed to clear all form caches:', error);
+    logger.error('Failed to clear all form caches:', error);
   }
 };

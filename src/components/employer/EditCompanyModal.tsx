@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase, uploadFile } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { logger } from '../../utils/logger';
+import { FACULTIES } from '../../utils/constants';
 
 interface CompanyData {
     company_name: string;
@@ -9,7 +11,7 @@ interface CompanyData {
     website: string;
     description: string;
     logo_url: string;
-    booth_number: string;
+    target_faculties: string[];
 }
 
 interface EditCompanyModalProps {
@@ -27,7 +29,7 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
         website: '',
         description: '',
         logo_url: '',
-        booth_number: ''
+        target_faculties: []
     });
     const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -40,7 +42,7 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
             website: initialData.website || '',
             description: initialData.description || '',
             logo_url: initialData.logo_url || '',
-            booth_number: initialData.booth_number || ''
+            target_faculties: initialData.target_faculties || []
         });
     }, [initialData]);
 
@@ -57,18 +59,65 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
         setError(null);
 
         try {
-            const { data, error } = await uploadFile('company-logo', companyId, file);
-
-            if (error) throw error;
-            if (data?.url) {
-                setFormData(prev => ({ ...prev, logo_url: data.url }));
+            // Validate file type
+            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/svg+xml'];
+            if (!allowedTypes.includes(file.type)) {
+                throw new Error(`Invalid file type. Allowed: JPEG, PNG, SVG`);
             }
+            if (file.size > 10 * 1024 * 1024) {
+                throw new Error('File must be under 10MB');
+            }
+
+            const fileExt = file.name.split('.').pop()?.toLowerCase();
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substring(2, 8);
+            const sanitized = file.name.replace(/[^a-zA-Z0-9.-]/g, '_').replace(/\.[^/.]+$/, '');
+            const fileName = `${sanitized}_${timestamp}_${random}.${fileExt}`;
+            const filePath = `${companyId}/${fileName}`;
+
+            logger.log('📤 [UPLOAD] Uploading company logo to Companies bucket:', fileName);
+
+            // Upload directly to the 'Companies' bucket (not 'Users')
+            const { error: uploadError } = await supabase.storage
+                .from('Companies')
+                .upload(filePath, file, {
+                    cacheControl: '3600',
+                    upsert: true
+                });
+
+            if (uploadError) throw uploadError;
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('Companies')
+                .getPublicUrl(filePath);
+
+            logger.log('✅ [UPLOAD] Logo uploaded:', publicUrl);
+            setFormData(prev => ({ ...prev, logo_url: publicUrl }));
         } catch (err: any) {
-            console.error('Error uploading logo:', err);
+            logger.error('Error uploading logo:', err);
             setError(err.message || 'Failed to upload logo');
         } finally {
             setUploading(false);
         }
+    };
+
+    const addFaculty = () => {
+        setFormData(prev => ({ ...prev, target_faculties: [...prev.target_faculties, ''] }));
+    };
+
+    const updateFaculty = (index: number, value: string) => {
+        setFormData(prev => {
+            const updated = [...prev.target_faculties];
+            updated[index] = value;
+            return { ...prev, target_faculties: updated };
+        });
+    };
+
+    const removeFaculty = (index: number) => {
+        setFormData(prev => ({
+            ...prev,
+            target_faculties: prev.target_faculties.filter((_, i) => i !== index)
+        }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -77,30 +126,31 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
         setError(null);
 
         try {
-            const { error: updateError } = await supabase
-                .from('companies')
-                .update({
-                    company_name: formData.company_name,
-                    industry: formData.industry,
-                    website: formData.website,
-                    description: formData.description,
-                    logo_url: formData.logo_url,
-                    booth_number: formData.booth_number
-                })
-                .eq('id', companyId);
+            const { data, error: rpcError } = await supabase.rpc('update_company_details', {
+                p_company_id: companyId,
+                p_company_name: formData.company_name,
+                p_industry: formData.industry,
+                p_website: formData.website,
+                p_description: formData.description,
+                p_logo_url: formData.logo_url,
+                p_target_faculties: formData.target_faculties
+            });
 
-            if (updateError) throw updateError;
+            if (rpcError) throw rpcError;
 
-            // Get event_id from profile or use default
+            const result = data as any;
+            if (result?.success === false) {
+                setError(result.error || 'Failed to update company');
+                return;
+            }
+
             const EVENT_ID = profile?.event_id || 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
-
-            // Force refresh profile to get updated company data
             await refreshProfile(EVENT_ID, undefined, undefined, true);
 
             onSave();
             onClose();
         } catch (err: any) {
-            console.error('Error updating company:', err);
+            logger.error('Error updating company:', err);
             setError(err.message || 'Failed to update company');
         } finally {
             setLoading(false);
@@ -190,7 +240,6 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
                             { label: 'Company Name', name: 'company_name', type: 'text', placeholder: 'e.g. Tech Corp', required: true },
                             { label: 'Industry', name: 'industry', type: 'text', placeholder: 'e.g. Software Development' },
                             { label: 'Website', name: 'website', type: 'url', placeholder: 'https://example.com' },
-                            { label: 'Booth Number', name: 'booth_number', type: 'text', placeholder: 'e.g. A-12' },
                             { label: 'Description', name: 'description', type: 'textarea', placeholder: 'About your company...', rows: 4 }
                         ].map((field, idx) => (
                             <motion.div
@@ -225,6 +274,64 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
                                 )}
                             </motion.div>
                         ))}
+
+                        {/* Target Faculties - outside the map, renders once */}
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.35 }}
+                        >
+                            <div className="flex items-center justify-between mb-2">
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                                    Target Faculties
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={addFaculty}
+                                    className="flex items-center gap-1 text-sm text-red-600 hover:text-red-700 font-medium transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-base">add</span>
+                                    Add Faculty
+                                </button>
+                            </div>
+
+                            <AnimatePresence>
+                                {formData.target_faculties.length === 0 && (
+                                    <p className="text-sm text-slate-400 dark:text-slate-500 italic">
+                                        No faculties added yet. Click "Add Faculty" to start.
+                                    </p>
+                                )}
+                                {formData.target_faculties.map((faculty, index) => (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0, height: 0 }}
+                                        animate={{ opacity: 1, height: 'auto' }}
+                                        exit={{ opacity: 0, height: 0 }}
+                                        transition={{ duration: 0.2 }}
+                                        className="flex items-center gap-2 mb-2"
+                                    >
+                                        <select
+                                            value={faculty}
+                                            onChange={e => updateFaculty(index, e.target.value)}
+                                            className="flex-1 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 outline-none transition-all"
+                                        >
+                                            <option value="" disabled>Select a faculty...</option>
+                                            {FACULTIES.map(f => (
+                                                <option key={f} value={f}>{f}</option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeFaculty(index)}
+                                            className="text-slate-400 hover:text-red-500 transition-colors"
+                                        >
+                                            <span className="material-symbols-outlined text-xl">remove_circle</span>
+                                        </button>
+                                    </motion.div>
+                                ))}
+                            </AnimatePresence>
+
+                        </motion.div>
                     </form>
                 </div>
 
@@ -247,8 +354,8 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
                         Save Changes
                     </button>
                 </div>
-            </motion.div>
-        </div>
+            </motion.div >
+        </div >
     );
 };
 

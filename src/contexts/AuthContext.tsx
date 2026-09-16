@@ -1,7 +1,9 @@
 // AuthContext with optimized session handling and proper RPC response parsing
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from "react";
-import { supabase, signOutUser, getCurrentSession } from "../lib/supabase";
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { supabase, signOutUser, getCurrentSession, DEFAULT_EVENT_ID } from "../lib/supabase";
+import { clearAllFormCaches } from "../utils/formCache";
 import type { User } from "@supabase/supabase-js";
+import { logger } from '../utils/logger';
 
 // ----- RPC Response Interface (matches actual get_my_profile return) -----
 interface GetMyProfileResponse {
@@ -15,11 +17,11 @@ interface GetMyProfileResponse {
     preferred_language: string;
     created_at: string;
     updated_at: string;
+    nationality?: string | null;
   } | null;
   attendee: {
     user_id: string;
     is_asu_student: boolean;
-    student_id: string;
     university: string;
     faculty: string;
     department: string;
@@ -28,6 +30,7 @@ interface GetMyProfileResponse {
     cv_url: string;
     enrollment_proof_url: string;
     registered_at: string;
+    year?: number | null;
   } | null;
   volunteer: {
     user_id: string;
@@ -51,9 +54,11 @@ interface GetMyProfileResponse {
     partner_type: string;
     website: string;
     description: string;
+    faculties: string[] | null;
   } | null;
   roles: string[];
   isVolunteer: boolean;
+  nationality: string | null;
 }
 
 // ----- User profile type -----
@@ -65,22 +70,21 @@ type UserProfile = {
   personal_id: string;
   score: number;
   preferred_language: string;
+  nationality?: string | null;
 
-  // Role information
-  role: string; // primary/effective role
-  roles: string[]; // all roles for this event
+  role: string;
+  roles: string[];
   isVolunteer: boolean;
 
-  // Type-specific data
   attendee?: GetMyProfileResponse['attendee'];
   volunteer?: GetMyProfileResponse['volunteer'];
   employer?: GetMyProfileResponse['employer'];
   company?: GetMyProfileResponse['company'];
 
-  // Metadata
   profile_complete: boolean;
   created_at: string;
-  event_id?: string; // cache key
+  event_id?: string;
+  target_faculties?: string[] | null;
 };
 
 // ----- Context type -----
@@ -102,27 +106,31 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Role priority for downgrade protection
+const ROLE_PRIORITY: Record<string, number> = {
+  sadmin: 10, super_admin: 9, admin: 8, team_leader: 7, tech_support: 6,
+  employer: 5, volunteer: 4, building: 3, registration: 3,
+  info_desk: 2, verification: 2, attendee: 0
+};
+
+const getRolePriority = (role: string): number => ROLE_PRIORITY[role] ?? 0;
+
 // ----- Helper: Determine effective role from roles array -----
 const getEffectiveRole = (roles: string[]): string => {
   if (!roles || roles.length === 0) return "attendee";
-
-  // Priority order
-  const priority = ["sadmin", "super_admin", "admin", "team_leader", "employer",
+  const priority = ["sadmin", "super_admin", "admin", "team_leader", "tech_support", "employer",
     "volunteer", "building", "registration", "info_desk", "verification", "attendee"];
-
   for (const role of priority) {
     if (roles.includes(role)) return role;
   }
-
   return roles[0] || "attendee";
 };
 
-// ----- Helper: Restore from localStorage -----
+// ----- Helper: Restore minimal routing data from localStorage -----
 const getInitialSessionFromStorage = (): { user: User | null; profile: UserProfile | null } => {
   try {
     const stored = localStorage.getItem("currentUser");
     if (!stored) return { user: null, profile: null };
-
     const parsed = JSON.parse(stored);
     if (!parsed?.id || !parsed?.email) return { user: null, profile: null };
 
@@ -136,7 +144,28 @@ const getInitialSessionFromStorage = (): { user: User | null; profile: UserProfi
       user_metadata: {}
     } as User;
 
-    const profile: UserProfile = parsed;
+    const profile: UserProfile = {
+      ...({} as UserProfile),
+      id: parsed.id,
+      email: parsed.email,
+      full_name: parsed.full_name || "",
+      phone: parsed.phone || "",
+      personal_id: parsed.personal_id || "",
+      score: parsed.score || 0,
+      preferred_language: parsed.preferred_language || "en",
+      nationality: parsed.nationality ?? null,
+      role: parsed.role,
+      roles: parsed.roles || [],
+      isVolunteer: parsed.isVolunteer || false,
+      attendee: parsed.attendee || null,
+      volunteer: parsed.volunteer || null,
+      employer: parsed.employer || null,
+      company: parsed.company || null,
+      profile_complete: parsed.profile_complete,
+      created_at: parsed.created_at || "",
+      event_id: parsed.event_id,
+      target_faculties: parsed.target_faculties || null,
+    };
     return { user, profile };
   } catch {
     return { user: null, profile: null };
@@ -153,61 +182,128 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // ----- Fetch profile from RPC (authoritative) -----
+  // ----- Clear all user-related cached data -----
+  const clearAllCachedData = useCallback(() => {
+    // Preserve theme
+    const theme = localStorage.getItem("theme");
+
+    // Clear everything
+    localStorage.clear();
+    sessionStorage.clear();
+    clearAllFormCaches();
+
+    // Restore theme
+    if (theme) {
+      localStorage.setItem("theme", theme);
+    }
+
+    logger.log('🧹 All cached user data cleared');
+  }, []);
+
+  const profileRef = useRef<UserProfile | null>(profile);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  // ----- Fetch profile from RPC -----
   const fetchUserProfile = useCallback(
     async (userId: string, userEmail: string, eventId?: string, forceRefresh = false): Promise<UserProfile | null> => {
       try {
-        // Skip fetch if profile already cached for this event (unless force refresh)
-        if (!forceRefresh && profile && profile.event_id === eventId && profile.id === userId) {
-          console.log('📦 Using cached profile for event:', eventId);
-          return profile;
+        const currentProfile = profileRef.current;
+
+        // Return cache if same event and same user (unless forced)
+        if (!forceRefresh && currentProfile && currentProfile.event_id === eventId && currentProfile.id === userId) {
+          logger.log('📦 Using cached profile for event:', eventId);
+          return currentProfile;
         }
 
-        console.log('🔍 Fetching profile from database...', { userId, eventId, forceRefresh });
+        if (
+          !eventId &&
+          !forceRefresh &&
+          currentProfile?.id === userId &&
+          currentProfile.event_id   // ← only skip if we already know the event
+        ) {
+          const cachedPriority = getRolePriority(currentProfile.role);
+          if (cachedPriority > getRolePriority("attendee")) {
+            logger.log('📦 Skipping no-eventId fetch — keeping existing role:', currentProfile.role);
+            return currentProfile;
+          }
+        }
 
-        // RPC call to get_my_profile
+        // ── Auto-resolve active event for non-attendee users ──────────────
+        let effectiveEventId = eventId;
+        if (!effectiveEventId) {
+          try {
+            const { data: cfg } = await supabase
+              .from('system_config')
+              .select('value')
+              .eq('key', 'active_event_id')
+              .maybeSingle();
+
+            const activeEventId = (cfg?.value as any)?.event_id as string | undefined;
+            if (activeEventId) {
+              effectiveEventId = activeEventId;
+              logger.log('📌 Auto-resolved active event id:', activeEventId);
+            }
+          } catch (err) {
+            logger.warn('Could not fetch active_event_id:', err);
+          }
+        }
+
+        logger.log('🔍 Fetching profile from database...', {
+          userId,
+          eventId: effectiveEventId,
+          forceRefresh,
+        });
+
         const { data, error } = await supabase
-          .rpc("get_my_profile", { _event_id: eventId })
+          .rpc("get_my_profile", { _event_id: effectiveEventId || null })
           .single();
 
         if (error) {
-          console.error("❌ RPC Error fetching user profile:", {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint
+          logger.error("❌ RPC Error fetching user profile:", {
+            code: error.code, message: error.message,
+            details: error.details, hint: error.hint,
           });
           return null;
         }
 
         if (!data) {
-          console.warn("⚠️ RPC returned no data");
+          logger.warn("⚠️ RPC returned no data");
           return null;
         }
 
-        // Parse the RPC response
         const rpcData = data as unknown as GetMyProfileResponse;
 
-        console.log('📥 RPC Response:', {
+        logger.log('📥 RPC Response:', {
           hasProfile: !!rpcData.profile,
-          hasRoles: !!rpcData.roles,
+          hasRoles: !!(rpcData.roles?.length),
           rolesCount: rpcData.roles?.length || 0,
           isVolunteer: rpcData.isVolunteer,
           hasCompany: !!rpcData.company,
-          companyName: rpcData.company?.company_name
         });
 
         if (!rpcData.profile) {
-          console.warn("⚠️ No profile data in RPC response");
+          logger.warn("⚠️ No profile data in RPC response");
           return null;
         }
 
-        // Determine effective role
-        const effectiveRole = getEffectiveRole(rpcData.roles || []);
+        const incomingRoles: string[] = rpcData.roles || [];
+        const effectiveRole = getEffectiveRole(incomingRoles);
 
-        console.log('✅ Effective role determined:', effectiveRole, 'from roles:', rpcData.roles);
+        // ── DOWNGRADE PROTECTION (post-fetch) ─────────────────────────────
+        if (
+          !forceRefresh &&
+          incomingRoles.length === 0 &&
+          currentProfile?.id === userId &&
+          getRolePriority(currentProfile.role) > getRolePriority("attendee")
+        ) {
+          logger.log('⚠️ No roles returned (no eventId match) — keeping existing role:', currentProfile.role);
+          return currentProfile;
+        }
 
-        // Build UserProfile
+        logger.log('✅ Effective role determined:', effectiveRole, 'from roles:', incomingRoles);
+
         const userProfile: UserProfile = {
           id: userId,
           email: userEmail,
@@ -216,73 +312,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           personal_id: rpcData.profile.personal_id || "",
           score: rpcData.profile.score || 0,
           preferred_language: rpcData.profile.preferred_language || "en",
-
+          nationality: rpcData.nationality || null,
           role: effectiveRole,
-          roles: rpcData.roles || [],
+          roles: incomingRoles,
           isVolunteer: rpcData.isVolunteer || false,
-
           attendee: rpcData.attendee,
           volunteer: rpcData.volunteer,
           employer: rpcData.employer,
           company: rpcData.company,
-
           profile_complete: !!(rpcData.profile.full_name && rpcData.profile.phone && rpcData.profile.personal_id),
           created_at: rpcData.profile.created_at,
-          event_id: eventId
+          event_id: effectiveEventId,        // ← use the resolved id, not the raw param
+          target_faculties: rpcData.company?.faculties || null,
         };
 
-        // Update state
         setProfile(userProfile);
 
-        // Update localStorage cache
-        localStorage.setItem("currentUser", JSON.stringify(userProfile));
-
-        console.log('✅ Profile fetched and cached successfully', forceRefresh ? '(forced refresh)' : '');
+        const shouldCache = incomingRoles.length > 0 || forceRefresh || !currentProfile;
+        if (shouldCache) {
+          localStorage.setItem("currentUser", JSON.stringify({
+            id: userProfile.id,
+            email: userProfile.email,
+            full_name: userProfile.full_name,
+            phone: userProfile.phone,
+            personal_id: userProfile.personal_id,
+            score: userProfile.score,
+            preferred_language: userProfile.preferred_language,
+            nationality: userProfile.nationality,
+            role: userProfile.role,
+            roles: userProfile.roles,
+            isVolunteer: userProfile.isVolunteer,
+            attendee: userProfile.attendee,
+            volunteer: userProfile.volunteer,
+            employer: userProfile.employer,
+            company: userProfile.company,
+            profile_complete: userProfile.profile_complete,
+            created_at: userProfile.created_at,
+            event_id: userProfile.event_id,
+            target_faculties: userProfile.target_faculties,
+          }));
+          logger.log('✅ Profile fetched and cached successfully', forceRefresh ? '(forced refresh)' : '');
+        } else {
+          logger.log('✅ Profile fetched (not cached — no roles returned)');
+        }
 
         return userProfile;
       } catch (err) {
-        console.error("💥 Exception fetching user profile:", err);
-        if (err instanceof Error) {
-          console.error("Error details:", {
-            name: err.name,
-            message: err.message,
-            stack: err.stack
-          });
-        }
+        logger.error("💥 Exception fetching user profile:", err);
         return null;
       }
     },
-    [profile]
+    []
   );
-
-  // Add this to your AuthContext.tsx - Updated refreshProfile function
-
   // ----- Refresh profile -----
   const refreshProfile = useCallback(
     async (eventId?: string, userId?: string, userEmail?: string, forceRefresh: boolean = false): Promise<UserProfile | null> => {
-      // Use provided userId/email or fall back to current user state
       let targetUserId = userId || user?.id;
       let targetUserEmail = userEmail || user?.email || "";
 
-      // If no userId available, try to get it from current session
       if (!targetUserId) {
-        console.warn('⚠️ refreshProfile: No user ID in state, checking session...');
-
+        logger.warn('⚠️ refreshProfile: No user ID in state, checking session...');
         try {
           const session = await getCurrentSession();
           if (session?.user) {
-            console.log('✅ Found user from session:', session.user.id);
             targetUserId = session.user.id;
             targetUserEmail = session.user.email || "";
-
-            // Update the user state for future calls
             setUser(session.user);
           } else {
-            console.error('❌ No session found');
+            logger.error('❌ No session found');
             return null;
           }
         } catch (err) {
-          console.error('❌ Error getting current session:', err);
+          logger.error('❌ Error getting current session:', err);
           return null;
         }
       }
@@ -296,23 +397,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const initializeAuth = async () => {
       try {
-        // Show cached profile immediately if available
         if (initialSession.user) setSessionLoaded(true);
 
         const session = await getCurrentSession();
         if (session?.user) {
           setUser(session.user);
-          // Only fetch if no cached profile
-          if (!profile || profile.id !== session.user.id) {
-            await fetchUserProfile(session.user.id, session.user.email || "");
+          // Only fetch if no cached profile for this user
+          if (!profileRef.current || profileRef.current.id !== session.user.id) {
+            await fetchUserProfile(session.user.id, session.user.email || "", undefined);
           }
         } else {
           setUser(null);
           setProfile(null);
-          localStorage.removeItem("currentUser");
+          clearAllCachedData();
         }
       } catch (err) {
-        console.error("Error initializing auth:", err);
+        logger.error("Error initializing auth:", err);
         setUser(null);
         setProfile(null);
       } finally {
@@ -323,21 +423,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     initializeAuth();
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_IN" && session?.user) {
         setUser(session.user);
+        // On a fresh login, clear any stale cached profile first so we start clean
+        // but don't call fetchUserProfile here without eventId — the login flow
+        // will call refreshProfile with the correct eventId separately.
+        // We only fetch here if there's truly no profile yet.
+        const current = profileRef.current;
+        if (!current || current.id !== session.user.id) {
+          fetchUserProfile(session.user.id, session.user.email || "", undefined).catch(console.error);
+        }
       } else if (event === "SIGNED_OUT") {
         setUser(null);
         setProfile(null);
-        localStorage.removeItem("currentUser");
+        clearAllCachedData();
       } else if (event === "TOKEN_REFRESHED" && session?.user) {
         setUser(session.user);
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [fetchUserProfile]);
+  }, [fetchUserProfile, clearAllCachedData]);
 
   // ----- Role helpers -----
   const hasRole = useCallback(
@@ -365,6 +472,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         super_admin: "/super-ctrl-92k1x",
         admin: "/secure-9821panel",
         team_leader: "/team-leader",
+        tech_support: "/tech-support",
         employer: "/employer",
         volunteer: "/volunteer",
         building: "/building",
@@ -386,14 +494,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signOutUser();
       setUser(null);
       setProfile(null);
-      localStorage.removeItem("currentUser");
+      clearAllCachedData(); // ← always clears localStorage on signout
     } catch (err) {
-      console.error("Error signing out:", err);
+      logger.error("Error signing out:", err);
     } finally {
       setLoading(false);
       setIsLoggingOut(false);
     }
-  }, []);
+  }, [clearAllCachedData]);
 
   // ----- Cleanup session -----
   const cleanupSession = useCallback(async () => {
@@ -401,11 +509,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signOutUser();
       setUser(null);
       setProfile(null);
-      localStorage.removeItem("currentUser");
+      clearAllCachedData();
     } catch (err) {
-      console.error("Error cleaning up session:", err);
+      logger.error("Error cleaning up session:", err);
     }
-  }, []);
+  }, [clearAllCachedData]);
 
   // ----- Handle auth errors -----
   const handleAuthError = useCallback(async (error: any) => {
@@ -416,30 +524,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       error?.status === 403;
 
     if (isSessionExpired) {
-      localStorage.removeItem("currentUser");
+      clearAllCachedData();
       setUser(null);
       setProfile(null);
       await signOutUser().catch(console.error);
       window.location.href = "/login";
     }
-  }, []);
+  }, [clearAllCachedData]);
 
-  // ----- Context value -----
   const contextValue = useMemo(
     () => ({
-      user,
-      profile,
-      loading,
-      sessionLoaded,
+      user, profile, loading, sessionLoaded,
       isAuthenticated: !!user,
-      isLoggingOut,
-      signOut,
-      cleanupSession,
-      hasRole,
-      hasAnyRole,
-      getRoleBasedRedirect,
-      refreshProfile,
-      handleAuthError
+      isLoggingOut, signOut, cleanupSession,
+      hasRole, hasAnyRole, getRoleBasedRedirect,
+      refreshProfile, handleAuthError
     }),
     [user, profile, loading, sessionLoaded, isLoggingOut, signOut, cleanupSession,
       hasRole, hasAnyRole, getRoleBasedRedirect, refreshProfile, handleAuthError]
@@ -448,7 +547,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 };
 
-// ----- Hook -----
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error("useAuth must be used within an AuthProvider");

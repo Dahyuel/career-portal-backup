@@ -5,7 +5,7 @@ import {
   QrCode,
   Camera,
   User
-} from "lucide-react";
+} from '../../components/icons';
 
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { QRScanner } from "../../components/shared/QRScanner";
@@ -15,9 +15,11 @@ import {
   recordAttendeeAttendance,
   searchAttendeesByPersonalId,
   getAttendeeByPersonalIdOptimized,
-  getUserProfileByUUID,  // ✅ ADD THIS
-  supabase,
-  getVolunteerStatsRPC
+  getUserProfileByUUID,
+  getVolunteerStatsRPC,
+  getBuildingNotificationsRPC,
+  getBuildingActivitiesRPC,
+  getMyScanCountRPC
 } from "../../lib/supabase";
 import Toast from "../../components/shared/Toast";
 import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
@@ -25,6 +27,8 @@ import DashboardLoading from "../../components/DashboardLoading";
 import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
 import { RegTeamAttendeeCard } from "../../components/team/RegTeamAttendeeCard";
 import NotificationModal from "../../components/NotificationModal";
+import { logger } from '../../utils/logger';
+import { sanitizeSearchQuery } from '../../utils/sanitize';
 
 // ============================================================================
 // ANIMATION VARIANTS
@@ -69,6 +73,7 @@ interface Attendee {
   profile_complete?: boolean;
   authorized?: boolean;
   attendee_table_id?: string;
+  registration_status?: string; // 'approved' | 'pending' | 'rejected' | etc.
 }
 
 const castToAttendee = (data: any): Attendee => {
@@ -77,7 +82,8 @@ const castToAttendee = (data: any): Attendee => {
     current_status: data.current_status || (data.event_entry ? 'inside' : 'outside'),
     event_entry: data.event_entry || false,
     profile_complete: data.profile_complete !== undefined ? data.profile_complete : true,
-    authorized: data.authorized !== undefined ? data.authorized : true,
+    authorized: data.authorized !== undefined ? data.authorized : data.registration_status === 'approved',
+    registration_status: data.registration_status || 'pending',
     attendee_table_id: data.attendee_table_id
   } as Attendee;
 };
@@ -165,29 +171,16 @@ export const RegTeamDashboard: React.FC = () => {
   const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
   const fetchNotifications = useCallback(async () => {
-    if (!user?.id || !profile?.roles) return;
+    if (!user?.id) return;
     try {
-      const { data: volunteerData } = await supabase
-        .from('volunteers')
-        .select('team_id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-      const teamId = volunteerData?.team_id;
-
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
-        .eq('event_id', EVENT_ID)
-        .contains('target_roles', profile.roles)
-        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
-        .order('publish_at', { ascending: false })
-        .limit(20);
-      if (error) throw error;
+      const { data, error } = await getBuildingNotificationsRPC(EVENT_ID);
+      console.log('[NOTIFICATIONS] data:', data, 'error:', error); // add this
+      if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      console.error('[NOTIFICATIONS] caught error:', error); // and this
     }
-  }, [user?.id, profile?.roles]);
+  }, [user?.id]);
 
   useEffect(() => {
     fetchNotifications();
@@ -216,7 +209,6 @@ export const RegTeamDashboard: React.FC = () => {
 
   // User activities from database
   const [userActivities, setUserActivities] = useState<{
-    id: string;
     activity_type: string;
     description: string;
     points_earned: number;
@@ -239,7 +231,7 @@ export const RegTeamDashboard: React.FC = () => {
         const { data, error } = await searchAttendeesByPersonalId(query);
 
         if (error) {
-          console.error('Search error:', error);
+          logger.error('Search error:', error);
           setSearchResults([]);
           return;
         }
@@ -247,7 +239,7 @@ export const RegTeamDashboard: React.FC = () => {
         setSearchResults(data || []);
         setShowSearchResults(true);
       } catch (error) {
-        console.error('Search exception:', error);
+        logger.error('Search exception:', error);
         setSearchResults([]);
       } finally {
         setSearchLoading(false);
@@ -283,16 +275,16 @@ export const RegTeamDashboard: React.FC = () => {
       // Only show loading on initial load (score 0 acts as proxy for "needs first load" or use a separate flag if needed)
       // We don't want to show full loading screen on background refreshes
       if (userStats.loading && userStats.score === 0 && userStats.rank === 0) {
-        console.log('📊 [DASHBOARD] Fetching volunteer stats (Initial)...');
+        logger.log('📊 [DASHBOARD] Fetching volunteer stats (Initial)...');
       } else {
-        console.log('📊 [DASHBOARD] Refreshing volunteer stats (Background)...');
+        logger.log('📊 [DASHBOARD] Refreshing volunteer stats (Background)...');
       }
 
       try {
         const { data, error } = await getVolunteerStatsRPC(user.id);
 
         if (error || !data) {
-          console.error('❌ [DASHBOARD] Failed to fetch stats:', error);
+          logger.error('❌ [DASHBOARD] Failed to fetch stats:', error);
           setUserStats({
             score: volunteerProfile?.total_points || 0,
             rank: 0,
@@ -302,7 +294,7 @@ export const RegTeamDashboard: React.FC = () => {
           return;
         }
 
-        console.log('✅ [DASHBOARD] Stats loaded:', data);
+        logger.log('✅ [DASHBOARD] Stats loaded:', data);
         setUserStats({
           score: data.total_points,
           rank: data.team_rank,
@@ -310,7 +302,7 @@ export const RegTeamDashboard: React.FC = () => {
           loading: false
         });
       } catch (error) {
-        console.error('💥 [DASHBOARD] Exception fetching stats:', error);
+        logger.error('💥 [DASHBOARD] Exception fetching stats:', error);
         setUserStats({
           score: volunteerProfile?.total_points || 0,
           rank: 0,
@@ -327,22 +319,17 @@ export const RegTeamDashboard: React.FC = () => {
   // ============================================================================
   useEffect(() => {
     const fetchActivities = async () => {
-      if (!user?.id) return;
+      if (!user?.id || profile?.role === 'attendee') return;
       try {
-        const { data: activities, error: activitiesError } = await supabase
-          .from('user_activities')
-          .select('id, activity_type, description, points_earned, activity_timestamp')
-          .eq('user_id', user.id)
-          .order('activity_timestamp', { ascending: false })
-          .limit(3);
+        const { data, error } = await getBuildingActivitiesRPC(3);
 
-        if (activitiesError) {
-          console.error('Error fetching activities:', activitiesError);
+        if (error) {
+          logger.error('Error fetching activities:', error);
         } else {
-          setUserActivities(activities || []);
+          setUserActivities((data as any[]) || []);
         }
       } catch (error) {
-        console.error('Error fetching activities:', error);
+        logger.error('Error fetching activities:', error);
       }
     };
     fetchActivities();
@@ -353,18 +340,15 @@ export const RegTeamDashboard: React.FC = () => {
     if (user?.id) {
       const fetchCheckInStats = async () => {
         try {
-          const { count, error } = await supabase
-            .from('attendee_attendance')
-            .select('*', { count: 'exact', head: true })
-            .or(`checked_in_by.eq.${user.id},checked_out_by.eq.${user.id}`);
+          const { count, error } = await getMyScanCountRPC();
 
           if (error) {
-            console.error("Error loading check-in stats:", error);
+            logger.error("Error loading check-in stats:", error);
           } else {
-            setMyScanCount(count || 0);
+            setMyScanCount(count);
           }
         } catch (err) {
-          console.error("Error loading check-in stats", err);
+          logger.error("Error loading check-in stats", err);
         }
       };
       fetchCheckInStats();
@@ -398,6 +382,15 @@ export const RegTeamDashboard: React.FC = () => {
     if (attendee.role !== 'attendee') {
       return { isValid: false, error: 'Only attendees can be processed through this system' };
     }
+    // Registration status check — must be 'approved' to enter
+    const regStatus = attendee.registration_status || 'pending';
+    if (regStatus !== 'approved') {
+      const label = regStatus.charAt(0).toUpperCase() + regStatus.slice(1);
+      return {
+        isValid: false,
+        error: `Entry denied: attendee registration status is "${label}". Only approved attendees may enter.`
+      };
+    }
     const profileComplete = attendee.profile_complete === true;
     if (!profileComplete) {
       return { isValid: false, error: 'This attendee has not completed their profile and cannot enter the event' };
@@ -421,7 +414,7 @@ export const RegTeamDashboard: React.FC = () => {
     try {
       setSearchLoading(true);
 
-      const { data, error } = await getAttendeeByPersonalIdOptimized(searchTerm.trim());
+      const { data, error } = await getAttendeeByPersonalIdOptimized(sanitizeSearchQuery(searchTerm.trim()));
 
       if (error || !data) {
         showToast('Personal ID not found', 'error');
@@ -440,7 +433,7 @@ export const RegTeamDashboard: React.FC = () => {
       setShowSearchResults(false);
 
     } catch (error) {
-      console.error("Search exception:", error);
+      logger.error("Search exception:", error);
       showToast('Search failed. Please try again.', 'error');
     } finally {
       setSearchLoading(false);
@@ -455,52 +448,51 @@ export const RegTeamDashboard: React.FC = () => {
   // ============================================================================
   const handleSelectSearchResult = async (attendee: Attendee) => {
     try {
-      // 1. Show card immediately with partial data + loading state
-      setSelectedAttendee(attendee); // Use the partial attendee from search
-      setShowAttendeeCard(true);
-      setCardLoading(true); // Start loading
-
-      // 2. Clear search UI
+      // Clear search UI immediately
       setSearchTerm("");
       setShowSearchResults(false);
       setSearchResults([]);
+      setSearchLoading(true);
 
-      // 3. Fetch full data
+      // Fetch full data (includes registration_status from RPC)
       const { data, error } = await getUserProfileByUUID(attendee.id);
 
       if (error || !data) {
         showToast('Failed to load attendee details', 'error');
-        // Close card if fetch fails completely
-        setShowAttendeeCard(false);
         return;
       }
 
       // Validate role
       if (data.role !== 'attendee') {
         showToast(`Only attendees can be checked in. This user is a ${data.role || 'unknown role'}`, 'error');
-        setShowAttendeeCard(false);
         return;
       }
 
       const fullAttendee = castToAttendee(data);
 
+      // Validate (registration_status, profile_complete, authorized)
       const validation = validateAttendee(fullAttendee);
       if (!validation.isValid) {
-        showToast(validation.error || 'Validation failed', 'error');
-        setShowAttendeeCard(false);
+        // Show card anyway so the volunteer sees the status banner,
+        // but the Enter button will be disabled by the card itself
+        setSelectedAttendee(fullAttendee);
+        setShowAttendeeCard(true);
         return;
       }
 
-      // 4. Update with full data and stop loading
+      // Show card only after successful validation
       setSelectedAttendee(fullAttendee);
+      setShowAttendeeCard(true);
     } catch (error) {
-      console.error("Error selecting attendee:", error);
+      logger.error("Error selecting attendee:", error);
       showToast('Failed to select attendee', 'error');
-      setShowAttendeeCard(false);
     } finally {
+      setSearchLoading(false);
       setCardLoading(false);
     }
   };
+
+
 
   // ============================================================================
   // OPTIMIZED: QR Scan Handler
@@ -546,11 +538,19 @@ export const RegTeamDashboard: React.FC = () => {
       }
 
       const attendeeData = castToAttendee(data);
+
+      // Check registration_status before showing card
+      const validation = validateAttendee(attendeeData);
+      if (!validation.isValid) {
+        showToast(validation.error || 'Validation failed', 'error');
+        return;
+      }
+
       setSelectedAttendee(attendeeData);
       setShowAttendeeCard(true);
 
     } catch (error) {
-      console.error("QR scan error:", error);
+      logger.error("QR scan error:", error);
       showToast('Failed to process QR code', 'error');
     }
   };
@@ -614,7 +614,7 @@ export const RegTeamDashboard: React.FC = () => {
       }, 2000);
 
     } catch (error) {
-      console.error("Attendance action error:", error);
+      logger.error("Attendance action error:", error);
       showToast(`Failed to process ${action}`, 'error');
     } finally {
       setActionLoading(false);
@@ -732,8 +732,8 @@ export const RegTeamDashboard: React.FC = () => {
                 ) : (
                   <div className="space-y-8 relative">
                     <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-700"></div>
-                    {userActivities.map((activity) => (
-                      <div key={activity.id} className="relative flex gap-6 items-start group">
+                    {userActivities.map((activity, index) => (
+                      <div key={`${activity.activity_timestamp}-${index}`} className="relative flex gap-6 items-start group">
                         <div className="relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-500/10 border-4 border-white dark:border-slate-900">
                           <span className="material-symbols-outlined text-primary text-xl">
                             {getActivityIcon(activity.activity_type)}
@@ -898,44 +898,55 @@ export const RegTeamDashboard: React.FC = () => {
               initial={{ height: 0, opacity: 0, marginBottom: 0 }}
               animate={{ height: 'auto', opacity: 1, marginBottom: 16 }}
               exit={{ height: 0, opacity: 0, marginBottom: 0 }}
-              className="md:hidden relative overflow-hidden"
+              className="md:hidden overflow-hidden"
             >
-              {searchLoading ? (
-                <div className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 border-2 border-slate-200 border-t-primary rounded-full animate-spin z-10" />
-              ) : (
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 z-10" />
-              )}
-              <input
-                ref={mobileInputRef}
-                id="mobile-search-input"
-                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
-                placeholder="Search by Personal ID"
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearchByPersonalId()}
-                onBlur={handleSearchInputBlur}
-                onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
-              />
+              <div className="relative flex items-center gap-2">
+                {searchLoading ? (
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 border-2 border-slate-200 border-t-primary rounded-full animate-spin z-10" />
+                ) : (
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5 z-10" />
+                )}
+                <input
+                  ref={mobileInputRef}
+                  id="mobile-search-input"
+                  className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl py-4 pl-12 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
+                  placeholder="Search by Personal ID"
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSearchByPersonalId()}
+                  onBlur={handleSearchInputBlur}
+                  onFocus={() => searchResults.length > 0 && setShowSearchResults(true)}
+                />
+                <button
+                  onClick={handleSearchByPersonalId}
+                  disabled={searchLoading}
+                  className="shrink-0 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white p-4 rounded-2xl transition-colors shadow-sm active:scale-95"
+                >
+                  <Search className="w-5 h-5" />
+                </button>
+              </div>
               {/* Mobile Search Results Dropdown */}
               {showSearchResults && (searchResults.length > 0 || searchLoading) && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-                  {searchLoading && (
-                    <div className="p-4 text-center text-slate-500 dark:text-slate-400">
-                      <div className="w-5 h-5 border-2 border-slate-200 border-t-red-600 rounded-full animate-spin mx-auto mb-2" />
-                      Searching...
-                    </div>
-                  )}
-                  {!searchLoading && searchResults.map((attendee) => (
-                    <button
-                      key={attendee.id}
-                      onClick={() => handleSelectSearchResult(attendee)}
-                      className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-b-0"
-                    >
-                      <div className="font-medium text-gray-900 dark:text-white">{attendee.first_name} {attendee.last_name}</div>
-                      <div className="text-xs text-gray-500 dark:text-slate-400">{attendee.personal_id}</div>
-                    </button>
-                  ))}
+                <div className="relative mt-1">
+                  <div className="absolute top-0 left-0 right-0 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                    {searchLoading && (
+                      <div className="p-4 text-center text-slate-500 dark:text-slate-400">
+                        <div className="w-5 h-5 border-2 border-slate-200 border-t-red-600 rounded-full animate-spin mx-auto mb-2" />
+                        Searching...
+                      </div>
+                    )}
+                    {!searchLoading && searchResults.map((attendee) => (
+                      <button
+                        key={attendee.id}
+                        onClick={() => handleSelectSearchResult(attendee)}
+                        className="w-full px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-slate-800 border-b border-gray-100 dark:border-slate-800 last:border-b-0"
+                      >
+                        <div className="font-medium text-gray-900 dark:text-white">{attendee.first_name} {attendee.last_name}</div>
+                        <div className="text-xs text-gray-500 dark:text-slate-400">{attendee.personal_id}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </motion.div>
@@ -993,7 +1004,7 @@ export const RegTeamDashboard: React.FC = () => {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="Registration Team"
+      title="ASU Career Expo"
       onProfileClick={() => setShowProfile(true)}
       notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}

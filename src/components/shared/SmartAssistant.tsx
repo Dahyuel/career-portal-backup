@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Bot, User, Loader2, Minimize2 } from 'lucide-react';
+import { X, Send, Bot, User, Loader2, Minimize2 } from '../icons';
 import { useTheme } from '../../contexts/ThemeContext';
 
 interface Message {
@@ -113,7 +113,7 @@ export const SmartAssistant: React.FC = () => {
     };
 
     return (
-        <div className="fixed bottom-28 right-4 lg:bottom-6 lg:right-6 z-[60]">
+        <div className="fixed bottom-[100px] right-4 lg:bottom-6 lg:right-6 z-[60]">
             {/* Chat Window */}
             {isOpen && !isMinimized && (
                 <div className={`mb-4 w-80 sm:w-96 rounded-2xl shadow-2xl overflow-hidden transition-all duration-300 ${isDark ? 'bg-gray-800 border border-gray-700' : 'bg-white border border-gray-200'

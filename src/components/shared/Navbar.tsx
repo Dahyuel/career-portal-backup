@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sun, Moon, Menu, X, ArrowRight } from 'lucide-react';
+import { Sun, Moon, Menu, X, ArrowRight } from '../icons';
 import { useTheme } from '../../contexts/ThemeContext';
 
 export const Navbar: React.FC = () => {
@@ -40,7 +40,7 @@ export const Navbar: React.FC = () => {
                     <div className="flex items-center space-x-3 md:space-x-4">
                         {/* Get Started Button (Desktop only) */}
                         <button
-                            onClick={() => navigate('/login')}
+                            onClick={() => window.open('https://ems.careerexpo.asu.eg', '_self')}
                             className="hidden md:inline-flex group relative items-center justify-center px-6 py-2 bg-gradient-to-r from-red-500 to-red-600 rounded-full shadow-md hover:shadow-red-500/30 hover:shadow-lg transition-all duration-300 transform hover:scale-105 overflow-hidden border border-red-400"
                         >
                             <span className="absolute inset-0 bg-gradient-to-r from-red-600 to-red-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></span>
@@ -122,7 +122,7 @@ export const Navbar: React.FC = () => {
                             {/* Mobile Login Button */}
                             <button
                                 onClick={() => {
-                                    navigate('/login');
+                                    window.open('https://ems.careerexpo.asu.eg', '_self');
                                     setIsMenuOpen(false);
                                 }}
                                 className="mt-2 w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl shadow-md hover:shadow-lg transition-all active:scale-95"

@@ -10,17 +10,21 @@ import {
   X,
   Phone,
   Mail,
-} from "lucide-react";
+} from '../../components/icons';
 import SharedNavigation, { NavItem } from "../../components/shared/SharedNavigation";
 import { QRScanner } from "../../components/shared/QRScanner";
 
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import {
-  supabase,
   getUserProfileByUUID,
   getVolunteerStatsRPC,
-  searchSessionBookings
+  searchSessionBookings,
+  getBuildingNotificationsRPC,
+  getBuildingActivitiesRPC,
+  getBuildingSessionsRPC,
+  getSessionBookingForCheckinRPC,
+  buildingSessionCheckinRPC
 } from "../../lib/supabase";
 import Toast from "../../components/shared/Toast";
 import SettingsModal from "../../components/shared/SettingsModal";
@@ -28,6 +32,7 @@ import VolunteerProfileModal from "../../components/volunteer/VolunteerProfileMo
 import DashboardLoading from "../../components/DashboardLoading";
 import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
 import NotificationModal from "../../components/NotificationModal";
+import { logger } from '../../utils/logger';
 
 // --- Animation Variants (matching EmployerDashboard / tabsanimation.md) ---
 const containerVariants: Variants = {
@@ -161,25 +166,11 @@ export const BuildTeamDashboard: React.FC = () => {
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id || !profile?.roles) return;
     try {
-      const { data: volunteerData } = await supabase
-        .from('volunteers')
-        .select('team_id')
-        .eq('user_id', profile.id)
-        .maybeSingle();
-      const teamId = volunteerData?.team_id;
-
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('id, title, content, publish_at, target_roles, team_id, announcement_type')
-        .eq('event_id', EVENT_ID)
-        .contains('target_roles', profile.roles)
-        .or(teamId ? `team_id.is.null,team_id.eq.${teamId}` : 'team_id.is.null')
-        .order('publish_at', { ascending: false })
-        .limit(20);
-      if (error) throw error;
+      const { data, error } = await getBuildingNotificationsRPC(EVENT_ID);
+      if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
-      console.error('Error fetching notifications:', error);
+      logger.error('Error fetching notifications:', error);
     }
   }, [profile?.id, profile?.roles]);
 
@@ -189,7 +180,6 @@ export const BuildTeamDashboard: React.FC = () => {
 
   // User activities from database
   const [userActivities, setUserActivities] = useState<{
-    id: string;
     activity_type: string;
     description: string;
     points_earned: number;
@@ -211,24 +201,19 @@ export const BuildTeamDashboard: React.FC = () => {
 
       if (!userId) return;
 
-      console.log('📊 [DASHBOARD] Fetching stats for:', userId);
+      logger.log('📊 [DASHBOARD] Fetching stats for:', userId);
       setUserStats(prev => ({ ...prev, loading: true }));
 
       try {
         // Parallel fetch: Stats + Activities
         const [statsResult, activitiesResult] = await Promise.all([
           getVolunteerStatsRPC(userId),
-          supabase
-            .from('user_activities')
-            .select('id, activity_type, description, points_earned, activity_timestamp')
-            .eq('user_id', userId)
-            .order('activity_timestamp', { ascending: false })
-            .limit(3)
+          profile?.role !== 'attendee' ? getBuildingActivitiesRPC(3) : Promise.resolve({ data: [], error: null })
         ]);
 
         // Process Stats
         if (statsResult.error || !statsResult.data) {
-          console.error('❌ [DASHBOARD] Failed to fetch stats:', statsResult.error);
+          logger.error('❌ [DASHBOARD] Failed to fetch stats:', statsResult.error);
         } else {
           setUserStats(prev => ({
             ...prev,
@@ -240,13 +225,13 @@ export const BuildTeamDashboard: React.FC = () => {
 
         // Process Activities
         if (activitiesResult.error) {
-          console.error('Error fetching activities:', activitiesResult.error);
+          logger.error('Error fetching activities:', activitiesResult.error);
         } else {
-          setUserActivities(activitiesResult.data || []);
+          setUserActivities((activitiesResult.data as any[]) || []);
         }
 
       } catch (error) {
-        console.error('💥 [DASHBOARD] Exception fetching data:', error);
+        logger.error('💥 [DASHBOARD] Exception fetching data:', error);
       } finally {
         setUserStats(prev => ({ ...prev, loading: false }));
       }
@@ -259,19 +244,16 @@ export const BuildTeamDashboard: React.FC = () => {
   const fetchSessions = useCallback(async () => {
     try {
       setIsLoadingSessions(true);
-      const { data, error } = await supabase
-        .from('sessions')
-        .select('id, title, description, speaker_id, start_time, end_time, room_name, room_capacity, max_attendees, current_bookings, session_type, status, created_at')
-        .order('start_time', { ascending: true });
+      const { data, error } = await getBuildingSessionsRPC();
 
       if (error) {
-        console.error('Error fetching sessions:', error);
+        logger.error('Error fetching sessions:', error);
         return;
       }
 
-      setSessions(data || []);
+      setSessions((data as any[]) || []);
     } catch (err) {
-      console.error('Error fetching sessions:', err);
+      logger.error('Error fetching sessions:', err);
     } finally {
       setIsLoadingSessions(false);
     }
@@ -300,17 +282,10 @@ export const BuildTeamDashboard: React.FC = () => {
 
     setIsSessionProcessing(true);
     try {
-      const { error } = await supabase
-        .from('session_bookings')
-        .update({
-          checked_in: true,
-          checked_in_at: new Date().toISOString(),
-          checked_in_by: profile?.id
-        })
-        .eq('id', sessionBooking.id);
+      const { error } = await buildingSessionCheckinRPC(sessionBooking.id);
 
       if (error) {
-        throw error;
+        throw new Error(error.message);
       }
 
       showToast(`${sessionAttendee.full_name} checked in successfully!`, 'success');
@@ -338,7 +313,7 @@ export const BuildTeamDashboard: React.FC = () => {
         refreshProfile(profile.event_id, profile.id, undefined, true);
       }
     } catch (err) {
-      console.error('Check-in error:', err);
+      logger.error('Check-in error:', err);
       showToast('Failed to check in attendee', 'error');
     } finally {
       setIsSessionProcessing(false);
@@ -364,14 +339,11 @@ export const BuildTeamDashboard: React.FC = () => {
         return;
       }
 
-      // Check for booking - Uses composite index: session_bookings_session_id_attendee_id_key
-      const { data: booking, error } = await supabase
-        .from('session_bookings')
-        .select('*')
-        .eq('session_id', selectedSessionForScan.id)
-        .eq('attendee_id', uuid)
-        .eq('booking_status', 'confirmed')
-        .single();
+      // Check for booking via RPC
+      const { data: booking, error } = await getSessionBookingForCheckinRPC(
+        selectedSessionForScan.id,
+        uuid
+      );
 
       if (error || !booking) {
         showToast('No confirmed booking found for this session', 'error');
@@ -397,7 +369,7 @@ export const BuildTeamDashboard: React.FC = () => {
       setShowSessionCard(true);
 
     } catch (err) {
-      console.error('Session scan error:', err);
+      logger.error('Session scan error:', err);
       showToast('Error verifying booking', 'error');
     }
   };
@@ -442,7 +414,7 @@ export const BuildTeamDashboard: React.FC = () => {
       const { data, error } = await searchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim());
 
       if (error) {
-        console.error('Error searching:', error);
+        logger.error('Error searching:', error);
         showToast('Search failed. Please try again.', 'error');
         return;
       }
@@ -455,7 +427,7 @@ export const BuildTeamDashboard: React.FC = () => {
 
       setSessionSearchResults(data);
     } catch (err) {
-      console.error('Search error:', err);
+      logger.error('Search error:', err);
       showToast('Search failed', 'error');
     } finally {
       setIsSessionSearching(false);
@@ -578,8 +550,8 @@ export const BuildTeamDashboard: React.FC = () => {
               ) : (
                 <div className="space-y-8 relative">
                   <div className="absolute left-[1.35rem] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-700"></div>
-                  {userActivities.map((activity) => (
-                    <div key={activity.id} className="relative flex gap-6 items-start group">
+                  {userActivities.map((activity, index) => (
+                    <div key={`${activity.activity_timestamp}-${index}`} className="relative flex gap-6 items-start group">
                       <div className="relative z-10 w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-500/10 border-4 border-white dark:border-slate-900">
                         <span className="material-symbols-outlined text-primary text-xl">
                           {/* Simple icon mapping */}
@@ -734,7 +706,7 @@ export const BuildTeamDashboard: React.FC = () => {
 
                 <div className="mt-8 flex items-center justify-between pt-6 border-t border-gray-50 dark:border-slate-800">
                   <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">{session.current_bookings || 0} checked-in</span>
+                    <span className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider">{session.current_bookings || 0} booking</span>
                   </div>
                   <button
                     onClick={(e) => {
@@ -760,7 +732,7 @@ export const BuildTeamDashboard: React.FC = () => {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="Build Team"
+      title="ASU Career Expo"
       onProfileClick={() => setShowProfile(true)}
       notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}
@@ -951,26 +923,34 @@ export const BuildTeamDashboard: React.FC = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3 }}
-                  className="relative mb-6"
+                  className="relative mb-6 flex items-center gap-2"
                 >
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                  <input
-                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-red-600 shadow-sm dark:text-white"
-                    placeholder="Enter Personal ID"
-                    value={sessionSearchTerm}
-                    onChange={(e) => setSessionSearchTerm(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSessionSearch()}
-                    autoFocus
-                  />
-                  {isSessionSearching && (
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-red-600 shadow-sm dark:text-white"
+                      placeholder="Enter Personal ID"
+                      value={sessionSearchTerm}
+                      onChange={(e) => setSessionSearchTerm(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSessionSearch()}
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    onClick={handleSessionSearch}
+                    disabled={isSessionSearching}
+                    className="shrink-0 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white p-4 rounded-2xl transition-colors shadow-sm active:scale-95"
+                  >
+                    {isSessionSearching ? (
                       <motion.div
                         animate={{ rotate: 360 }}
                         transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                        className="rounded-full h-5 w-5 border-b-2 border-red-600"
+                        className="rounded-full h-5 w-5 border-b-2 border-white"
                       />
-                    </div>
-                  )}
+                    ) : (
+                      <Search className="w-5 h-5" />
+                    )}
+                  </button>
                 </motion.div>
 
                 <div className="space-y-2 max-h-60 overflow-y-auto">

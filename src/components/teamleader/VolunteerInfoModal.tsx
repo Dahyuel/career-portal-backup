@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AttendanceActionModal from './AttendanceActionModal';
 import BonusActionModal from './BonusActionModal';
+import UserActivityModal from './UserActivityModal';
 
 interface VolunteerInfo {
     user_id: string;
@@ -20,7 +21,6 @@ interface VolunteerInfoModalProps {
     isOpen: boolean;
     onClose: () => void;
     volunteer: VolunteerInfo | null;
-    teamLeaderId: string;
     onSuccess: () => void;
     loading?: boolean; // New loading prop
 }
@@ -29,12 +29,12 @@ const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
     isOpen,
     onClose,
     volunteer,
-    teamLeaderId,
     onSuccess,
     loading = false
 }) => {
     const [showAttendanceModal, setShowAttendanceModal] = useState(false);
     const [showBonusModal, setShowBonusModal] = useState(false);
+    const [showActivityModal, setShowActivityModal] = useState(false);
 
     if (!volunteer && !loading) return null;
 
@@ -250,6 +250,20 @@ const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
                                                 Bonus
                                             </motion.button>
                                         </div>
+
+                                        {/* Show User Activity button - full width */}
+                                        <motion.button
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ delay: 1.1 }}
+                                            whileHover={{ scale: 1.02 }}
+                                            whileTap={{ scale: 0.98 }}
+                                            onClick={() => setShowActivityModal(true)}
+                                            className="w-full mt-3 px-4 sm:px-6 py-3 sm:py-4 bg-slate-700 hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2 text-sm sm:text-base"
+                                        >
+                                            <span className="material-symbols-outlined text-lg sm:text-xl">history</span>
+                                            Show User Activity
+                                        </motion.button>
                                     </>
                                 ) : null}
                             </div>
@@ -263,7 +277,6 @@ const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
                                 isOpen={showAttendanceModal}
                                 onClose={() => setShowAttendanceModal(false)}
                                 volunteer={volunteer}
-                                teamLeaderId={teamLeaderId}
                                 onSuccess={() => {
                                     setShowAttendanceModal(false);
                                     onSuccess();
@@ -278,6 +291,13 @@ const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
                                     setShowBonusModal(false);
                                     onSuccess();
                                 }}
+                            />
+
+                            <UserActivityModal
+                                isOpen={showActivityModal}
+                                onClose={() => setShowActivityModal(false)}
+                                targetUserId={volunteer.user_id}
+                                volunteerName={volunteer.full_name}
                             />
                         </>
                     )}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
+import { logger } from '../../utils/logger';
 
 interface JobPosition {
     id?: string;
@@ -72,32 +73,26 @@ const AddEditJobModal: React.FC<AddEditJobModalProps> = ({ job, companyId, emplo
         }
 
         try {
-            const jobData = {
-                ...formData,
-                company_id: companyId,
-                employer_id: employerId,
-                event_id: eventId,
-            };
+            const { error } = await supabase.rpc('employer_upsert_job', {
+                _job_id: job?.id || null,
+                _title: formData.title || '',
+                _description: formData.description || '',
+                _location: formData.location || '',
+                _job_type: formData.job_type || 'full-time',
+                _employment_mode: formData.employment_mode || 'on-site',
+                _experience_level: formData.experience_level || 'entry',
+                _required_skills: formData.required_skills || '',
+                _is_active: formData.is_active ?? true,
+                _company_id: companyId,
+                _event_id: eventId,
+            });
 
-            if (job?.id) {
-                // Update
-                const { error } = await supabase
-                    .from('job_positions')
-                    .update(jobData)
-                    .eq('id', job.id);
-                if (error) throw error;
-            } else {
-                // Create
-                const { error } = await supabase
-                    .from('job_positions')
-                    .insert([jobData]);
-                if (error) throw error;
-            }
+            if (error) throw error;
 
             onSave();
             onClose();
         } catch (err: any) {
-            console.error('Error saving job:', err);
+            logger.error('Error saving job:', err);
             setError(err.message || 'Failed to save job');
         } finally {
             setLoading(false);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { User, X, CheckCircle, LogOut, QrCode } from 'lucide-react';
+import { User, X, CheckCircle, LogOut, QrCode } from '../icons';
 
 interface Attendee {
     id: string;
@@ -18,6 +18,7 @@ interface Attendee {
     event_entry?: boolean;
     profile_complete?: boolean;
     authorized?: boolean;
+    registration_status?: string; // e.g. 'approved', 'pending', 'rejected'
 }
 
 interface Props {
@@ -164,43 +165,64 @@ export const RegTeamAttendeeCard: React.FC<Props> = ({ attendee, onClose, onActi
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.4 }}
-                            className="grid grid-cols-2 gap-4"
                         >
-                            <button
-                                onClick={() => onAction('enter')}
-                                disabled={actionLoading || attendee.current_status === 'inside'}
-                                className={`flex items-center justify-center py-4 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${attendee.current_status === 'inside'
-                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
-                                    : 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/30'
-                                    }`}
-                            >
-                                {actionLoading ? (
-                                    <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                ) : (
-                                    <>
-                                        <CheckCircle className="w-5 h-5 mr-2" />
-                                        Check In
-                                    </>
-                                )}
-                            </button>
+                            {/* Registration-not-approved banner */}
+                            {attendee.registration_status && attendee.registration_status !== 'approved' && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -8 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="flex items-start gap-3 p-4 mb-4 rounded-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800"
+                                >
+                                    <span className="material-symbols-outlined text-red-500 text-xl flex-shrink-0 mt-0.5">block</span>
+                                    <div>
+                                        <p className="text-sm font-bold text-red-700 dark:text-red-400">Entry Not Allowed</p>
+                                        <p className="text-xs text-red-600 dark:text-red-500 mt-0.5">
+                                            This attendee was not approved to enter the event.
+                                            Registration status: <span className="font-semibold capitalize">{attendee.registration_status}</span>.
+                                        </p>
+                                    </div>
+                                </motion.div>
+                            )}
 
-                            <button
-                                onClick={() => onAction('exit')}
-                                disabled={actionLoading || attendee.current_status !== 'inside'}
-                                className={`flex items-center justify-center py-4 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${attendee.current_status !== 'inside'
-                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
-                                    : 'bg-red-600 text-white hover:bg-red-700 shadow-red-600/30'
-                                    }`}
-                            >
-                                {actionLoading ? (
-                                    <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                                ) : (
-                                    <>
-                                        <LogOut className="w-5 h-5 mr-2" />
-                                        Check Out
-                                    </>
-                                )}
-                            </button>
+                            <div className="grid grid-cols-2 gap-4">
+                                <button
+                                    onClick={() => onAction('enter')}
+                                    disabled={actionLoading || attendee.current_status === 'inside' || (!!attendee.registration_status && attendee.registration_status !== 'approved')}
+                                    className={`flex items-center justify-center py-4 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${attendee.registration_status && attendee.registration_status !== 'approved'
+                                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
+                                            : attendee.current_status === 'inside'
+                                                ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
+                                                : 'bg-green-600 text-white hover:bg-green-700 shadow-green-600/30'
+                                        }`}
+                                >
+                                    {actionLoading ? (
+                                        <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                        <>
+                                            <CheckCircle className="w-5 h-5 mr-2" />
+                                            Check In
+                                        </>
+                                    )}
+                                </button>
+
+                                <button
+                                    onClick={() => onAction('exit')}
+                                    disabled={actionLoading || attendee.current_status !== 'inside'}
+                                    className={`flex items-center justify-center py-4 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-95 ${attendee.current_status !== 'inside'
+                                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
+                                        : 'bg-red-600 text-white hover:bg-red-700 shadow-red-600/30'
+                                        }`}
+                                >
+                                    {actionLoading ? (
+                                        <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                        <>
+                                            <LogOut className="w-5 h-5 mr-2" />
+                                            Check Out
+                                        </>
+                                    )}
+                                </button>
+                            </div>
                         </motion.div>
                     </>
                 )}

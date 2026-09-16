@@ -7,6 +7,7 @@ import { QRScanner } from '../../components/shared/QRScanner';
 import VolunteerInfoModal from '../../components/teamleader/VolunteerInfoModal';
 import Toast from '../../components/shared/Toast';
 import DashboardLoading from '../../components/DashboardLoading';
+import { logger } from '../../utils/logger';
 
 // Animation variants
 const containerVariants = {
@@ -35,7 +36,7 @@ type TabKey = 'home' | 'team' | 'announcements';
 interface TeamInfo {
   team_id: string;
   team_name: string;
-  team_leader_id: string;
+  team_leader_ids: string[];
   event_id: string;
 }
 
@@ -88,64 +89,36 @@ export const TeamLeaderDashboard: React.FC = () => {
       try {
         setLoading(true);
 
-        // Get current user
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          console.error('No user found');
+        // Single RPC call to get team info, leader name, and member count
+        const { data, error } = await supabase.rpc('get_team_leader_data');
+
+        if (error || !data) {
+          logger.error('Error fetching team leader data:', error);
           return;
         }
 
-        // Fetch volunteer record with team info in one query
-        const { data: volunteerWithTeam, error: volError } = await supabase
-          .from('volunteers')
-          .select(`
-        team_id,
-        volunteer_teams!inner (
-          id,
-          team_name,
-          team_leader_id,
-          event_id
-        )
-      `)
-          .eq('user_id', user.id)
-          .single();
-
-        if (volError || !volunteerWithTeam?.team_id) {
-          console.error('No team assigned to leader:', volError);
-          return;
-        }
-
-        const teamDataArr = volunteerWithTeam.volunteer_teams as any;
-        const teamRecord = Array.isArray(teamDataArr) ? teamDataArr[0] : teamDataArr;
-
-        // Get user profile for name
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('full_name')
-          .eq('id', user.id)
-          .single();
-
-        if (profile) {
-          const firstName = profile.full_name.split(' ')[0];
+        // Set leader name
+        if (data.leader_name) {
+          const firstName = data.leader_name.split(' ')[0];
           setLeaderName(firstName);
         }
 
         // Set team info
         setTeamInfo({
-          team_id: teamRecord.id,
-          team_name: teamRecord.team_name,
-          team_leader_id: teamRecord.team_leader_id,
-          event_id: teamRecord.event_id
+          team_id: data.team_id,
+          team_name: data.team_name,
+          team_leader_ids: data.team_leader_ids || [],
+          event_id: data.event_id
         });
 
-        // Fetch team data in parallel
-        await Promise.all([
-          fetchInitialTeamStats(teamRecord.id, teamRecord.team_leader_id),
-          fetchEventEntriesCount(teamRecord.id, teamRecord.event_id)
-        ]);
+        // Set members count from RPC response
+        setTeamMembersCount(data.members_count || 0);
+
+        // Fetch event entries count
+        await fetchEventEntriesCount(data.event_id);
 
       } catch (error) {
-        console.error('Error fetching team leader data:', error);
+        logger.error('Error fetching team leader data:', error);
       } finally {
         setLoading(false);
       }
@@ -154,76 +127,41 @@ export const TeamLeaderDashboard: React.FC = () => {
     fetchTeamLeaderData();
   }, []);
 
-  const fetchInitialTeamStats = async (teamId: string, teamLeaderId?: string) => {
-    try {
-      const { count, error } = await supabase
-        .from('volunteers')
-        .select('*', { count: 'exact', head: true })
-        .eq('team_id', teamId)
-        .neq('user_id', teamLeaderId || '');
+  // fetchInitialTeamStats is now handled by get_team_leader_data RPC
 
-      if (error) throw error;
-      setTeamMembersCount(count || 0);
-    } catch (error) {
-      console.error('Error fetching team stats:', error);
-    }
-  };
-
-  const fetchTeamMembers = async (teamId: string, teamLeaderId?: string) => {
+  const fetchTeamMembers = async (teamId: string) => {
     if (isTeamListLoaded) return;
 
     setLoadingTeamList(true);
     try {
-      // This query will use idx_volunteers_team_id_name index
-      let query = supabase
-        .from('volunteers')
-        .select('user_id, volunteer_id, full_name, total_points, hours_volunteered')
-        .eq('team_id', teamId);
-
-      // Exclude the team leader from the list
-      if (teamLeaderId) {
-        query = query.neq('user_id', teamLeaderId);
-      }
-
-      const { data, error } = await query.order('full_name', { ascending: true });
+      const { data, error } = await supabase.rpc('get_team_members_list', {
+        p_team_id: teamId
+      });
 
       if (error) throw error;
 
-      setTeamMembers(data || []);
-      setFilteredMembers(data || []);
-      setTeamMembersCount(data?.length || 0);
+      const members = data || [];
+      setTeamMembers(members);
+      setFilteredMembers(members);
+      setTeamMembersCount(members.length);
       setIsTeamListLoaded(true);
     } catch (error) {
-      console.error('Error fetching team members:', error);
+      logger.error('Error fetching team members:', error);
     } finally {
       setLoadingTeamList(false);
     }
   };
 
-  const fetchEventEntriesCount = async (teamId: string, eventId: string) => {
+  const fetchEventEntriesCount = async (eventId: string) => {
     try {
-      // Get today's date range (start and end of day)
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStart = today.toISOString();
-
-      const tomorrow = new Date(today);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const todayEnd = tomorrow.toISOString();
-
-      const { data, error, count } = await supabase
-        .from('attendee_attendance')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_id', eventId)
-        .gte('check_in_time', todayStart)
-        .lt('check_in_time', todayEnd)
-        .not('check_in_time', 'is', null)
-        .is('check_out_time', null);
+      const { data, error } = await supabase.rpc('get_event_entries_count', {
+        p_event_id: eventId
+      });
 
       if (error) throw error;
-      setEventEntriesCount(count || 0);
+      setEventEntriesCount(data || 0);
     } catch (error) {
-      console.error('Error fetching event entries count:', error);
+      logger.error('Error fetching event entries count:', error);
     }
   };
 
@@ -232,8 +170,10 @@ export const TeamLeaderDashboard: React.FC = () => {
     if (searchQuery.trim() === '') {
       setFilteredMembers(teamMembers);
     } else {
+      const query = searchQuery.toLowerCase();
       const filtered = teamMembers.filter(member =>
-        member.volunteer_id?.toLowerCase().includes(searchQuery.toLowerCase())
+        member.volunteer_id?.toLowerCase().includes(query) ||
+        member.personal_id?.toLowerCase().includes(query)
       );
       setFilteredMembers(filtered);
     }
@@ -243,59 +183,37 @@ export const TeamLeaderDashboard: React.FC = () => {
   // Load team members when tab changes
   useEffect(() => {
     if (activeTab === 'team' && !isTeamListLoaded && teamInfo) {
-      fetchTeamMembers(teamInfo.team_id, teamInfo.team_leader_id);
+      fetchTeamMembers(teamInfo.team_id);
     }
   }, [activeTab, isTeamListLoaded, teamInfo]);
 
   const fetchFullVolunteer = async (volunteerId: string): Promise<TeamMember | null> => {
     setLoadingVolunteerDetails(true);
     try {
-      let volunteerData = null;
+      const { data, error } = await supabase.rpc('get_full_volunteer_details', {
+        p_volunteer_identifier: volunteerId
+      });
 
-      // Try volunteer_id first (most common from QR scan)
-      const { data: byVolId } = await supabase
-        .from('volunteers')
-        .select('user_id, volunteer_id, full_name, total_points, hours_volunteered, team_id')
-        .eq('volunteer_id', volunteerId)
-        .maybeSingle();
-
-      if (byVolId) {
-        volunteerData = byVolId;
-      } else {
-        // Fallback to user_id
-        const { data: byUserId } = await supabase
-          .from('volunteers')
-          .select('user_id, volunteer_id, full_name, total_points, hours_volunteered, team_id')
-          .eq('user_id', volunteerId)
-          .maybeSingle();
-
-        if (!byUserId) {
-          return null;
-        }
-        volunteerData = byUserId;
+      if (error) {
+        logger.error('Error in fetchFullVolunteer:', error);
+        return null;
       }
 
-      // Fetch user profile with email, phone, personal_id
-      const { data: profileData } = await supabase
-        .from('user_profiles')
-        .select('email, phone, personal_id')
-        .eq('id', volunteerData.user_id)
-        .maybeSingle();
+      if (!data) return null;
 
-      // Combine the data
       return {
-        user_id: volunteerData.user_id,
-        volunteer_id: volunteerData.volunteer_id,
-        full_name: volunteerData.full_name,
-        total_points: volunteerData.total_points,
-        hours_volunteered: volunteerData.hours_volunteered,
-        team_id: volunteerData.team_id,
-        email: profileData?.email || '',
-        phone: profileData?.phone || '',
-        personal_id: profileData?.personal_id || ''
+        user_id: data.user_id,
+        volunteer_id: data.volunteer_id,
+        full_name: data.full_name,
+        total_points: data.total_points,
+        hours_volunteered: data.hours_volunteered,
+        team_id: data.team_id,
+        email: data.email || '',
+        phone: data.phone || '',
+        personal_id: data.personal_id || ''
       };
     } catch (error) {
-      console.error('Error in fetchFullVolunteer:', error);
+      logger.error('Error in fetchFullVolunteer:', error);
       return null;
     } finally {
       setLoadingVolunteerDetails(false);
@@ -321,7 +239,7 @@ export const TeamLeaderDashboard: React.FC = () => {
         setToast({ show: true, message: 'Volunteer not found', type: 'error' });
       }
     } catch (error) {
-      console.error('Error processing QR scan:', error);
+      logger.error('Error processing QR scan:', error);
       setToast({ show: true, message: 'Error processing QR scan', type: 'error' });
     }
   };
@@ -334,37 +252,24 @@ export const TeamLeaderDashboard: React.FC = () => {
 
     setSendingAnnouncement(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setToast({ show: true, message: 'User not authenticated', type: 'error' });
-        return;
-      }
-
-      // Insert notification with target_roles = ['volunteer'] and team_id
-      const { error } = await supabase
-        .from('notifications')
-        .insert({
-          event_id: 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5',
-          title: announcementTitle.trim(),
-          content: announcementContent.trim(),
-          announcement_type: 'general',
-          target_roles: ['volunteer'], // Only volunteers
-          team_id: teamInfo.team_id, // Team's ID from volunteer_teams
-          sender_id: user.id
-        });
+      const { error } = await supabase.rpc('send_team_announcement', {
+        p_event_id: 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5',
+        p_team_id: teamInfo.team_id,
+        p_title: announcementTitle.trim(),
+        p_content: announcementContent.trim()
+      });
 
       if (error) {
-        console.error('Error sending announcement:', error);
+        logger.error('Error sending announcement:', error);
         setToast({ show: true, message: 'Failed to send announcement', type: 'error' });
         return;
       }
 
-      // Success
       setToast({ show: true, message: 'Announcement sent successfully!', type: 'success' });
       setAnnouncementTitle('');
       setAnnouncementContent('');
     } catch (error) {
-      console.error('Error in handleSendAnnouncement:', error);
+      logger.error('Error in handleSendAnnouncement:', error);
       setToast({ show: true, message: 'An unexpected error occurred', type: 'error' });
     } finally {
       setSendingAnnouncement(false);
@@ -471,7 +376,7 @@ export const TeamLeaderDashboard: React.FC = () => {
             <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">search</span>
             <input
               type="text"
-              placeholder="Search by Volunteer ID..."
+              placeholder="Search by Personal ID or Volunteer ID..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-12 pr-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all"
@@ -647,7 +552,7 @@ export const TeamLeaderDashboard: React.FC = () => {
         navItems={navItems}
         activeItem={activeTab}
         onItemChange={(key) => setActiveTab(key as TabKey)}
-        title="ASU Career Week"
+        title="ASU Career Expo"
       >
         <AnimatePresence mode="wait">
           {activeTab === 'home' && renderHomeTab()}
@@ -675,12 +580,11 @@ export const TeamLeaderDashboard: React.FC = () => {
           setSelectedVolunteer(null);
         }}
         volunteer={selectedVolunteer}
-        teamLeaderId={teamInfo?.team_leader_id || ''}
         loading={loadingVolunteerDetails}
         onSuccess={async () => {
           // Refresh team members data
           if (teamInfo) {
-            await fetchTeamMembers(teamInfo.team_id, teamInfo.team_leader_id);
+            await fetchTeamMembers(teamInfo.team_id);
 
             // Also refresh the selected volunteer's data so the card updates
             if (selectedVolunteer) {

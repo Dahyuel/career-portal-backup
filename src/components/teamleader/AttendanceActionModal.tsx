@@ -2,7 +2,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 import Toast from '../shared/Toast';
+import { logger } from '../../utils/logger';
 
 const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 
@@ -16,7 +18,6 @@ interface AttendanceActionModalProps {
     isOpen: boolean;
     onClose: () => void;
     volunteer: VolunteerInfo | null;
-    teamLeaderId: string;
     onSuccess: () => void;
 }
 
@@ -30,9 +31,9 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
     isOpen,
     onClose,
     volunteer,
-    teamLeaderId,
     onSuccess
 }) => {
+    useAuth();
     const [processing, setProcessing] = useState(false);
     const [toast, setToast] = useState<ToastState>({ show: false, message: '', type: 'info' });
 
@@ -45,52 +46,19 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
     const handleCheckIn = async () => {
         setProcessing(true);
         try {
-            // Check if there's already attendance for today
-            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+            const { data, error } = await supabase.rpc('volunteer_check_in', {
+                p_volunteer_user_id: volunteer.user_id,
+                p_event_id: EVENT_ID
+            });
 
-            const { data: existingAttendance, error: checkError } = await supabase
-                .from('volunteer_attendance')
-                .select('*')
-                .eq('volunteer_id', volunteer.user_id)
-                .eq('attendance_date', today)
-                .maybeSingle();
-
-            if (checkError) {
-                console.error('Error checking attendance:', checkError);
-                showToast('Failed to check attendance records', 'error');
-                setProcessing(false);
-                return;
-            }
-
-            if (existingAttendance) {
-                // Check if already checked in and out (fully attended)
-                if (existingAttendance.check_in_time && existingAttendance.check_out_time) {
-                    showToast('Already attended today (checked in and out)', 'warning');
-                } else {
-                    // Already checked in but not out (currently inside)
-                    showToast('Already checked in today', 'warning');
-                }
-                setProcessing(false);
-                return;
-            }
-
-            // Insert new attendance entry
-            const { error: insertError } = await supabase
-                .from('volunteer_attendance')
-                .insert({
-                    volunteer_id: volunteer.user_id,
-                    event_id: EVENT_ID,
-                    attendance_date: today,
-                    check_in_time: new Date().toISOString(),
-                    check_out_time: null,
-                    hours_worked: null,
-                    validated_by: teamLeaderId
-                });
-
-            if (insertError) {
-                console.error('Error inserting attendance:', insertError);
+            if (error) {
+                logger.error('Error in check-in:', error);
                 showToast('Failed to check in', 'error');
-                setProcessing(false);
+                return;
+            }
+
+            if (!data.success) {
+                showToast(data.message, 'warning');
                 return;
             }
 
@@ -101,7 +69,7 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
             }, 1500);
 
         } catch (error) {
-            console.error('Error in check-in:', error);
+            logger.error('Error in check-in:', error);
             showToast('An unexpected error occurred', 'error');
         } finally {
             setProcessing(false);
@@ -111,42 +79,19 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
     const handleCheckOut = async () => {
         setProcessing(true);
         try {
-            const today = new Date().toISOString().split('T')[0];
+            const { data, error } = await supabase.rpc('volunteer_check_out', {
+                p_volunteer_user_id: volunteer.user_id,
+                p_event_id: EVENT_ID
+            });
 
-            // Find today's attendance record with null check_out_time
-            const { data: attendanceRecord, error: fetchError } = await supabase
-                .from('volunteer_attendance')
-                .select('*')
-                .eq('volunteer_id', volunteer.user_id)
-                .eq('attendance_date', today)
-                .is('check_out_time', null)
-                .maybeSingle();
-
-            if (fetchError) {
-                console.error('Error fetching attendance:', fetchError);
-                showToast('Failed to fetch attendance record', 'error');
-                setProcessing(false);
-                return;
-            }
-
-            if (!attendanceRecord) {
-                showToast('No active check-in found for today', 'warning');
-                setProcessing(false);
-                return;
-            }
-
-            // Update check_out_time
-            const { error: updateError } = await supabase
-                .from('volunteer_attendance')
-                .update({
-                    check_out_time: new Date().toISOString()
-                })
-                .eq('id', attendanceRecord.id);
-
-            if (updateError) {
-                console.error('Error updating attendance:', updateError);
+            if (error) {
+                logger.error('Error in check-out:', error);
                 showToast('Failed to check out', 'error');
-                setProcessing(false);
+                return;
+            }
+
+            if (!data.success) {
+                showToast(data.message, 'warning');
                 return;
             }
 
@@ -157,7 +102,7 @@ const AttendanceActionModal: React.FC<AttendanceActionModalProps> = ({
             }, 1500);
 
         } catch (error) {
-            console.error('Error in check-out:', error);
+            logger.error('Error in check-out:', error);
             showToast('An unexpected error occurred', 'error');
         } finally {
             setProcessing(false);

@@ -1,8 +1,9 @@
 // AttendeeCard component with framer-motion animations and dark mode support
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { User, X } from 'lucide-react';
+import { User, X } from '../icons';
 import QRCode from 'qrcode';
+import { logger } from '../../utils/logger';
 
 interface AttendeeCardProps {
   attendee: {
@@ -28,7 +29,7 @@ export const AttendeeCard: React.FC<AttendeeCardProps> = ({ attendee, onClose, c
     if (showQR && attendee.personal_id) {
       QRCode.toDataURL(attendee.personal_id, { width: 200, margin: 1 })
         .then(url => setQrUrl(url))
-        .catch(err => console.error('QR Gen Error:', err));
+        .catch(err => logger.error('QR Gen Error:', err));
     }
   }, [showQR, attendee.personal_id]);
 

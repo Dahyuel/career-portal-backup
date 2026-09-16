@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
 import Toast from '../shared/Toast';
+import { logger } from '../../utils/logger';
 
 const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
 const POINT_OPTIONS = [5, 10, 15, 20];
@@ -51,28 +52,25 @@ const BonusActionModal: React.FC<BonusActionModalProps> = ({
 
         setProcessing(true);
         try {
-            const finalDescription = description.trim() || 'Completed bonus task';
+            const { data, error } = await supabase.rpc('award_bonus_points', {
+                p_volunteer_user_id: volunteer.user_id,
+                p_event_id: EVENT_ID,
+                p_points: selectedPoints,
+                p_description: description.trim() || 'Completed bonus task'
+            });
 
-            const { error: insertError } = await supabase
-                .from('user_activities')
-                .insert({
-                    user_id: volunteer.user_id,
-                    event_id: EVENT_ID,
-                    activity_type: 'bonus',
-                    description: finalDescription,
-                    points_earned: selectedPoints
-                });
-
-            if (insertError) {
-                console.error('Error inserting bonus activity:', insertError);
+            if (error) {
+                logger.error('Error awarding bonus:', error);
                 showToast('Failed to award bonus points', 'error');
-                setProcessing(false);
+                return;
+            }
+
+            if (!data.success) {
+                showToast(data.message, 'warning');
                 return;
             }
 
             showToast(`Awarded ${selectedPoints} bonus points to ${volunteer.full_name}!`, 'success');
-
-            // Reset form
             setSelectedPoints(null);
             setDescription('');
 
@@ -82,7 +80,7 @@ const BonusActionModal: React.FC<BonusActionModalProps> = ({
             }, 1500);
 
         } catch (error) {
-            console.error('Error awarding bonus:', error);
+            logger.error('Error awarding bonus:', error);
             showToast('An unexpected error occurred', 'error');
         } finally {
             setProcessing(false);

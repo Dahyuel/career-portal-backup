@@ -106,11 +106,19 @@ const CompanyDetailModal: React.FC<CompanyDetailModalProps> = ({ company, isOpen
                                         transition={{ delay: 0.3, type: "spring" }}
                                         className="flex items-center justify-center gap-2"
                                     >
-                                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700' :
-                                            company.partner_type === 'gold' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' :
-                                                'bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
+                                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${company.partner_type === 'diamond' ? 'bg-cyan-100 text-cyan-700 border-cyan-200 dark:bg-cyan-900/20 dark:text-cyan-400 dark:border-cyan-800' :
+                                                company.partner_type === 'platinum' ? 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700' :
+                                                    company.partner_type === 'gold' ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' :
+                                                        company.partner_type === 'silver' ? 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700' :
+                                                            company.partner_type === 'exhibitor_a' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800' :
+                                                                company.partner_type === 'exhibitor_b' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800' :
+                                                                    company.partner_type === 'student_activity_partner' ? 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-900/20 dark:text-violet-400 dark:border-violet-800' :
+                                                                        company.partner_type === 'community_partner' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800' :
+                                                                            company.partner_type === 'catering_partner' ? 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-800' :
+                                                                                company.partner_type === 'career_coaching_partner' ? 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-900/20 dark:text-sky-400 dark:border-sky-800' :
+                                                                                    'bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-700'
                                             }`}>
-                                            {company.partner_type} Partner
+                                            {company.partner_type.replace('_', ' ')} Partner
                                         </span>
                                     </motion.div>
                                 </motion.div>

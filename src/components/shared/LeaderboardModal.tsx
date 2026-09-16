@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
-import { supabase, DEFAULT_EVENT_ID } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
+import { logger } from '../../utils/logger';
 
 interface LeaderboardEntry {
     rank: number;
     full_name: string;
     total_points: number;
-    user_id: string;
 }
 
 interface LeaderboardModalProps {
     isOpen: boolean;
     onClose: () => void;
+    eventId?: string;
 }
 
 interface Team {
@@ -20,250 +22,127 @@ interface Team {
     team_name: string;
 }
 
-const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) => {
-    const { user, profile } = useAuth();
-    const [loading, setLoading] = useState(false);
-    const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
-    const [userRank, setUserRank] = useState<LeaderboardEntry | null>(null);
+const ADMIN_ROLES = ['admin', 'super_admin', 'sadmin'] as const;
 
-    // Admin state
+const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose, eventId }) => {
+    const { user, profile } = useAuth();
+    const currentEventId = eventId || profile?.event_id;
+
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
+    const [myRow, setMyRow] = useState<LeaderboardEntry | null>(null);
+
     const [teams, setTeams] = useState<Team[]>([]);
     const [selectedTeamId, setSelectedTeamId] = useState<string>('');
 
-    useEffect(() => {
-        if (isOpen && user && profile) {
-            fetchData();
-        }
-    }, [isOpen, user, profile, selectedTeamId]);
+    const isAdmin = ADMIN_ROLES.includes(profile?.role as any);
 
-    const fetchData = async () => {
-        if (!user || !profile) return;
+    // Reset on close
+    useEffect(() => {
+        if (!isOpen) {
+            setLeaderboardData([]);
+            setMyRow(null);
+            setError(null);
+            setSelectedTeamId('');
+        }
+    }, [isOpen]);
+
+    // Fetch teams for admins
+    useEffect(() => {
+        if (!isOpen || !isAdmin || !currentEventId) return;
+        (async () => {
+            const { data, error } = await supabase
+                .rpc('get_volunteer_teams_admin', { p_event_id: currentEventId });
+
+            if (error) {
+                logger.error('❌ [LEADERBOARD] Error fetching teams:', error);
+                return;
+            }
+            const list = (data as Team[]) || [];
+            setTeams(list);
+            if (list.length) {
+                setSelectedTeamId(prev => prev || list[0].id);
+            }
+        })();
+    }, [isOpen, isAdmin, currentEventId]);
+
+    // Fetch leaderboard
+    useEffect(() => {
+        if (!isOpen || !user || !profile || !currentEventId) return;
+        if (isAdmin && !selectedTeamId) return;
+        fetchLeaderboard(isAdmin ? selectedTeamId : null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, user, profile, isAdmin, selectedTeamId, currentEventId]);
+
+    const fetchLeaderboard = async (teamId: string | null = null) => {
+        if (!user || !profile || !currentEventId) return;
 
         setLoading(true);
+        setError(null);
+
         try {
-            const userRole = profile.role;
+            const { data, error: rpcError } = await supabase.rpc('get_event_leaderboard', {
+                _event_id: currentEventId,
+                _limit: 10,
+                _team_id: teamId,
+            });
 
-            if (['volunteer', 'registration', 'building', 'info_desk', 'verification'].includes(userRole)) {
-                // ================================================================
-                // VOLUNTEER LOGIC - Show team leaderboard
-                // ================================================================
-
-                console.log('🎯 [LEADERBOARD] Fetching for volunteer with role:', userRole);
-
-                // 1. Get user's volunteer record to find their team
-                const { data: volunteerData, error: vError } = await supabase
-                    .from('volunteers')
-                    .select('team_id, user_id')
-                    .eq('user_id', user.id)
-                    .single();
-
-                if (vError || !volunteerData?.team_id) {
-                    console.error('❌ [LEADERBOARD] Error fetching volunteer team:', vError);
-                    throw new Error("Could not find your team");
+            if (rpcError) {
+                logger.error('❌ [LEADERBOARD] RPC error:', rpcError);
+                const m = rpcError.message || '';
+                if (m.includes('FORBIDDEN') || m.includes('UNAUTHORIZED')) {
+                    setError('You do not have permission to view the leaderboard.');
+                } else if (m.includes('NO_TEAM')) {
+                    setError('You are not assigned to a team yet.');
+                } else if (m.includes('MISSING_TEAM')) {
+                    setError('Please select a team.');
+                } else if (m.includes('UNAUTHENTICATED')) {
+                    setError('Please sign in again.');
+                } else {
+                    setError(`Failed to load leaderboard: ${m}`);
                 }
-
-                console.log('✅ [LEADERBOARD] Found team:', volunteerData.team_id);
-
-                // 2. Fetch all volunteers in the same team
-                const { data: teamMembers, error: tError } = await supabase
-                    .from('volunteers')
-                    .select('user_id, full_name, total_points')
-                    .eq('team_id', volunteerData.team_id)
-                    .order('total_points', { ascending: false });
-
-                if (tError) {
-                    console.error('❌ [LEADERBOARD] Error fetching team members:', tError);
-                    throw tError;
-                }
-
-                console.log('📊 [LEADERBOARD] Found team members:', teamMembers?.length || 0);
-
-                if (!teamMembers || teamMembers.length === 0) {
-                    console.warn('⚠️ [LEADERBOARD] No team members found');
-                    setLeaderboardData([]);
-                    setUserRank(null);
-                    return;
-                }
-
-                // 3. Get user_roles to verify they're actually volunteer roles
-                // This filters out any attendees or employers who might be mistakenly in the volunteers table
-                const userIds = teamMembers.map(m => m.user_id);
-
-                const { data: rolesData, error: rolesError } = await supabase
-                    .from('user_roles')
-                    .select('user_id, role')
-                    .eq('event_id', DEFAULT_EVENT_ID)
-                    .in('user_id', userIds)
-                    .in('role', ['volunteer', 'registration', 'building', 'info_desk', 'verification']);
-
-                if (rolesError) {
-                    console.error('❌ [LEADERBOARD] Error fetching roles:', rolesError);
-                    // Continue without role filtering if this fails
-                }
-
-                // Create a Set of valid volunteer user IDs
-                const validVolunteerIds = new Set(rolesData?.map(r => r.user_id) || userIds);
-
-                console.log('✅ [LEADERBOARD] Valid volunteer IDs:', validVolunteerIds.size);
-
-                // 4. Filter and process the data
-                const filteredMembers = teamMembers.filter(m => validVolunteerIds.has(m.user_id));
-
-                const processedData = filteredMembers.map((m, index) => ({
-                    rank: index + 1,
-                    full_name: m.full_name,
-                    total_points: m.total_points || 0,
-                    user_id: m.user_id
-                }));
-
-                console.log('✅ [LEADERBOARD] Processed data:', processedData.length, 'members');
-
-                // 5. Set top 10 for display
-                setLeaderboardData(processedData.slice(0, 10));
-
-                // 6. Find current user's rank (if outside top 10)
-                const myRank = processedData.find(m => m.user_id === user.id);
-                setUserRank(myRank || null);
-
-            } else if (userRole === 'team_leader') {
-                // ================================================================
-                // TEAM LEADER LOGIC - Show their team's full leaderboard
-                // ================================================================
-
-                console.log('👑 [LEADERBOARD] Fetching for team leader');
-
-                // 1. Find the team this user leads
-                const { data: teamData, error: tError } = await supabase
-                    .from('volunteer_teams')
-                    .select('id')
-                    .eq('team_leader_id', user.id)
-                    .single();
-
-                if (tError || !teamData) {
-                    console.error('❌ [LEADERBOARD] Error fetching team for leader:', tError);
-                    throw new Error("Could not find your team");
-                }
-
-                console.log('✅ [LEADERBOARD] Found team:', teamData.id);
-
-                // 2. Fetch all members of that team
-                const { data: teamMembers, error: mError } = await supabase
-                    .from('volunteers')
-                    .select('user_id, full_name, total_points')
-                    .eq('team_id', teamData.id)
-                    .order('total_points', { ascending: false });
-
-                if (mError) {
-                    console.error('❌ [LEADERBOARD] Error fetching team members:', mError);
-                    throw mError;
-                }
-
-                // 3. Verify volunteer roles
-                const userIds = teamMembers?.map(m => m.user_id) || [];
-
-                const { data: rolesData } = await supabase
-                    .from('user_roles')
-                    .select('user_id')
-                    .eq('event_id', DEFAULT_EVENT_ID)
-                    .in('user_id', userIds)
-                    .in('role', ['volunteer', 'registration', 'building', 'info_desk', 'verification']);
-
-                const validVolunteerIds = new Set(rolesData?.map(r => r.user_id) || userIds);
-
-                // 4. Filter and process
-                const filteredMembers = (teamMembers || []).filter(m => validVolunteerIds.has(m.user_id));
-
-                const processedData = filteredMembers.map((m, index) => ({
-                    rank: index + 1,
-                    full_name: m.full_name,
-                    total_points: m.total_points || 0,
-                    user_id: m.user_id
-                }));
-
-                console.log('✅ [LEADERBOARD] Processed data:', processedData.length, 'members');
-
-                // Team leaders see the full list
-                setLeaderboardData(processedData);
-                setUserRank(null);
-
-            } else if (['admin', 'super_admin', 'sadmin'].includes(userRole)) {
-                // ================================================================
-                // ADMIN LOGIC - Select any team to view
-                // ================================================================
-
-                console.log('🔐 [LEADERBOARD] Fetching for admin');
-
-                // 1. Load teams dropdown (only once)
-                if (teams.length === 0) {
-                    const { data: allTeams, error: teamsError } = await supabase
-                        .from('volunteer_teams')
-                        .select('id, team_name')
-                        .order('team_name');
-
-                    if (teamsError) {
-                        console.error('❌ [LEADERBOARD] Error fetching teams:', teamsError);
-                        throw teamsError;
-                    }
-
-                    setTeams(allTeams || []);
-
-                    // Auto-select first team if none selected
-                    if (!selectedTeamId && allTeams && allTeams.length > 0) {
-                        setSelectedTeamId(allTeams[0].id);
-                        setLoading(false);
-                        return;
-                    }
-                }
-
-                // 2. Fetch members of selected team
-                if (selectedTeamId) {
-                    const { data: teamMembers, error: mError } = await supabase
-                        .from('volunteers')
-                        .select('user_id, full_name, total_points')
-                        .eq('team_id', selectedTeamId)
-                        .order('total_points', { ascending: false });
-
-                    if (mError) {
-                        console.error('❌ [LEADERBOARD] Error fetching team members:', mError);
-                        throw mError;
-                    }
-
-                    // 3. Verify volunteer roles
-                    const userIds = teamMembers?.map(m => m.user_id) || [];
-
-                    const { data: rolesData } = await supabase
-                        .from('user_roles')
-                        .select('user_id')
-                        .eq('event_id', DEFAULT_EVENT_ID)
-                        .in('user_id', userIds)
-                        .in('role', ['volunteer', 'registration', 'building', 'info_desk', 'verification']);
-
-                    const validVolunteerIds = new Set(rolesData?.map(r => r.user_id) || userIds);
-
-                    // 4. Filter and process
-                    const filteredMembers = (teamMembers || []).filter(m => validVolunteerIds.has(m.user_id));
-
-                    const processedData = filteredMembers.map((m, index) => ({
-                        rank: index + 1,
-                        full_name: m.full_name,
-                        total_points: m.total_points || 0,
-                        user_id: m.user_id
-                    }));
-
-                    console.log('✅ [LEADERBOARD] Processed data:', processedData.length, 'members');
-
-                    setLeaderboardData(processedData);
-                    setUserRank(null);
-                }
-            } else {
-                // Other roles (attendee, employer) - no leaderboard
-                console.warn('⚠️ [LEADERBOARD] Leaderboard not available for role:', userRole);
                 setLeaderboardData([]);
+                setMyRow(null);
+                return;
             }
 
+            const payload = data as {
+                rows: any[];
+                my_row: any | null;
+                team_id: string;
+                is_admin: boolean;
+                is_leader: boolean;
+            } | null;
+
+            if (!payload || !Array.isArray(payload.rows) || payload.rows.length === 0) {
+                setLeaderboardData([]);
+                setMyRow(null);
+                return;
+            }
+
+            setLeaderboardData(
+                payload.rows.map((r: any) => ({
+                    rank: Number(r.rank),
+                    full_name: r.full_name,
+                    total_points: Number(r.total_points ?? 0),
+                }))
+            );
+
+            setMyRow(
+                payload.my_row
+                    ? {
+                        rank: Number(payload.my_row.rank),
+                        full_name: payload.my_row.full_name,
+                        total_points: Number(payload.my_row.total_points ?? 0),
+                    }
+                    : null
+            );
         } catch (err) {
-            console.error("❌ [LEADERBOARD] Error fetching leaderboard:", err);
+            logger.error('❌ [LEADERBOARD] Unexpected error:', err);
+            setError('An unexpected error occurred.');
             setLeaderboardData([]);
+            setMyRow(null);
         } finally {
             setLoading(false);
         }
@@ -271,36 +150,32 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
 
     const modalVariants: Variants = {
         hidden: { opacity: 0, scale: 0.95 },
-        visible: {
-            opacity: 1,
-            scale: 1,
-            transition: { type: "spring", stiffness: 300, damping: 25 }
-        },
-        exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2 } }
+        visible: { opacity: 1, scale: 1, transition: { type: 'spring', stiffness: 300, damping: 25 } },
+        exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2 } },
     };
 
-    return (
+    const headerSubtitle =
+        profile?.role === 'team_leader'
+            ? 'Your Team Performance'
+            : isAdmin
+                ? 'Global Team Performance'
+                : 'Top 10 of Your Team + Your Rank';
+
+    return createPortal(
         <AnimatePresence>
             {isOpen && (
                 <>
-                    {/* Backdrop */}
                     <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                         className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998]"
                         onClick={onClose}
                     />
 
-                    {/* Modal */}
                     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
                         <motion.div
-                            variants={modalVariants}
-                            initial="hidden"
-                            animate="visible"
-                            exit="exit"
+                            variants={modalVariants} initial="hidden" animate="visible" exit="exit"
                             className="bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-zinc-800 w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={e => e.stopPropagation()}
                         >
                             {/* Header */}
                             <div className="bg-gradient-to-r from-amber-500 to-amber-600 p-6 relative flex-shrink-0">
@@ -310,11 +185,7 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                 <div className="relative z-10 flex justify-between items-start">
                                     <div>
                                         <h2 className="text-2xl font-bold text-white mb-1">Team Leaderboard</h2>
-                                        <p className="text-amber-100 text-sm">
-                                            {profile?.role === 'team_leader' ? 'Your Team Performance' :
-                                                ['admin', 'super_admin', 'sadmin'].includes(profile?.role || '') ? 'Global Team Performance' :
-                                                    'Top Performers & My Rank'}
-                                        </p>
+                                        <p className="text-amber-100 text-sm">{headerSubtitle}</p>
                                     </div>
                                     <button
                                         onClick={onClose}
@@ -324,13 +195,12 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                                     </button>
                                 </div>
 
-                                {/* Admin Team Selector */}
-                                {['admin', 'super_admin', 'sadmin'].includes(profile?.role || '') && (
+                                {isAdmin && (
                                     <div className="mt-4">
                                         <select
                                             value={selectedTeamId}
-                                            onChange={(e) => setSelectedTeamId(e.target.value)}
-                                            className="w-full bg-white/20 text-white placeholder-white/60 border border-white/30 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-white/50 [&>option]:text-black"
+                                            onChange={e => setSelectedTeamId(e.target.value)}
+                                            className="w-full bg-white/20 text-white border border-white/30 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-white/50 [&>option]:text-black"
                                         >
                                             <option value="" disabled>Select a team</option>
                                             {teams.map(t => (
@@ -342,94 +212,142 @@ const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) 
                             </div>
 
                             {/* Content */}
-                            <div className="flex-1 overflow-y-auto p-0">
+                            <div className="flex-1 overflow-y-auto">
                                 {loading ? (
                                     <div className="flex flex-col items-center justify-center py-20">
-                                        <div className="animate-spin rounded-full h-12 w-12 border-4 border-amber-500 border-t-transparent"></div>
+                                        <div className="animate-spin rounded-full h-12 w-12 border-4 border-amber-500 border-t-transparent" />
                                         <p className="mt-4 text-gray-500 dark:text-gray-400">Loading rankings...</p>
                                     </div>
-                                ) : leaderboardData.length === 0 ? (
+                                ) : error ? (
+                                    <div className="flex flex-col items-center justify-center py-20 text-red-500 px-6 text-center">
+                                        <span className="material-symbols-outlined text-5xl mb-2 opacity-50">error</span>
+                                        <p>{error}</p>
+                                    </div>
+                                ) : leaderboardData.length === 0 && !myRow ? (
                                     <div className="flex flex-col items-center justify-center py-20 text-gray-500">
                                         <span className="material-symbols-outlined text-5xl mb-2 opacity-50">format_list_bulleted</span>
                                         <p>No leaderboard data available</p>
                                     </div>
                                 ) : (
-                                    <table className="w-full text-left border-collapse">
-                                        <thead className="bg-gray-50 dark:bg-zinc-800/50 sticky top-0 z-10">
-                                            <tr>
-                                                <th className="py-3 px-6 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-20">Rank</th>
-                                                <th className="py-3 px-6 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Volunteer</th>
-                                                <th className="py-3 px-6 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Score</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
-                                            {leaderboardData.map((entry) => {
-                                                const isMe = user?.id === entry.user_id;
-                                                return (
-                                                    <tr
-                                                        key={entry.user_id}
-                                                        className={`${isMe ? 'bg-amber-50 dark:bg-amber-900/20' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'} transition-colors`}
-                                                    >
-                                                        <td className="py-4 px-6">
-                                                            <div className={`
-                                                                w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm
-                                                                ${entry.rank === 1 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400' :
-                                                                    entry.rank === 2 ? 'bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-400' :
-                                                                        entry.rank === 3 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400' :
-                                                                            'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'}
-                                                            `}>
-                                                                {entry.rank}
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-4 px-6">
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300">
-                                                                    {entry.full_name.charAt(0).toUpperCase()}
+                                    <div className="pb-4">
+                                        {/* ── MY RANK CARD (volunteers only) ── */}
+                                        {myRow && !isAdmin && profile?.role !== 'team_leader' && (
+                                            <div className="px-6 pt-6 pb-2">
+                                                <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
+                                                    Your Rank
+                                                </p>
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: -8 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    className="relative overflow-hidden rounded-2xl p-5 bg-gradient-to-br from-amber-500 to-amber-600 shadow-lg shadow-amber-500/20"
+                                                >
+                                                    {/* decorative blob */}
+                                                    <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-white/10 blur-2xl" />
+
+                                                    <div className="relative z-10 flex items-center gap-4">
+                                                        <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0 border border-white/30">
+                                                            <span className="text-2xl font-bold text-white">
+                                                                #{myRow.rank}
+                                                            </span>
+                                                        </div>
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="text-white font-bold text-lg truncate">
+                                                                {myRow.full_name}
+                                                            </p>
+                                                            <p className="text-amber-100 text-sm mt-0.5">
+                                                                Your current standing on the team
+                                                            </p>
+                                                        </div>
+                                                        <div className="text-right shrink-0">
+                                                            <p className="text-3xl font-bold text-white leading-none">
+                                                                {myRow.total_points}
+                                                            </p>
+                                                            <p className="text-amber-100 text-xs uppercase tracking-wider mt-1">
+                                                                points
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </motion.div>
+                                            </div>
+                                        )}
+
+                                        {/* ── TOP 10 TABLE ── */}
+                                        <div className="px-6 pt-4 pb-2">
+                                            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                                                {isAdmin || profile?.role === 'team_leader'
+                                                    ? 'Team Rankings'
+                                                    : 'Top 10 of Your Team'}
+                                            </p>
+                                        </div>
+                                        <table className="w-full text-left border-collapse">
+                                            <thead className="bg-gray-50 dark:bg-zinc-800/50">
+                                                <tr>
+                                                    <th className="py-3 px-6 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-20">Rank</th>
+                                                    <th className="py-3 px-6 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Volunteer</th>
+                                                    <th className="py-3 px-6 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Score</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
+                                                {leaderboardData.map(entry => {
+                                                    const isMe =
+                                                        myRow
+                                                        && myRow.rank === entry.rank
+                                                        && myRow.full_name === entry.full_name;
+
+                                                    return (
+                                                        <tr
+                                                            key={`${entry.rank}-${entry.full_name}`}
+                                                            className={`
+                                                                transition-colors
+                                                                ${isMe
+                                                                    ? 'bg-amber-50 dark:bg-amber-900/20'
+                                                                    : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}
+                                                            `}
+                                                        >
+                                                            <td className="py-4 px-6">
+                                                                <div className={`
+                                                                    w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm
+                                                                    ${entry.rank === 1 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400' :
+                                                                        entry.rank === 2 ? 'bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-400' :
+                                                                            entry.rank === 3 ? 'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400' :
+                                                                                'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'}
+                                                                `}>
+                                                                    {entry.rank}
                                                                 </div>
-                                                                <div>
-                                                                    <p className={`font-medium ${isMe ? 'text-amber-700 dark:text-amber-400' : 'text-gray-900 dark:text-white'}`}>
-                                                                        {entry.full_name} {isMe && "(You)"}
+                                                            </td>
+                                                            <td className="py-4 px-6">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-600 dark:text-gray-300">
+                                                                        {entry.full_name.charAt(0).toUpperCase()}
+                                                                    </div>
+                                                                    <p className="font-medium text-gray-900 dark:text-white">
+                                                                        {entry.full_name}
+                                                                        {isMe && (
+                                                                            <span className="ml-2 text-xs font-normal text-amber-700 dark:text-amber-300">
+                                                                                (You)
+                                                                            </span>
+                                                                        )}
                                                                     </p>
                                                                 </div>
-                                                            </div>
-                                                        </td>
-                                                        <td className="py-4 px-6 text-right">
-                                                            <span className="font-bold text-gray-900 dark:text-white">{entry.total_points}</span>
-                                                            <span className="text-xs text-gray-500 ml-1">pts</span>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
+                                                            </td>
+                                                            <td className="py-4 px-6 text-right">
+                                                                <span className="font-bold text-gray-900 dark:text-white">{entry.total_points}</span>
+                                                                <span className="text-xs text-gray-500 ml-1">pts</span>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 )}
                             </div>
-
-                            {/* Footer - Show user's rank if they're outside top 10 */}
-                            {userRank && !leaderboardData.find(d => d.user_id === userRank.user_id) && (
-                                <div className="border-t border-gray-200 dark:border-zinc-800 bg-amber-50 dark:bg-amber-900/10 p-4 flex-shrink-0">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-4">
-                                            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-800 flex items-center justify-center font-bold text-amber-700 dark:text-amber-200">
-                                                {userRank.rank}
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-gray-900 dark:text-white">Your Rank</p>
-                                                <p className="text-sm text-gray-500 dark:text-gray-400">Keep up the good work!</p>
-                                            </div>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-xl font-bold text-amber-600 dark:text-amber-400">{userRank.total_points}</p>
-                                            <p className="text-xs text-gray-500">points</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
                         </motion.div>
                     </div>
                 </>
             )}
-        </AnimatePresence>
+        </AnimatePresence>,
+        document.body
     );
 };
 

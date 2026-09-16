@@ -3,6 +3,7 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import DashboardLoading from '../DashboardLoading';
+import { logger } from '../../utils/logger';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -26,7 +27,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   } = useAuth();
   const location = useLocation();
 
-  console.log('🛡️ ProtectedRoute check:', {
+  logger.log('🛡️ ProtectedRoute check:', {
     path: location.pathname,
     loading,
     sessionLoaded,
@@ -44,7 +45,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
   // CRITICAL: Once session is loaded but no user, redirect to login
   if (sessionLoaded && !isAuthenticated) {
-    console.log('🔐 Not authenticated, redirecting to login');
+    logger.log('🔐 Not authenticated, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -52,7 +53,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const profileComplete = profile?.profile_complete || false;
 
   if (requireCompleteProfile && !profileComplete) {
-    console.log('📝 Profile incomplete, checking redirect...', {
+    logger.log('📝 Profile incomplete, checking redirect...', {
       role: profile?.role,
       profileComplete,
       currentPath: location.pathname
@@ -63,13 +64,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       location.pathname === '/attendee-register';
 
     if (isRegistrationPath) {
-      console.log('✅ Allowing access to registration form');
+      logger.log('✅ Allowing access to registration form');
       return <>{children}</>;
     }
 
     // Redirect incomplete profiles to appropriate registration form
     const redirectPath = getRoleBasedRedirect(profile?.role);
-    console.log('🔄 Redirecting incomplete profile to:', redirectPath);
+    logger.log('🔄 Redirecting incomplete profile to:', redirectPath);
 
     // Prevent redirect loop
     if (location.pathname !== redirectPath) {
@@ -82,7 +83,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     const hasRequiredRole = hasRole(requiredRole);
 
     if (!hasRequiredRole) {
-      console.log('❌ Access denied - insufficient permissions', {
+      logger.log('❌ Access denied - insufficient permissions', {
         userRole: profile.role,
         requiredRole
       });
@@ -112,7 +113,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     }
   }
 
-  console.log('✅ Access granted to protected route');
+  logger.log('✅ Access granted to protected route');
   return <>{children}</>;
 };
 

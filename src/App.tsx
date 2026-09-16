@@ -1,23 +1,22 @@
 // App.tsx
-import React, { Suspense, useLayoutEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import React, { Suspense, useLayoutEffect, useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import ProtectedRoute from './components/ProtectedRoute'; // Import ProtectedRoute
+import ProtectedRoute from './components/ProtectedRoute';
+import { supabase } from './lib/supabase';
 import { ResetPasswordForm } from './components/ResetPasswordForm';
 // import DashboardLoading from './components/DashboardLoading'; // Removed as we use shared LoadingScreen
 
 
 
-// Auth Components
-import { LoginForm } from './components/LoginForm';
-import { ForgotPasswordForm } from './components/ForgotPasswordForm';
-import { UnifiedAttendeeRegistration } from './components/UnifiedAttendeeRegistration';
-import { UnifiedVolunteerRegistration } from './components/UnifiedVolunteerRegistration';
-import { LandingPage } from './components/LandingPage';
-import { Footer } from './components/shared/Footer';
+// Auth Components (lazy loaded)
+const LoginForm = React.lazy(() => import('./components/LoginForm').then(module => ({ default: module.LoginForm })));
+const ForgotPasswordForm = React.lazy(() => import('./components/ForgotPasswordForm').then(module => ({ default: module.ForgotPasswordForm })));
+const UnifiedAttendeeRegistration = React.lazy(() => import('./components/UnifiedAttendeeRegistration').then(module => ({ default: module.UnifiedAttendeeRegistration })));
 
 // Lazy load dashboards
+const NoActiveEvent = React.lazy(() => import('./pages/NoActiveEvent'));
 const AttendeeDashboard = React.lazy(() => import('./pages/user/AttendeeDashboard'));
 const VolunteerDashboard = React.lazy(() => import('./pages/volunteer/VolunteerDashboard').then(module => ({ default: module.VolunteerDashboard })));
 const RegTeamDashboard = React.lazy(() => import('./pages/team/RegTeamDashboard').then(module => ({ default: module.RegTeamDashboard })));
@@ -27,11 +26,22 @@ const VerificationDashboard = React.lazy(() => import('./pages/team/Verification
 const TeamLeaderDashboard = React.lazy(() => import('./pages/team/TeamLeaderDashboard').then(module => ({ default: module.TeamLeaderDashboard })));
 const AdminPanel = React.lazy(() => import('./pages/admin/AdminPanel').then(module => ({ default: module.AdminPanel })));
 const SuperAdminPanel = React.lazy(() => import('./pages/admin/SuperAdminPanel').then(module => ({ default: module.SuperAdminPanel })));
-const EmployerRegistration = React.lazy(() => import('./pages/Employer/EmployerRegistration').then(module => ({ default: module.EmployerRegistration })));
+const TechSupportDashboard = React.lazy(() => import('./pages/team/TechSupportDashboard').then(module => ({ default: module.TechSupportDashboard })));
 const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
-const AboutCareerCenter = React.lazy(() => import('./pages/LandingPageContent/AboutCareerCenter').then(module => ({ default: module.AboutCareerCenter })));
-const Speakers = React.lazy(() => import('./pages/LandingPageContent/Speakers').then(module => ({ default: module.Speakers })));
-const Partners = React.lazy(() => import('./pages/LandingPageContent/Partners').then(module => ({ default: module.Partners })));
+const EventSelection = React.lazy(() => import('./pages/EventSelection').then(module => ({ default: module.EventSelection })));
+const EventRegistration = React.lazy(() => import('./pages/EventRegistration').then(module => ({ default: module.EventRegistration })));
+const VolunteerRegistration = React.lazy(() => import('./pages/VolunteerRegistration').then(module => ({ default: module.VolunteerRegistration })));
+const PendingApproval = React.lazy(() => import('./pages/PendingApproval').then(module => ({ default: module.PendingApproval })));
+const RegistrationConfirmed = React.lazy(() => import('./pages/RegistrationConfirmed').then(module => ({ default: module.RegistrationConfirmed })));
+const RejectedAttendee = React.lazy(() => import('./pages/RejectedAttendee').then(module => ({ default: module.RejectedAttendee })));
+const PaymentRequired = React.lazy(() => import('./pages/PaymentRequired').then(module => ({ default: module.PaymentRequired })));
+
+// Landing Page Components (public)
+const LandingPage = React.lazy(() => import('./pages/Landing page/LandingPage').then(module => ({ default: module.LandingPage })));
+const Partners = React.lazy(() => import('./pages/Landing page/Partners').then(module => ({ default: module.Partners })));
+const Speakers = React.lazy(() => import('./pages/Landing page/Speakers').then(module => ({ default: module.Speakers })));
+const AboutCareerCenter = React.lazy(() => import('./pages/Landing page/AboutCareerCenter').then(module => ({ default: module.AboutCareerCenter })));
+
 
 // Loading Screen
 import DashboardLoading from './components/DashboardLoading';
@@ -40,48 +50,128 @@ import DashboardLoading from './components/DashboardLoading';
 // Main App Router
 const AppRouter: React.FC = () => {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const { loading } = useAuth();
 
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, _session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        // Only redirect if THIS tab has the recovery token in the URL (i.e. opened from email).
+        // This prevents the old "forgot password" tab from also navigating via cross-tab session sync.
+        const hash = window.location.hash;
+        if (hash.includes('type=recovery') || hash.includes('access_token')) {
+          navigate('/reset-password' + hash, { replace: true });
+        }
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
 
+  if (loading) {
+    return (
+      <DashboardLoading
+        message="Initializing App..."
+        subMessage="Please wait while we load your session"
+      />
+    );
+  }
+
   return (
     <Routes>
-      {/* Landing Page */}
-      <Route path="/" element={<LandingPage />} />
-      <Route path="/about" element={
-        <Suspense fallback={<DashboardLoading message="Loading page..." />}>
-          <AboutCareerCenter />
-        </Suspense>
-      } />
-      <Route path="/speakers" element={
-        <Suspense fallback={<DashboardLoading message="Loading page..." />}>
-          <Speakers />
+      {/* Public Landing Pages */}
+      <Route path="/" element={
+        <Suspense fallback={<DashboardLoading message="Loading..." />}>
+          <LandingPage />
         </Suspense>
       } />
       <Route path="/partners" element={
-        <Suspense fallback={<DashboardLoading message="Loading page..." />}>
+        <Suspense fallback={<DashboardLoading message="Loading partners..." />}>
           <Partners />
+        </Suspense>
+      } />
+      <Route path="/speakers" element={
+        <Suspense fallback={<DashboardLoading message="Loading speakers..." />}>
+          <Speakers />
+        </Suspense>
+      } />
+      <Route path="/about" element={
+        <Suspense fallback={<DashboardLoading message="Loading..." />}>
+          <AboutCareerCenter />
         </Suspense>
       } />
 
       {/* Auth Routes */}
-      <Route path="/login" element={<LoginForm />} />
-      <Route path="/forgot-password" element={<ForgotPasswordForm />} />
-      <Route path="/reset-password" element={<ResetPasswordForm />} />
-      <Route path="/employerreg" element={
+      <Route path="/login" element={
+        <Suspense fallback={<DashboardLoading message="Loading..." />}>
+          <LoginForm />
+        </Suspense>
+      } />
+      <Route path="/forgot-password" element={
+        <Suspense fallback={<DashboardLoading message="Loading..." />}>
+          <ForgotPasswordForm />
+        </Suspense>
+      } />
+      <Route path="/reset-password" element={
+        <Suspense fallback={<DashboardLoading message="Loading..." />}>
+          <ResetPasswordForm />
+        </Suspense>
+      } />
+      {/* Registration Form */}
+      <Route path="/attendee-register" element={
         <Suspense fallback={<DashboardLoading message="Loading registration form..." />}>
-          <EmployerRegistration />
+          <UnifiedAttendeeRegistration />
         </Suspense>
       } />
 
-      {/* Registration Forms */}
-      <Route path="/attendee-register" element={<UnifiedAttendeeRegistration />} />
-      <Route path="/V0lunt33ringR3g" element={<UnifiedVolunteerRegistration />} />
+      {/* Hidden volunteer registration endpoint — not linked publicly */}
+      <Route path="/x-8uR2-mP5x-K9wQ-Reg7" element={
+        <Suspense fallback={<DashboardLoading message="Loading volunteer registration..." />}>
+          <VolunteerRegistration />
+        </Suspense>
+      } />
 
-      {/* Protected Dashboards */}
+
+      {/* Protected Event Selection & Registration */}
+      <Route path="/select-event" element={
+        <ProtectedRoute>
+          <Suspense fallback={<DashboardLoading message="Loading events..." />}>
+            <EventSelection />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/register-event" element={
+        <ProtectedRoute>
+          <Suspense fallback={<DashboardLoading message="Loading registration form..." />}>
+            <EventRegistration />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+      <Route path="/no-active-event" element={
+        <ProtectedRoute>
+          <Suspense fallback={<DashboardLoading message="Loading..." />}>
+            <NoActiveEvent />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
       <Route path="/attendee" element={
-        <ProtectedRoute requiredRole="attendee">
+        <ProtectedRoute
+          requiredRole={[
+            'attendee',
+            'volunteer',
+            'registration',
+            'building',
+            'info_desk',
+            'verification',
+            'tech_support',
+            'team_leader'
+          ]}
+        >
           <Suspense fallback={<DashboardLoading message="Loading Your Dashboard" />}>
             <AttendeeDashboard />
           </Suspense>
@@ -95,7 +185,21 @@ const AppRouter: React.FC = () => {
           </Suspense>
         </ProtectedRoute>
       } />
+      <Route path="/rejected-attendee" element={
+        <ProtectedRoute requiredRole="attendee">
+          <Suspense fallback={<DashboardLoading message="Loading..." />}>
+            <RejectedAttendee />
+          </Suspense>
+        </ProtectedRoute>
+      } />
 
+      <Route path="/payment-required" element={
+        <ProtectedRoute requiredRole="attendee">
+          <Suspense fallback={<DashboardLoading message="Loading..." />}>
+            <PaymentRequired />
+          </Suspense>
+        </ProtectedRoute>
+      } />
       <Route path="/building" element={
         <ProtectedRoute requiredRole="building">
           <Suspense fallback={<DashboardLoading message="Loading Your Dashboard" />}>
@@ -152,10 +256,35 @@ const AppRouter: React.FC = () => {
         </ProtectedRoute>
       } />
 
+      <Route path="/tech-support" element={
+        <ProtectedRoute requiredRole="tech_support">
+          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
+            <TechSupportDashboard />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
       <Route path="/employer" element={
         <ProtectedRoute requiredRole="employer">
           <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <EmployerDashboard />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
+      {/* Attendee Status Screens */}
+      <Route path="/pending-approval" element={
+        <ProtectedRoute requiredRole="attendee">
+          <Suspense fallback={<DashboardLoading message="Checking status..." />}>
+            <PendingApproval />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/registration-confirmed" element={
+        <ProtectedRoute requiredRole="attendee">
+          <Suspense fallback={<DashboardLoading message="Checking status..." />}>
+            <RegistrationConfirmed />
           </Suspense>
         </ProtectedRoute>
       } />
@@ -170,7 +299,7 @@ const AppRouter: React.FC = () => {
       <Route path="/teamleader" element={<Navigate to="/team-leader" replace />} />
       <Route path="/employer-dashboard" element={<Navigate to="/employer" replace />} />
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 };
@@ -198,6 +327,69 @@ const LogoutPopup: React.FC = () => {
   );
 };
 
+// Maintenance Mode Guard
+const MaintenanceGuard: React.FC = () => {
+  const { pathname } = useLocation();
+  // null = not yet checked, true = maintenance on, false = maintenance off
+  const [isMaintenance, setIsMaintenance] = useState<boolean | null>(null);
+  const [maintenanceMsg, setMaintenanceMsg] = useState('System is under maintenance. Please try again later.');
+
+  useEffect(() => {
+    const checkMaintenance = async () => {
+      try {
+        const { data } = await supabase.rpc('check_maintenance_status');
+        if (data?.enabled) {
+          setIsMaintenance(true);
+          setMaintenanceMsg(data.message || 'System is under maintenance. Please try again later.');
+        } else {
+          setIsMaintenance(false);
+        }
+      } catch {
+        // If RPC fails, assume not in maintenance to avoid blocking users permanently
+        setIsMaintenance(false);
+      }
+    };
+
+    checkMaintenance();
+    const interval = setInterval(checkMaintenance, 30000);
+    return () => clearInterval(interval);
+  }, [pathname]);
+
+  // Never block auth pages or super admin path
+  const exemptPaths = ['/super-ctrl-92k1x', '/login', '/forgot-password', '/reset-password', '/', '/partners', '/speakers', '/about'];
+  if (exemptPaths.includes(pathname)) return null;
+
+  // While still checking maintenance status — show a blank dark screen to hide dashboard content
+  if (isMaintenance === null) {
+    return (
+      <div className="fixed inset-0 bg-slate-900 z-[9998]" />
+    );
+  }
+
+  if (!isMaintenance) return null;
+
+  return (
+    <div className="fixed inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center z-[9998]">
+      <div className="text-center max-w-lg mx-auto px-6">
+        <div className="relative w-24 h-24 mx-auto mb-8">
+          <div className="absolute inset-0 bg-red-500/20 rounded-full animate-ping" />
+          <div className="relative w-24 h-24 bg-red-500/10 rounded-full flex items-center justify-center border-2 border-red-500/30">
+            <svg className="w-12 h-12 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 11-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 004.486-6.336l-3.276 3.277a3.004 3.004 0 01-2.25-2.25l3.276-3.276a4.5 4.5 0 00-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085" />
+            </svg>
+          </div>
+        </div>
+        <h1 className="text-3xl font-bold text-white mb-3">We'll Be Right Back</h1>
+        <p className="text-lg text-slate-400 mb-6">{maintenanceMsg}</p>
+        <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+          <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+          <span>Maintenance in progress</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Main App Component
 function App() {
   return (
@@ -206,7 +398,7 @@ function App() {
         <AuthProvider>
           <AppRouter />
           <LogoutPopup />
-          <Footer />
+          <MaintenanceGuard />
         </AuthProvider>
       </Router>
     </ThemeProvider>

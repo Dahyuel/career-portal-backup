@@ -1,8 +1,12 @@
-import React, { useRef, useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { QRCodeCanvas } from 'qrcode.react';
 import { AttendeeProfile } from '../hooks/useAttendeeProfile';
 import { supabase, uploadFile } from '../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { logger } from '../utils/logger';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 interface AttendeeProfileCardProps {
     profile: AttendeeProfile | null;
@@ -17,44 +21,201 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     hasActiveApplications,
     loading = false,
     onClose,
-    onProfileUpdate
+    onProfileUpdate,
 }) => {
+    const { profile: authProfile, refreshProfile, getRoleBasedRedirect } = useAuth();
+    const navigate = useNavigate();
+    const eventId = authProfile?.event_id ?? undefined;
+
     const qrRef = useRef<HTMLDivElement>(null);
     const [uploading, setUploading] = useState(false);
     const [uploadMessage, setUploadMessage] = useState('');
     const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'qrcode'>('overview');
     const [showRestrictionModal, setShowRestrictionModal] = useState(false);
 
+    // Editable field states
+    const [editingName, setEditingName] = useState(false);
+    const [editName, setEditName] = useState('');
+    const [editingYear, setEditingYear] = useState(false);
+    const [editYear, setEditYear] = useState<number | null>(null);
+    const [editingDepartment, setEditingDepartment] = useState(false);
+    const [editDepartment, setEditDepartment] = useState('');
+    const [saving, setSaving] = useState(false);
+    const [saveMessage, setSaveMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+    // Signed URLs for the private bucket (CV + proof)
+    const [cvSignedUrl, setCvSignedUrl] = useState<string | null>(null);
+    const [proofSignedUrl, setProofSignedUrl] = useState<string | null>(null);
+    const [signedUrlLoading, setSignedUrlLoading] = useState(false);
+
+    const showSaveMsg = (text: string, type: 'success' | 'error') => {
+        setSaveMessage({ text, type });
+        setTimeout(() => setSaveMessage(null), 3000);
+    };
+
+    // ── Generate signed URLs whenever profile.cv_url / enrollment_proof_url changes ──
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadSignedUrls = async () => {
+            if (!profile) return;
+            setSignedUrlLoading(true);
+            setCvSignedUrl(null);
+            setProofSignedUrl(null);
+
+            try {
+                const tasks: Promise<void>[] = [];
+
+                if (profile.cv_url) {
+                    tasks.push(
+                        supabase.storage
+                            .from('ems-assets')
+                            .createSignedUrl(profile.cv_url, 60 * 60, { download: false })
+                            .then(({ data, error }) => {
+                                if (cancelled) return;
+                                if (error) {
+                                    logger.error('Failed to sign CV URL:', error);
+                                    return;
+                                }
+                                setCvSignedUrl(data?.signedUrl ?? null);
+                            })
+                    );
+                }
+
+                if (profile.enrollment_proof_url) {
+                    tasks.push(
+                        supabase.storage
+                            .from('ems-assets')
+                            .createSignedUrl(profile.enrollment_proof_url, 60 * 60, { download: false })
+                            .then(({ data, error }) => {
+                                if (cancelled) return;
+                                if (error) {
+                                    logger.error('Failed to sign proof URL:', error);
+                                    return;
+                                }
+                                setProofSignedUrl(data?.signedUrl ?? null);
+                            })
+                    );
+                }
+
+                await Promise.all(tasks);
+            } finally {
+                if (!cancelled) setSignedUrlLoading(false);
+            }
+        };
+
+        loadSignedUrls();
+        return () => { cancelled = true; };
+    }, [profile?.cv_url, profile?.enrollment_proof_url, profile]);
+
+    // ── Refresh profile without full page reload ──
+    // Pass event_id, user_id, user_email explicitly so AuthContext doesn't need
+    // to re-fetch the session, and skip cache invalidation (forceRefresh=false).
+    const silentRefreshProfile = async () => {
+        console.log('[SILENT REFRESH] Called with:', {
+            hasProfileId: !!authProfile?.id,
+            hasEmail: !!authProfile?.email,
+            eventId,
+        });
+        try {
+            if (!authProfile?.id || !authProfile?.email || !eventId) {
+                console.warn('[SILENT REFRESH] Missing required values — skipping');
+                return;
+            }
+            const result = await refreshProfile(eventId, authProfile.id, authProfile.email, true);
+            console.log('[SILENT REFRESH] Result profile.full_name:', result?.full_name);
+        } catch (err) {
+            console.warn('[SILENT REFRESH] Failed:', err);
+        }
+    };
+
+    const handleSaveName = async () => {
+        if (!editName.trim() || editName.trim().length < 2) {
+            showSaveMsg('Name must be at least 2 characters', 'error');
+            return;
+        }
+        setSaving(true);
+        try {
+            console.log('[SAVE NAME] Sending:', editName.trim());
+            const { data, error } = await supabase.rpc('update_display_name', { p_full_name: editName.trim() });
+            console.log('[SAVE NAME] RPC response:', { data, error });
+            if (error) throw error;
+
+            showSaveMsg('Name updated successfully!', 'success');
+            setEditingName(false);
+
+            console.log('[SAVE NAME] Calling silent refresh...');
+            await silentRefreshProfile();
+            console.log('[SAVE NAME] Silent refresh done');
+            onProfileUpdate?.();
+        } catch (err: any) {
+            console.error('[SAVE NAME] Failed:', err);
+            showSaveMsg(err.message || 'Failed to update name', 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSaveYear = async (year: number) => {
+        setSaving(true);
+        try {
+            const { error } = await supabase.rpc('update_attendee_info', { p_year: year });
+            if (error) throw error;
+            showSaveMsg('Year updated successfully!', 'success');
+            setEditingYear(false);
+            await silentRefreshProfile();
+            onProfileUpdate?.();
+        } catch (err: any) {
+            logger.error('Error updating year:', err);
+            showSaveMsg(err.message || 'Failed to update year', 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSaveDepartment = async () => {
+        setSaving(true);
+        try {
+            const { error } = await supabase.rpc('update_attendee_info', { p_department: editDepartment.trim() || null });
+            if (error) throw error;
+            showSaveMsg('Department updated successfully!', 'success');
+            setEditingDepartment(false);
+            await silentRefreshProfile();
+            onProfileUpdate?.();
+        } catch (err: any) {
+            logger.error('Error updating department:', err);
+            showSaveMsg(err.message || 'Failed to update department', 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
     const downloadQRCode = () => {
-        const svg = qrRef.current?.querySelector('svg');
-        if (!svg) return;
+        const qrCanvas = qrRef.current?.querySelector('canvas');
+        if (!qrCanvas) return;
 
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const svgData = new XMLSerializer().serializeToString(svg);
-        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(svgBlob);
+        const padding = 24;
+        canvas.width = qrCanvas.width + padding * 2;
+        canvas.height = qrCanvas.height + padding * 2;
 
-        const img = new Image();
-        img.onload = () => {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            canvas.toBlob((blob) => {
-                if (blob) {
-                    const link = document.createElement('a');
-                    link.download = `attendee-qr-${profile?.personal_id}.png`;
-                    link.href = URL.createObjectURL(blob);
-                    link.click();
-                    URL.revokeObjectURL(link.href);
-                }
-            });
-            URL.revokeObjectURL(url);
-        };
-        img.src = url;
+        ctx.drawImage(qrCanvas, padding, padding);
+
+        canvas.toBlob((blob) => {
+            if (blob) {
+                const link = document.createElement('a');
+                link.download = `attendee-qr-${profile?.personal_id}.png`;
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                URL.revokeObjectURL(link.href);
+            }
+        });
     };
 
     const handleCVUploadClick = (e: React.MouseEvent) => {
@@ -66,6 +227,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
 
     const handleCVUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
+        event.target.value = ''; // allow re-selecting the same file
         if (!file || !profile) return;
 
         if (file.type !== 'application/pdf') {
@@ -73,25 +235,52 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
             return;
         }
 
+        if (!eventId) {
+            setUploadMessage('No active event — please reload.');
+            return;
+        }
+
         setUploading(true);
         setUploadMessage('');
 
         try {
-            const { data: uploadData, error: uploadError } = await uploadFile('CV', profile.id, file);
+            // 1. Delete old CV from bucket if one exists (any extension)
+            if (profile.cv_url) {
+                const parts = profile.cv_url.split('/');
+                const personalId = parts[0];
+                const folder = `${personalId}/cv`;
+
+                const { data: existing } = await supabase.storage
+                    .from('ems-assets')
+                    .list(folder, { limit: 100 });
+
+                if (existing && existing.length > 0) {
+                    const toRemove = existing.map(f => `${folder}/${f.name}`);
+                    await supabase.storage.from('ems-assets').remove(toRemove);
+                }
+            }
+
+            // 2. Upload new CV
+            const { data: uploadData, error: uploadError } = await uploadFile(
+                'CV',
+                profile.id,
+                file,
+                eventId
+            );
 
             if (uploadError || !uploadData) throw new Error(uploadError?.message || 'Upload failed');
 
+            // 3. Save the PATH (not a signed URL) to the DB
             const { error: updateError } = await supabase
-                .from('attendees')
-                .update({ cv_url: uploadData.url })
-                .eq('user_id', profile.id);
+                .rpc('update_attendee_cv', { p_cv_url: uploadData.path });
 
             if (updateError) throw updateError;
 
             setUploadMessage('CV uploaded successfully!');
+            await silentRefreshProfile();
             onProfileUpdate?.();
         } catch (error: any) {
-            console.error('Error uploading CV:', error);
+            logger.error('Error uploading CV:', error);
             setUploadMessage(error.message || 'Failed to upload CV');
         } finally {
             setUploading(false);
@@ -99,7 +288,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     };
 
     if (loading || !profile) {
-        return (
+        return createPortal(
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]" onClick={onClose}>
                 <motion.div
                     initial={{ opacity: 0, scale: 0.9 }}
@@ -108,16 +297,17 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                 >
                     <motion.div
                         animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                         className="rounded-full h-12 w-12 border-b-2 border-red-600 mb-4"
                     />
                     <p className="text-gray-600 dark:text-gray-400 font-medium">Loading profile...</p>
                 </motion.div>
-            </div>
+            </div>,
+            document.body
         );
     }
 
-    return (
+    return createPortal(
         <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
             <motion.div
                 initial={{ opacity: 0 }}
@@ -131,7 +321,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                 initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                transition={{ type: "spring", duration: 0.5 }}
+                transition={{ type: 'spring', duration: 0.5 }}
                 className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] relative z-10"
                 onClick={(e) => e.stopPropagation()}
             >
@@ -152,7 +342,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                     <motion.div
                         initial={{ scale: 0, y: 20 }}
                         animate={{ scale: 1, y: 0 }}
-                        transition={{ delay: 0.1, type: "spring" }}
+                        transition={{ delay: 0.1, type: 'spring' }}
                         className="absolute -bottom-12 left-8"
                     >
                         <div className="w-24 h-24 rounded-full border-4 border-white dark:border-slate-900 bg-white dark:bg-slate-800 flex items-center justify-center shadow-md">
@@ -163,14 +353,60 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
 
                 {/* Profile Name & Tabs */}
                 <div className="pt-14 px-8 pb-4 border-b border-gray-100 dark:border-slate-800">
-                    <motion.h2
+                    <motion.div
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.2 }}
-                        className="text-2xl font-bold text-gray-900 dark:text-white"
+                        className="flex items-center gap-2"
                     >
-                        {profile.full_name}
-                    </motion.h2>
+                        {editingName ? (
+                            <div className="flex items-center gap-2 w-full">
+                                <input
+                                    type="text"
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false); }}
+                                    autoFocus
+                                    disabled={saving}
+                                    className="text-2xl font-bold text-gray-900 dark:text-white bg-gray-50 dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded-lg px-3 py-1 outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent w-full"
+                                    placeholder="Full Name"
+                                />
+                                <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={handleSaveName}
+                                    disabled={saving}
+                                    className="text-green-600 hover:text-green-700 dark:text-green-400 p-1 rounded-full hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-xl">{saving ? 'progress_activity' : 'check'}</span>
+                                </motion.button>
+                                <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => setEditingName(false)}
+                                    disabled={saving}
+                                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                    <span className="material-symbols-outlined text-xl">close</span>
+                                </motion.button>
+                            </div>
+                        ) : (
+                            <>
+                                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                                    {profile.full_name}
+                                </h2>
+                                <motion.button
+                                    whileHover={{ scale: 1.1 }}
+                                    whileTap={{ scale: 0.9 }}
+                                    onClick={() => { setEditName(profile.full_name || ''); setEditingName(true); }}
+                                    className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                                    title="Edit name"
+                                >
+                                    <span className="material-symbols-outlined text-lg">edit</span>
+                                </motion.button>
+                            </>
+                        )}
+                    </motion.div>
                     <motion.p
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
@@ -179,6 +415,25 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                     >
                         {profile.university || 'ASU Student'}
                     </motion.p>
+
+                    <AnimatePresence>
+                        {saveMessage && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className={`mt-2 px-3 py-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 ${saveMessage.type === 'success'
+                                    ? 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'
+                                    : 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400'
+                                    }`}
+                            >
+                                <span className="material-symbols-outlined text-sm">
+                                    {saveMessage.type === 'success' ? 'check_circle' : 'error'}
+                                </span>
+                                {saveMessage.text}
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -196,8 +451,8 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                 whileTap={{ y: 0 }}
                                 onClick={() => setActiveTab(tab as any)}
                                 className={`pb-2 text-sm font-semibold transition-colors relative ${activeTab === tab
-                                        ? 'text-red-600'
-                                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                                    ? 'text-red-600'
+                                    : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
                                     }`}
                             >
                                 {tab.charAt(0).toUpperCase() + tab.slice(1).replace('qrcode', 'QR Code')}
@@ -224,8 +479,25 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                 transition={{ duration: 0.3 }}
                                 className="space-y-6"
                             >
+                                {/* Back to Volunteer Dashboard — only for non-attendee roles */}
+                                {authProfile?.role && authProfile.role !== 'attendee' && (
+                                    <motion.button
+                                        initial={{ opacity: 0, y: -8 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        whileHover={{ scale: 1.01 }}
+                                        whileTap={{ scale: 0.99 }}
+                                        onClick={() => {
+                                            onClose();
+                                            navigate(getRoleBasedRedirect(authProfile.role));
+                                        }}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors font-medium border border-red-200 dark:border-red-800/50"
+                                    >
+                                        <span className="material-symbols-outlined">arrow_back</span>
+                                        Back to {authProfile.role.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())} Dashboard
+                                    </motion.button>
+                                )}
+
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Personal Info */}
                                     <motion.div
                                         initial={{ opacity: 0, y: 20 }}
                                         animate={{ opacity: 1, y: 0 }}
@@ -241,7 +513,6 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 { label: 'Personal ID', value: profile.personal_id },
                                                 { label: 'Phone', value: profile.phone },
                                                 { label: 'Email', value: profile.email },
-                                                { label: 'Nationality', value: profile.nationality || 'N/A' }
                                             ].map((item, index) => (
                                                 <motion.div
                                                     key={item.label}
@@ -256,7 +527,6 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                         </div>
                                     </motion.div>
 
-                                    {/* Academic Info */}
                                     <motion.div
                                         initial={{ opacity: 0, y: 20 }}
                                         animate={{ opacity: 1, y: 0 }}
@@ -268,33 +538,119 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                             Academic Info
                                         </h3>
                                         <div className="bg-gray-50 dark:bg-slate-800/50 rounded-xl p-4 space-y-3">
-                                            {[
-                                                { label: 'Faculty', value: profile.faculty, show: true },
-                                                { label: 'Department', value: profile.department, show: !!profile.department },
-                                                { label: 'Student ID', value: profile.student_id, show: !!profile.student_id }
-                                            ].filter(item => item.show).map((item, index) => (
-                                                <motion.div
-                                                    key={item.label}
-                                                    initial={{ opacity: 0, x: -10 }}
-                                                    animate={{ opacity: 1, x: 0 }}
-                                                    transition={{ delay: 0.3 + index * 0.1 }}
-                                                >
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400">{item.label}</p>
-                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">{item.value}</p>
-                                                </motion.div>
-                                            ))}
                                             <motion.div
                                                 initial={{ opacity: 0, x: -10 }}
                                                 animate={{ opacity: 1, x: 0 }}
-                                                transition={{ delay: 0.6 }}
+                                                transition={{ delay: 0.3 }}
                                             >
-                                                <p className="text-xs text-gray-500 dark:text-gray-400">Student Type</p>
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${profile.is_asu_student
-                                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-                                                        : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-                                                    }`}>
-                                                    {profile.is_asu_student ? 'ASU Student' : 'Non-ASU Student'}
-                                                </span>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">Faculty</p>
+                                                <p className="text-sm font-medium text-gray-900 dark:text-white">{profile.faculty}</p>
+                                            </motion.div>
+
+                                            <motion.div
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: 0.35 }}
+                                            >
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">Year</p>
+                                                {editingYear ? (
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <select
+                                                            value={editYear ?? ''}
+                                                            onChange={(e) => {
+                                                                const val = parseInt(e.target.value);
+                                                                setEditYear(val);
+                                                                handleSaveYear(val);
+                                                            }}
+                                                            disabled={saving}
+                                                            autoFocus
+                                                            className="text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                                                        >
+                                                            {[1, 2, 3, 4, 5, 6, 7].map(y => (
+                                                                <option key={y} value={y}>Year {y}</option>
+                                                            ))}
+                                                        </select>
+                                                        <motion.button
+                                                            whileHover={{ scale: 1.1 }}
+                                                            whileTap={{ scale: 0.9 }}
+                                                            onClick={() => setEditingYear(false)}
+                                                            disabled={saving}
+                                                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-600 transition-colors"
+                                                        >
+                                                            <span className="material-symbols-outlined text-base">close</span>
+                                                        </motion.button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                            {profile.year ? `Year ${profile.year}` : 'Not set'}
+                                                        </p>
+                                                        <motion.button
+                                                            whileHover={{ scale: 1.1 }}
+                                                            whileTap={{ scale: 0.9 }}
+                                                            onClick={() => { setEditYear(profile.year ?? 1); setEditingYear(true); }}
+                                                            className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                                                            title="Edit year"
+                                                        >
+                                                            <span className="material-symbols-outlined text-sm">edit</span>
+                                                        </motion.button>
+                                                    </div>
+                                                )}
+                                            </motion.div>
+
+                                            <motion.div
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: 0.4 }}
+                                            >
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">Department</p>
+                                                {editingDepartment ? (
+                                                    <div className="flex items-center gap-2 mt-1">
+                                                        <input
+                                                            type="text"
+                                                            value={editDepartment}
+                                                            onChange={(e) => setEditDepartment(e.target.value)}
+                                                            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveDepartment(); if (e.key === 'Escape') setEditingDepartment(false); }}
+                                                            autoFocus
+                                                            disabled={saving}
+                                                            className="text-sm font-medium text-gray-900 dark:text-white bg-white dark:bg-slate-700 border border-gray-300 dark:border-slate-600 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent flex-1"
+                                                            placeholder="Department name"
+                                                        />
+                                                        <motion.button
+                                                            whileHover={{ scale: 1.1 }}
+                                                            whileTap={{ scale: 0.9 }}
+                                                            onClick={handleSaveDepartment}
+                                                            disabled={saving}
+                                                            className="text-green-600 hover:text-green-700 dark:text-green-400 p-0.5 rounded-full hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+                                                        >
+                                                            <span className="material-symbols-outlined text-base">{saving ? 'progress_activity' : 'check'}</span>
+                                                        </motion.button>
+                                                        <motion.button
+                                                            whileHover={{ scale: 1.1 }}
+                                                            whileTap={{ scale: 0.9 }}
+                                                            onClick={() => setEditingDepartment(false)}
+                                                            disabled={saving}
+                                                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-600 transition-colors"
+                                                        >
+                                                            <span className="material-symbols-outlined text-base">close</span>
+                                                        </motion.button>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                            {profile.department || 'Not set'}
+                                                        </p>
+                                                        <motion.button
+                                                            whileHover={{ scale: 1.1 }}
+                                                            whileTap={{ scale: 0.9 }}
+                                                            onClick={() => { setEditDepartment(profile.department || ''); setEditingDepartment(true); }}
+                                                            className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
+                                                            title="Edit department"
+                                                        >
+                                                            <span className="material-symbols-outlined text-sm">edit</span>
+                                                        </motion.button>
+                                                    </div>
+                                                )}
                                             </motion.div>
                                         </div>
                                     </motion.div>
@@ -334,7 +690,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 <motion.div
                                                     initial={{ scale: 0 }}
                                                     animate={{ scale: 1 }}
-                                                    transition={{ delay: 0.2, type: "spring" }}
+                                                    transition={{ delay: 0.2, type: 'spring' }}
                                                     className="bg-blue-100 dark:bg-blue-900/20 p-2 rounded-lg text-blue-600 dark:text-blue-400"
                                                 >
                                                     <span className="material-symbols-outlined text-2xl">description</span>
@@ -342,22 +698,28 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 <div>
                                                     <h4 className="font-semibold text-gray-900 dark:text-white">Curriculum Vitae (CV)</h4>
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                        {profile.cv_url ? "Uploaded and ready" : "Not uploaded yet"}
+                                                        {profile.cv_url ? 'Uploaded and ready' : 'Not uploaded yet'}
                                                     </p>
                                                 </div>
                                             </div>
                                             {profile.cv_url && (
-                                                <motion.a
-                                                    whileHover={{ scale: 1.05 }}
-                                                    whileTap={{ scale: 0.95 }}
-                                                    href={profile.cv_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium hover:underline flex items-center gap-1"
-                                                >
-                                                    View
-                                                    <span className="material-symbols-outlined text-base">open_in_new</span>
-                                                </motion.a>
+                                                cvSignedUrl ? (
+                                                    <motion.a
+                                                        whileHover={{ scale: 1.05 }}
+                                                        whileTap={{ scale: 0.95 }}
+                                                        href={cvSignedUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium hover:underline flex items-center gap-1"
+                                                    >
+                                                        View
+                                                        <span className="material-symbols-outlined text-base">open_in_new</span>
+                                                    </motion.a>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400 italic">
+                                                        {signedUrlLoading ? 'Loading...' : 'Not available'}
+                                                    </span>
+                                                )
                                             )}
                                         </div>
 
@@ -375,13 +737,13 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                     whileHover={{ scale: 1.05 }}
                                                     whileTap={{ scale: 0.95 }}
                                                     className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${profile.cv_url
-                                                            ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 dark:bg-slate-800 dark:border-slate-600 dark:text-gray-300 dark:hover:bg-slate-700'
-                                                            : 'bg-red-600 text-white hover:bg-red-700 shadow-sm hover:shadow'
+                                                        ? 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 dark:bg-slate-800 dark:border-slate-600 dark:text-gray-300 dark:hover:bg-slate-700'
+                                                        : 'bg-red-600 text-white hover:bg-red-700 shadow-sm hover:shadow'
                                                         } ${hasActiveApplications ? 'opacity-70' : ''}`}
                                                 >
                                                     <motion.span
                                                         animate={uploading ? { rotate: 360 } : {}}
-                                                        transition={uploading ? { duration: 1, repeat: Infinity, ease: "linear" } : {}}
+                                                        transition={uploading ? { duration: 1, repeat: Infinity, ease: 'linear' } : {}}
                                                         className="material-symbols-outlined text-lg"
                                                     >
                                                         {uploading ? 'progress_activity' : (profile.cv_url ? 'sync' : 'upload')}
@@ -417,7 +779,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 <motion.div
                                                     initial={{ scale: 0 }}
                                                     animate={{ scale: 1 }}
-                                                    transition={{ delay: 0.3, type: "spring" }}
+                                                    transition={{ delay: 0.3, type: 'spring' }}
                                                     className="bg-purple-100 dark:bg-purple-900/20 p-2 rounded-lg text-purple-600 dark:text-purple-400"
                                                 >
                                                     <span className="material-symbols-outlined text-2xl">badge</span>
@@ -428,17 +790,23 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 </div>
                                             </div>
                                             {profile.enrollment_proof_url ? (
-                                                <motion.a
-                                                    whileHover={{ scale: 1.05 }}
-                                                    whileTap={{ scale: 0.95 }}
-                                                    href={profile.enrollment_proof_url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 text-sm font-medium hover:underline flex items-center gap-1"
-                                                >
-                                                    View
-                                                    <span className="material-symbols-outlined text-base">open_in_new</span>
-                                                </motion.a>
+                                                proofSignedUrl ? (
+                                                    <motion.a
+                                                        whileHover={{ scale: 1.05 }}
+                                                        whileTap={{ scale: 0.95 }}
+                                                        href={proofSignedUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 text-sm font-medium hover:underline flex items-center gap-1"
+                                                    >
+                                                        View
+                                                        <span className="material-symbols-outlined text-base">open_in_new</span>
+                                                    </motion.a>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400 italic">
+                                                        {signedUrlLoading ? 'Loading...' : 'Not available'}
+                                                    </span>
+                                                )
                                             ) : (
                                                 <span className="text-xs text-gray-400 italic">Not available</span>
                                             )}
@@ -473,10 +841,10 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                     ref={qrRef}
                                     initial={{ opacity: 0, scale: 0.5 }}
                                     animate={{ opacity: 1, scale: 1 }}
-                                    transition={{ delay: 0.2, type: "spring" }}
+                                    transition={{ delay: 0.2, type: 'spring' }}
                                     className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mx-auto"
                                 >
-                                    <QRCodeSVG value={profile.id} size={200} level="H" />
+                                    <QRCodeCanvas value={profile.id} size={200} level="H" />
                                 </motion.div>
 
                                 <motion.button
@@ -521,7 +889,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                 <motion.div
                                     initial={{ scale: 0, rotate: -180 }}
                                     animate={{ scale: 1, rotate: 0 }}
-                                    transition={{ delay: 0.2, type: "spring" }}
+                                    transition={{ delay: 0.2, type: 'spring' }}
                                     className="w-16 h-16 bg-red-100 dark:bg-red-900/40 rounded-full flex items-center justify-center mb-4"
                                 >
                                     <span className="material-symbols-outlined text-3xl text-red-600 dark:text-red-400">gpp_maybe</span>
@@ -569,7 +937,8 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                     </motion.div>
                 )}
             </AnimatePresence>
-        </div>
+        </div>,
+        document.body
     );
 };
 
