@@ -115,6 +115,10 @@ const ROLE_PRIORITY: Record<string, number> = {
 
 const getRolePriority = (role: string): number => ROLE_PRIORITY[role] ?? 0;
 
+// Super admins are exempt from event selection: they keep their admin scope.
+const isSuperAdminRole = (role?: string|null): boolean =>
+  role === 'sadmin'|role === 'super_admin';
+
 // ----- Helper: Determine effective role from roles array -----
 const getEffectiveRole = (roles: string[]): string => {
   if (!roles || roles.length === 0) return "attendee";
@@ -243,25 +247,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        // ── Auto-resolve active event for non-attendee users ──────────────
-        let effectiveEventId = eventId;
-        if (!effectiveEventId) {
-          try {
-            const { data: cfg } = await supabase
-              .from('system_config')
-              .select('value')
-              .eq('key', 'active_event_id')
-              .maybeSingle();
-
-            const activeEventId = (cfg?.value as any)?.event_id as string | undefined;
-            if (activeEventId) {
-              effectiveEventId = activeEventId;
-              logger.log('📌 Auto-resolved active event id:', activeEventId);
-            }
-          } catch (err) {
-            logger.warn('Could not fetch active_event_id:', err);
-          }
-        }
+// Event selection is the single source of truth for event_id.
+        // No system_config auto-resolve: every non-sadmin user must pick an
+        // event after login (see EventSelection).
+        const effectiveEventId = eventId;
 
         logger.log('🔍 Fetching profile from database...', {
           userId,
@@ -305,13 +294,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const effectiveRole = getEffectiveRole(incomingRoles);
 
         // ── DOWNGRADE PROTECTION (post-fetch) ─────────────────────────────
+        // Only protect WITHIN the same event. Across events the roles array
+        // legitimately changes: a volunteer in event A is just an attendee in
+        // event B, and we must accept that switch.
         if (
           !forceRefresh &&
           incomingRoles.length === 0 &&
           currentProfile?.id === userId &&
+          currentProfile.event_id === effectiveEventId &&
           getRolePriority(currentProfile.role) > getRolePriority("attendee")
         ) {
-          logger.log('⚠️ No roles returned (no eventId match) — keeping existing role:', currentProfile.role);
+          logger.log('⚠️ No roles returned (same event) — keeping existing role:', currentProfile.role);
           return currentProfile;
         }
 
@@ -457,8 +450,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: session.user.id,
             email: session.user.email || "",
           }));
-        } else if (current?.role === 'attendee') {
-          // Same attendee re-logging in: strip event_id so they must re-select.
+} else if (!isSuperAdminRole(current?.role)) {
+          // Same non-super-admin re-logging in: strip event_id so they must
+          // re-select an event. Applies to attendee, staff and employer alike.
           const clearedProfile = { ...current, event_id: undefined };
           setProfile(clearedProfile);
 
@@ -472,9 +466,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } catch { /* ignore */ }
         }
 
-        // Fetch fresh profile. For attendees this will come back with
-        // roles: [] and no event_id until they pick one.
-        fetchUserProfile(session.user.id, session.user.email || "", undefined)
+        // Fetch fresh profile. Without an event_id this comes back with
+        // roles: [] until the user picks an event.
+        fetchUserProfile(session.user.id, session.user.email|"", undefined)
           .catch(console.error);
       } else if (event === "SIGNED_OUT") {
         setUser(null);

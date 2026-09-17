@@ -73,18 +73,3 @@ export const openEmployerEvent = async (eventId: string): Promise<{ success: boo
   if (!data?.success) return { success: false, error: data?.error || 'Could not open this event' };
   return { success: true };
 };
-
-/** Roles that keep their own dashboard even if the account is also an employer somewhere. */
-const STAFF_ROLES = ['sadmin', 'super_admin', 'admin', 'team_leader', 'tech_support',
-  'volunteer', 'building', 'registration', 'info_desk', 'verification'];
-
-/**
- * After login: should this account go through employer onboarding?
- * Staff keep their dashboards; attendee-or-unknown accounts that an admin made
- * employers go to /employer-start.
- */
-export const shouldUseEmployerStart = async (role?: string | null): Promise<boolean> => {
-  if (role && STAFF_ROLES.includes(role)) return false;
-  const status = await getEmployerStatus();
-  return !!status?.is_employer;
-};

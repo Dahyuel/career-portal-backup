@@ -1,8 +1,8 @@
 // pages/Employer/EmployerStart.tsx
 // Employer onboarding after login. Accounts are created by admins, so on first
 // login the employer fills in their profile, then picks one of their events.
-import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   AlertCircle, ArrowRight, Briefcase, Building2, Calendar, FileText,
@@ -28,7 +28,12 @@ const inputClass = (hasError: boolean) =>
 
 export const EmployerStart: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, signOut, refreshProfile } = useAuth();
+  // Set when the user picked a specific company event in /select-event and we
+  // need to complete the profile first, then open that event.
+  const targetEventId = searchParams.get('eventId');
+  const autoOpenedRef = useRef(false);
 
   const [status, setStatus] = useState<EmployerStatus | null>(null);
   const [loading, setLoading] = useState(true);

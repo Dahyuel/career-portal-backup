@@ -484,6 +484,8 @@ export interface FairEvent {
   non_asu_ticket_price?: number;
   venue_name?: string | null;
   is_current?: boolean;
+  is_ended?: boolean;
+  can_register?: boolean;
   landing?: any;
 }
 
@@ -496,7 +498,18 @@ export const getActiveEvents = async (): Promise<{ data: FairEvent[]; error: { m
       return { data: [], error: { message: error.message } };
     }
 
-    return { data: ((data as any)?.events as FairEvent[]) || [], error: null };
+    let parsedData = data;
+    if (typeof data === 'string') {
+      try {
+        parsedData = JSON.parse(data);
+      } catch (e) {
+        // ignore JSON parse error
+      }
+    }
+    const rawEvents = (parsedData as any)?.events ?? parsedData;
+    const eventsArray = Array.isArray(rawEvents) ? rawEvents : (Array.isArray(parsedData) ? parsedData : []);
+
+    return { data: eventsArray as FairEvent[], error: null };
   } catch (error: any) {
     logger.error('💥 [EVENTS] Exception:', error);
     return { data: [], error: { message: error.message } };

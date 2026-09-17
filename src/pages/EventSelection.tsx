@@ -1,33 +1,97 @@
 // pages/EventSelection.tsx
-// Post-login screen where the user picks which active event to join.
+// Post-login screen where the user picks which event to join.
+// All roles except sadmin/super_admin land here. If the user already has a role
+// in the picked event they go straight to their dashboard; otherwise employer
+// company events open as employer, and everything else registers as an attendee.
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, MapPin, ArrowRight, AlertCircle, LogOut, Loader2 } from '../components/icons';
+import { Calendar, MapPin, ArrowRight, AlertCircle, LogOut, Loader2, Building2, Lock } from '../components/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { getActiveEvents, checkEventRegistration, FairEvent } from '../lib/supabase';
+import { getEmployerStatus, openEmployerEvent } from '../lib/employer';
+import { getActiveEventId } from '../lib/currentEvent';
 import { logger } from '../utils/logger';
 import DashboardLoading from '../components/DashboardLoading';
 
+// An event in the merged picker list. Employer-only events (company participates
+// but the event isn't in get_active_events) are merged in as well.
+interface PickableEvent extends FairEvent {
+  isEmployerEvent?: boolean;
+  companyName?: string|null;
+}
+
 export const EventSelection: React.FC = () => {
   const navigate = useNavigate();
-  const { signOut, user, getRoleBasedRedirect, refreshProfile } = useAuth();
+  const { signOut, user, profile, getRoleBasedRedirect, refreshProfile } = useAuth();
 
-  const [events, setEvents] = useState<FairEvent[]>([]);
+  const [events, setEvents] = useState<PickableEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectingId, setSelectingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [selectingId, setSelectingId] = useState<string|null>(null);
+  const [error, setError] = useState<string|null>(null);
+  // Employer events where the company takes part but the user has no employers
+  // row yet. Selecting one runs employer_open_event.
+  const [employerOpenable, setEmployerOpenable] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const loadEvents = async () => {
       try {
         setLoading(true);
-        const { data, error: fetchError } = await getActiveEvents();
+        const [{ data: activeEvents, error: fetchError }, employerStatus] = await Promise.all([
+          getActiveEvents(),
+          getEmployerStatus().catch(() => null),
+        ]);
+
         if (fetchError) {
+          // Fallback: if the picker list can't be loaded, at least surface the
+          // system_config active event so the user isn't fully locked out.
+          const fallbackId = getActiveEventId();
+          logger.warn('EventSelection: using system_config fallback', fallbackId);
           setError(fetchError.message);
           return;
         }
-        setEvents(data || []);
+
+        const merged: PickableEvent[] = [...(Array.isArray(activeEvents) ? activeEvents : [])];
+        const seen = new Set(merged.map((e) => e.id));
+        const openable = new Set<string>();
+
+        if (employerStatus?.is_employer) {
+          for (const ev of employerStatus.events) {
+            const existing = merged.find((m) => m.id === ev.event_id);
+            if (existing) {
+              existing.isEmployerEvent = true;
+              existing.companyName = ev.company_name;
+              // Company participates but the user has no employers row yet.
+              if (!profile?.employer|profile.employer.company_id !== ev.company_id) {
+                openable.add(ev.event_id);
+              }
+            } else if (!seen.has(ev.event_id)) {
+              seen.add(ev.event_id);
+              merged.push({
+                id: ev.event_id,
+                name: ev.event_name,
+                event_type: ev.event_type,
+                start_date: ev.start_date|undefined,
+                end_date: ev.end_date|undefined,
+                status: ev.status|undefined,
+                venue_name: ev.venue_name,
+                is_current: ev.is_current,
+                is_ended: ev.is_ended,
+                can_register: false,
+                isEmployerEvent: true,
+                companyName: ev.company_name,
+              });
+              openable.add(ev.event_id);
+            }
+          }
+        }
+
+        merged.sort(
+          (a, b) => new Date(b.start_date|0).getTime() - new Date(a.start_date|0).getTime()
+        );
+
+        setEmployerOpenable(openable);
+        setEvents(merged);
       } catch (err: any) {
         logger.error('EventSelection load error:', err);
         setError('Could not load events. Please try again.');
@@ -37,9 +101,9 @@ export const EventSelection: React.FC = () => {
     };
 
     loadEvents();
-  }, []);
+  }, [profile?.employer]);
 
-  const handleSelectEvent = async (event: FairEvent) => {
+  const handleSelectEvent = async (event: PickableEvent) => {
     if (!user) return;
     setSelectingId(event.id);
     setError(null);
@@ -54,7 +118,7 @@ export const EventSelection: React.FC = () => {
       }
 
       if (registration) {
-        // Already registered → bind event_id to the profile and go to dashboard.
+        // Already has a role in this event → bind event_id and go to dashboard.
         const updated = await refreshProfile(event.id, user.id, user.email, true);
 
         if (!updated?.event_id) {
@@ -67,22 +131,46 @@ export const EventSelection: React.FC = () => {
           return;
         }
 
-        const role = registration.role || updated.role || 'attendee';
+        const role = registration.role|updated.role|'attendee';
         const redirectPath = getRoleBasedRedirect(role);
         logger.log(`✅ Event ${event.id} bound. Redirecting ${role} → ${redirectPath}`);
         navigate(redirectPath, { replace: true });
         return;
       }
 
-      // Not registered yet → navigate to registration form.
+      // Employer company event with no employers row: complete the profile
+      // first (same as the old /employer-start flow), then open the event.
+      if (event.isEmployerEvent && employerOpenable.has(event.id)) {
+        if (!profile?.profile_complete) {
+          navigate(`/employer-start?eventId=${event.id}`, { replace: false });
+          return;
+        }
+
+        const opened = await openEmployerEvent(event.id);
+        if (opened.success) {
+          const updated = await refreshProfile(event.id, user.id, user.email, true);
+          if (updated?.roles?.includes('employer')) {
+            navigate('/employer', { replace: true });
+            return;
+          }
+        }
+        // Otherwise fall through to attendee registration / ended handling.
+      }
+
+      // Event has ended and the user has no role there → blocked.
+      if (event.is_ended) {
+        setError('This event has ended and you cannot join it.');
+        setSelectingId(null);
+        return;
+      }
+
+      // Joinable → attendee registration form.
       // Do NOT refresh profile here — the user has no role yet for this event,
       // and the AuthContext would refuse to cache a role-less profile.
-      // The registration flow itself (register_attendee + refreshProfile after)
-      // will persist the event_id once the role exists.
       navigate(`/register-event?eventId=${event.id}`, { replace: false });
     } catch (err: any) {
       logger.error('Error selecting event:', err);
-      setError(err.message || 'Something went wrong. Please try again.');
+      setError(err.message|'Something went wrong. Please try again.');
       setSelectingId(null);
     }
   };
@@ -123,7 +211,7 @@ export const EventSelection: React.FC = () => {
             <Calendar className="w-8 h-8 text-asu-red" />
           </motion.div>
           <h1 className="text-2xl font-bold text-white mb-2">Select an Event</h1>
-          <p className="text-red-100">Choose the event you would like to register for.</p>
+          <p className="text-red-100">Choose the event you would like to open.</p>
         </div>
 
         <div className="p-8">
@@ -165,11 +253,23 @@ export const EventSelection: React.FC = () => {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
+                      <div className="flex flex-wrap items-center gap-3 mb-2">
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white">{event.name}</h3>
                         {event.is_current && (
                           <span className="px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full">
                             Current
+                          </span>
+                        )}
+                        {event.isEmployerEvent && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 rounded-full">
+                            <Building2 className="w-3 h-3" />
+                            Employer{event.companyName ? ` · ${event.companyName}` : ''}
+                          </span>
+                        )}
+                        {event.is_ended && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-200 rounded-full">
+                            <Lock className="w-3 h-3" />
+                            Ended
                           </span>
                         )}
                       </div>

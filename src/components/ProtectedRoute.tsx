@@ -114,13 +114,14 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     const isAdmin = isSuperAdmin(role);
     const isAttendee = role === 'attendee';
 
-    // ── 5a. Non-attendee without active event → block ─────────────────────
+    // ── 5a. Non-attendee without active event → /select-event ─────────────
     // Every non-attendee (volunteer, staff, employer, etc.) REQUIRES an
-    // active event. Only sadmin / super_admin are exempt.
+    // active event. Only sadmin / super_admin are exempt. Selection is the
+    // single source of truth, so send them to the picker.
     if (!isAdmin && !isAttendee && !profile.event_id) {
-      logger.log('🚫 No active event for role:', role, '— blocking access');
-      if (location.pathname !== '/no-active-event') {
-        return <Navigate to="/no-active-event" replace />;
+      logger.log('🚫 No active event for role:', role, '— redirecting to selection');
+      if (!onPublicPath) {
+        return <Navigate to="/select-event" replace />;
       }
     }
 
@@ -133,11 +134,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       return <Navigate to="/select-event" replace />;
     }
 
-    // ── 5c. Non-attendee with event_id but empty roles → /no-active-event ─
+    // ── 5c. Non-attendee with event_id but empty roles → /select-event ────
     if (!isAdmin && !isAttendee && profile.event_id && profile.roles.length === 0) {
-      logger.log('⚠️ Non-attendee with event but empty roles');
+      logger.log('⚠️ Non-attendee with event but empty roles — redirecting to selection');
       if (!onPublicPath) {
-        return <Navigate to="/no-active-event" replace />;
+        return <Navigate to="/select-event" replace />;
       }
     }
 
