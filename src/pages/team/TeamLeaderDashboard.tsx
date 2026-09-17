@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../contexts/AuthContext';
 import { QRScanner } from '../../components/shared/QRScanner';
 import VolunteerInfoModal from '../../components/teamleader/VolunteerInfoModal';
 import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
@@ -55,6 +56,9 @@ interface TeamMember {
 }
 
 export const TeamLeaderDashboard: React.FC = () => {
+  // The team leader's own event. Without it the database falls back to whichever
+  // event is current, which is the wrong team when two events are live.
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [loading, setLoading] = useState(true);
   const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null);
@@ -88,12 +92,18 @@ export const TeamLeaderDashboard: React.FC = () => {
 
   // Fetch team leader data on mount
   useEffect(() => {
+    // Admins legitimately have no event of their own, and this RPC allows them.
+    // Passing null lets the database fall back to the current event, as before.
+    const eventId = profile?.event_id ?? null;
+
     const fetchTeamLeaderData = async () => {
       try {
         setLoading(true);
 
         // Single RPC call to get team info, leader name, and member count
-        const { data, error } = await supabase.rpc('get_team_leader_data');
+        const { data, error } = await supabase.rpc('get_team_leader_data', {
+          p_event_id: eventId
+        });
 
         if (error || !data) {
           logger.error('Error fetching team leader data:', error);
@@ -128,7 +138,7 @@ export const TeamLeaderDashboard: React.FC = () => {
     };
 
     fetchTeamLeaderData();
-  }, []);
+  }, [profile?.event_id]);
 
   // fetchInitialTeamStats is now handled by get_team_leader_data RPC
 
@@ -194,7 +204,8 @@ export const TeamLeaderDashboard: React.FC = () => {
     setLoadingVolunteerDetails(true);
     try {
       const { data, error } = await supabase.rpc('get_full_volunteer_details', {
-        p_volunteer_identifier: volunteerId
+        p_volunteer_identifier: volunteerId,
+        p_event_id: profile?.event_id ?? null
       });
 
       if (error) {

@@ -287,7 +287,8 @@ export const VerificationDashboard: React.FC = () => {
                 p_search_term: searchTerm.trim(),
                 p_status_filter: statusSubTab,
                 p_limit: VERIFICATION_PAGE_SIZE,
-                p_offset: offset
+                p_offset: offset,
+                p_event_id: profile.event_id
             });
 
             if (mainError) {
@@ -314,7 +315,8 @@ export const VerificationDashboard: React.FC = () => {
                         p_search_term: searchTerm.trim(),
                         p_status_filter: status,
                         p_limit: 1,
-                        p_offset: 0
+                        p_offset: 0,
+                        p_event_id: profile.event_id
                     })
                 )
             );

@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronLeft } from '../icons';
 import {
   buttonClass, callSadmin, errorText, formatDateTime, fromLocalInput, inputClass, labelClass, toLocalInput,
-  type EventDetail, type EventTeamRow, type Notify
+  type EventDetail, type EventReadiness, type EventTeamRow, type Notify
 } from './sadminApi';
 import { Badge, ConfirmDialog, ErrorBlock, LoadingBlock, MIcon, Panel, Toggle } from './ui';
 import { EVENT_TYPE_LABELS } from '../../lib/landingContent';
@@ -279,6 +279,8 @@ const EventEditor: React.FC<{ eventId: string; notify: Notify; onBack: () => voi
   const [view, setView] = useState<View>('details');
   const [makeCurrentOpen, setMakeCurrentOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [withData, setWithData] = useState(false);
+  const [readiness, setReadiness] = useState<EventReadiness | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -294,7 +296,18 @@ const EventEditor: React.FC<{ eventId: string; notify: Notify; onBack: () => voi
     }
   }, [eventId]);
 
+  // What is still missing before this event can go live.
+  const loadReadiness = useCallback(async () => {
+    try {
+      const r = await callSadmin<EventReadiness>('sadmin_event_readiness', { _event_id: eventId }, 'Could not check the event.');
+      setReadiness(r);
+    } catch {
+      setReadiness(null); // The checklist is a helper, never a blocker.
+    }
+  }, [eventId]);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadReadiness(); }, [loadReadiness, detail?.event.status]);
 
   const makeCurrent = async (reason: string, typed: string) => {
     setBusy(true);
@@ -313,11 +326,17 @@ const EventEditor: React.FC<{ eventId: string; notify: Notify; onBack: () => voi
   const remove = async (reason: string, typed: string) => {
     setBusy(true);
     try {
-      await callSadmin('sadmin_delete_event', { _event_id: eventId, _confirm_name: typed, _reason: reason }, 'Could not delete the event.');
+      await callSadmin('sadmin_delete_event', {
+        _event_id: eventId,
+        _confirm_name: typed,
+        _reason: reason,
+        _with_data: withData
+      }, 'Could not delete the event.');
       notify(`${detail?.event.name ?? 'The event'} was deleted.`, 'success');
       setDeleteOpen(false);
       onBack();
     } catch (err) {
+      // When it refuses, the message already lists what is still inside.
       notify(errorText(err, 'Could not delete the event.'), 'error');
     } finally {
       setBusy(false);
@@ -414,6 +433,35 @@ const EventEditor: React.FC<{ eventId: string; notify: Notify; onBack: () => voi
         ))}
       </div>
 
+      {view === 'details' && readiness && (
+        <Panel
+          title={readiness.ready ? 'Ready to go live' : 'Before you publish'}
+          subtitle={
+            readiness.ready
+              ? 'Everything needed is set up. Publishing makes it appear in the chooser people see when they sign in.'
+              : 'These are worth setting before this event is open to people.'
+          }
+          actions={readiness.ready ? <Badge tone="green">Ready</Badge> : <Badge tone="amber">{readiness.checks.filter((c) => !c.ok).length} to do</Badge>}
+        >
+          <ul className="space-y-2">
+            {readiness.checks.map((c) => (
+              <li key={c.code} className="flex items-start gap-3">
+                <MIcon
+                  name={c.ok ? 'check_circle' : 'radio_button_unchecked'}
+                  className={`text-lg mt-0.5 ${c.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}
+                />
+                <div className="min-w-0">
+                  <p className={`text-sm font-semibold ${c.ok ? 'text-slate-500 dark:text-slate-400 line-through' : 'text-slate-900 dark:text-white'}`}>
+                    {c.label}
+                  </p>
+                  {!c.ok && <p className="text-xs text-slate-500 dark:text-slate-400">{c.hint}</p>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      )}
+
       {view === 'details' && <DetailsEditor key={JSON.stringify(event)} detail={detail} notify={notify} onSaved={load} />}
       {view === 'landing' && (
         <LandingEditor eventId={event.id} stored={detail.landing} isCurrent={event.is_current} notify={notify} onSaved={load} />
@@ -445,22 +493,37 @@ const EventEditor: React.FC<{ eventId: string; notify: Notify; onBack: () => voi
       <ConfirmDialog
         open={deleteOpen}
         title="Delete this event"
-        confirmLabel="Delete event"
+        confirmLabel={withData ? 'Delete everything' : 'Delete event'}
         danger
         reason="required"
         typeToConfirm={event.name}
         busy={busy}
-        onClose={() => setDeleteOpen(false)}
+        onClose={() => { setDeleteOpen(false); setWithData(false); }}
         onConfirm={remove}
         description={
           <>
-            <p>Deletes <strong>{event.name}</strong> with its volunteer teams and points rules. This cannot be undone.</p>
+            <p>Deletes <strong>{event.name}</strong>. This cannot be undone.</p>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Only an empty event can be deleted. If it already has people, registrations, sessions, companies, check-ins, bookings or a schedule, you are told what is still in it and nothing is removed.
+              By default only an empty event is removed: if it still holds people, registrations, sessions, check-ins or feedback, nothing is deleted and you are told what is inside.
             </p>
           </>
         }
-      />
+      >
+        <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 p-3">
+          <input
+            type="checkbox"
+            checked={withData}
+            onChange={(e) => setWithData(e.target.checked)}
+            className="w-5 h-5 rounded accent-red-600 mt-0.5"
+          />
+          <span className="text-sm">
+            <span className="font-semibold text-red-700 dark:text-red-300">Delete everything inside it too</span>
+            <span className="block text-xs text-red-600 dark:text-red-400 mt-0.5">
+              Registrations, check-ins, bookings, sessions, teams, feedback and roles for this event are permanently removed. The activity log keeps a record of the deletion.
+            </span>
+          </span>
+        </label>
+      </ConfirmDialog>
     </div>
   );
 };

@@ -242,7 +242,7 @@ export const BuildTeamDashboard: React.FC = () => {
     if (!profile?.event_id) return;
     try {
       setIsLoadingSessions(true);
-      const { data, error } = await getBuildingSessionsRPC();
+      const { data, error } = await getBuildingSessionsRPC(profile.event_id);
 
       if (error) {
         logger.error('Error fetching sessions:', error);
@@ -409,7 +409,7 @@ export const BuildTeamDashboard: React.FC = () => {
     setIsSessionSearching(true);
     try {
       // Use optimized function from supabase.ts - Scoped to session bookings (2-step)
-      const { data, error } = await searchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim());
+      const { data, error } = await searchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim(), profile?.event_id ?? undefined);
 
       if (error) {
         logger.error('Error searching:', error);

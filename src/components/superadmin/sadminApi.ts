@@ -138,6 +138,8 @@ export interface AuditEntry {
   target_table: string | null;
   target_key: Record<string, unknown> | null;
   details: Record<string, unknown> | null;
+  /** Which event the change belonged to, when it belonged to one (v2_07). */
+  event_id?: string | null;
 }
 
 export interface StaffSignIn {

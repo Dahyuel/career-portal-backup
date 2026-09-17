@@ -270,7 +270,7 @@ export const InfoDeskDashboard: React.FC = () => {
     }
     setIsSessionSearching(true);
     try {
-      const { data, error } = await searchAttendeesByPersonalId(sessionSearchTerm.trim());
+      const { data, error } = await searchAttendeesByPersonalId(sessionSearchTerm.trim(), profile?.event_id ?? undefined);
       if (error) {
         logger.error("Search error:", error);
         setSessionSearchResults([]);

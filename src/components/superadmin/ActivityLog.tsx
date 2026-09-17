@@ -13,6 +13,7 @@ import {
   roleLabel,
   timeAgo,
   type AuditEntry,
+  type EventSummary,
   type Notify,
   type SignInEvent,
   type StaffSignIn
@@ -80,7 +81,18 @@ const AuditLog: React.FC = () => {
   const [result, setResult] = useState<AuditResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // '' means every event; changes that belong to no event always show.
+  const [eventFilter, setEventFilter] = useState('');
+  const [events, setEvents] = useState<EventSummary[]>([]);
   const requestId = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    callSadmin<{ events: EventSummary[] }>('sadmin_list_events', undefined, 'Could not load the events.')
+      .then((r) => { if (!cancelled) setEvents(r.events); })
+      .catch(() => { /* the filter stays hidden */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => { setDebouncedSearch(search.trim()); setPage(0); }, 300);
@@ -97,7 +109,8 @@ const AuditLog: React.FC = () => {
         _action: action || null,
         _search: debouncedSearch || null,
         _from: fromLocalInput(from),
-        _to: fromLocalInput(to)
+        _to: fromLocalInput(to),
+        _event_id: eventFilter || null
       }, 'Could not load the activity log.');
       if (id !== requestId.current) return;
       setResult(data);
@@ -108,13 +121,13 @@ const AuditLog: React.FC = () => {
     } finally {
       if (id === requestId.current) setLoading(false);
     }
-  }, [action, debouncedSearch, from, to, page]);
+  }, [action, debouncedSearch, from, to, page, eventFilter]);
 
   useEffect(() => { load(); }, [load]);
 
   const rows = result?.data ?? [];
   const totalPages = Math.max(1, Math.ceil((result?.total ?? 0) / PAGE_SIZE));
-  const hasFilters = !!(action || search || from || to);
+  const hasFilters = !!(action || search || from || to || eventFilter);
 
   return (
     <div className="space-y-4">
@@ -134,6 +147,17 @@ const AuditLog: React.FC = () => {
               {(result?.actions ?? []).slice().sort().map((a) => <option key={a} value={a}>{actionLabel(a)}</option>)}
             </select>
           </div>
+          {events.length > 0 && (
+            <div>
+              <label className={labelClass}>Event</label>
+              <select value={eventFilter} onChange={(e) => { setEventFilter(e.target.value); setPage(0); }} className={inputClass}>
+                <option value="">All events</option>
+                {events.map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}{e.is_current ? ' (current)' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div>
             <label className={labelClass}>From</label>
             <input type="datetime-local" value={from} onChange={(e) => { setFrom(e.target.value); setPage(0); }} className={inputClass} />
@@ -146,10 +170,11 @@ const AuditLog: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Recorded by the database itself, so changes made from the SQL editor appear too (shown as “SQL editor / system”).
+            Pick an event to see only its changes; account and security actions belong to no event and always show.
           </p>
           <div className="flex gap-2">
             {hasFilters && (
-              <button className={buttonClass.ghost} onClick={() => { setAction(''); setSearch(''); setFrom(''); setTo(''); setPage(0); }}>Clear filters</button>
+              <button className={buttonClass.ghost} onClick={() => { setAction(''); setSearch(''); setFrom(''); setTo(''); setEventFilter(''); setPage(0); }}>Clear filters</button>
             )}
             <RefreshButton onClick={load} loading={loading} />
           </div>

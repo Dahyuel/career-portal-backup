@@ -227,7 +227,7 @@ export const RegTeamDashboard: React.FC = () => {
 
       setSearchLoading(true);
       try {
-        const { data, error } = await searchAttendeesByPersonalId(query);
+        const { data, error } = await searchAttendeesByPersonalId(query, profile?.event_id ?? undefined);
 
         if (error) {
           logger.error('Search error:', error);
@@ -244,7 +244,9 @@ export const RegTeamDashboard: React.FC = () => {
         setSearchLoading(false);
       }
     }, 300),
-    []
+    // The search is scoped to this staff member's event, so it must be rebuilt
+    // when that changes — otherwise the closure keeps searching the old event.
+    [profile?.event_id]
   );
 
   useEffect(() => {
@@ -337,9 +339,12 @@ export const RegTeamDashboard: React.FC = () => {
   // Lazy load check-in stats (My Scans Count)
   useEffect(() => {
     if (user?.id) {
+      // This staff member's own event. Left undefined (admins have none) the
+      // database falls back to the current event, as it did before.
+      const eventId = profile?.event_id ?? undefined;
       const fetchCheckInStats = async () => {
         try {
-          const { count, error } = await getMyScanCountRPC();
+          const { count, error } = await getMyScanCountRPC(eventId);
 
           if (error) {
             logger.error("Error loading check-in stats:", error);
@@ -352,7 +357,7 @@ export const RegTeamDashboard: React.FC = () => {
       };
       fetchCheckInStats();
     }
-  }, [user?.id, refreshTrigger]);
+  }, [user?.id, profile?.event_id, refreshTrigger]);
 
   // ============================================================================
   // HELPERS
@@ -413,7 +418,7 @@ export const RegTeamDashboard: React.FC = () => {
     try {
       setSearchLoading(true);
 
-      const { data, error } = await getAttendeeByPersonalIdOptimized(sanitizeSearchQuery(searchTerm.trim()));
+      const { data, error } = await getAttendeeByPersonalIdOptimized(sanitizeSearchQuery(searchTerm.trim()), profile?.event_id ?? undefined);
 
       if (error || !data) {
         showToast('Personal ID not found', 'error');
@@ -574,7 +579,8 @@ export const RegTeamDashboard: React.FC = () => {
       const { error } = await recordAttendeeAttendance({
         attendeeId: selectedAttendee.id,
         checkedInBy: user.id,
-        type: type
+        type: type,
+        eventId: profile?.event_id ?? undefined
       });
 
       if (error) {

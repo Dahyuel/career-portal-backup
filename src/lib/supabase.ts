@@ -648,10 +648,12 @@ export const resetPassword = async (email: string): Promise<{ success: boolean; 
 // ATTENDANCE & SEARCH
 // ============================================================================
 
-export const getAttendeeByPersonalId = async (personalId: string) => {
+// `eventId` is the caller's own event (profile.event_id). Left out, the database
+// falls back to the current event — which is wrong for staff of any other live event.
+export const getAttendeeByPersonalId = async (personalId: string, eventId?: string) => {
   try {
     const { data, error } = await supabase
-      .rpc('reg_team_get_attendee_by_personal_id', { p_personal_id: personalId });
+      .rpc('reg_team_get_attendee_by_personal_id', { p_personal_id: personalId, p_event_id: eventId ?? null });
 
     if (error) {
       logger.error('reg_team_get_attendee_by_personal_id Error:', error);
@@ -667,10 +669,10 @@ export const getAttendeeByPersonalId = async (personalId: string) => {
 };
 
 
-export const processAttendance = async (personalId: string, action: 'enter' | 'exit') => {
+export const processAttendance = async (personalId: string, action: 'enter' | 'exit', eventId?: string) => {
   try {
-    // First resolve the attendee to get their ID
-    const { data: attendee, error: fetchError } = await getAttendeeByPersonalId(personalId);
+    // First resolve the attendee to get their ID — in the same event we record into.
+    const { data: attendee, error: fetchError } = await getAttendeeByPersonalId(personalId, eventId);
     if (fetchError || !attendee) {
       throw new Error(fetchError?.message || 'Attendee not found');
     }
@@ -678,7 +680,8 @@ export const processAttendance = async (personalId: string, action: 'enter' | 'e
     const { error } = await supabase
       .rpc('reg_team_record_attendance', {
         p_attendee_id: attendee.id,
-        p_type: action === 'enter' ? 'entry' : 'exit'
+        p_type: action === 'enter' ? 'entry' : 'exit',
+        p_event_id: eventId ?? null
       });
 
     if (error) {
@@ -720,10 +723,10 @@ export const getRecentActivities = async (_userId: string, limit: number = 10) =
 // SECURE REGTEAM FUNCTIONS (via SECURITY DEFINER RPCs)
 // ============================================================================
 
-export const searchAttendeesByPersonalId = async (query: string) => {
+export const searchAttendeesByPersonalId = async (query: string, eventId?: string) => {
   try {
     const { data, error } = await supabase
-      .rpc('reg_team_search_attendees', { p_query: sanitizeSearchQuery(query) });
+      .rpc('reg_team_search_attendees', { p_query: sanitizeSearchQuery(query), p_event_id: eventId ?? null });
 
     if (error) {
       logger.error('reg_team_search_attendees Error:', error);
@@ -737,10 +740,10 @@ export const searchAttendeesByPersonalId = async (query: string) => {
   }
 };
 
-export const getAttendeeByPersonalIdOptimized = async (personalId: string) => {
+export const getAttendeeByPersonalIdOptimized = async (personalId: string, eventId?: string) => {
   try {
     const { data, error } = await supabase
-      .rpc('reg_team_get_attendee_by_personal_id', { p_personal_id: personalId });
+      .rpc('reg_team_get_attendee_by_personal_id', { p_personal_id: personalId, p_event_id: eventId ?? null });
 
     if (error) {
       logger.error('reg_team_get_attendee_by_personal_id Error:', error);
@@ -794,18 +797,22 @@ export const getUserProfileByUUID = async (uuid: string) => {
 export const recordAttendeeAttendance = async ({
   attendeeId,
   checkedInBy: _checkedInBy,
-  type
+  type,
+  eventId
 }: {
   attendeeId: string;
   checkedInBy: string;
   type: 'entry' | 'exit';
+  /** The scanning staff member's own event (profile.event_id). Omitted, the
+   *  database falls back to the current event — wrong when two events are live. */
+  eventId?: string;
 }) => {
   try {
     logger.log(`--- reg_team_record_attendance (${type}) ---`);
     logger.log('Attendee ID:', attendeeId);
 
     const { data, error } = await supabase
-      .rpc('reg_team_record_attendance', { p_attendee_id: attendeeId, p_type: type });
+      .rpc('reg_team_record_attendance', { p_attendee_id: attendeeId, p_type: type, p_event_id: eventId ?? null });
 
     if (error) {
       logger.error('reg_team_record_attendance Error:', error);
@@ -869,14 +876,15 @@ export const getVolunteerStatsRPC = async (_userId: string) => {
 // SESSION SEARCH
 // ============================================================================
 
-export const searchSessionBookings = async (sessionId: string, query: string) => {
+export const searchSessionBookings = async (sessionId: string, query: string, eventId?: string) => {
   if (!query || query.length < 2) return { data: [], error: null };
 
   try {
     const { data, error } = await supabase
       .rpc('build_team_search_session_bookings', {
         p_session_id: sessionId,
-        p_query: sanitizeSearchQuery(query)
+        p_query: sanitizeSearchQuery(query),
+        p_event_id: eventId ?? null
       });
 
     if (error) {
@@ -938,9 +946,9 @@ export const getBuildingActivitiesRPC = async (limit: number = 3) => {
   }
 };
 
-export const getBuildingSessionsRPC = async () => {
+export const getBuildingSessionsRPC = async (eventId?: string) => {
   try {
-    const { data, error } = await supabase.rpc('build_team_get_sessions');
+    const { data, error } = await supabase.rpc('build_team_get_sessions', { p_event_id: eventId ?? null });
     if (error) {
       logger.error('❌ [BUILDING SESSIONS RPC] Error:', error);
       return { data: null, error: { message: error.message } };
@@ -984,9 +992,9 @@ export const buildingSessionCheckinRPC = async (bookingId: string) => {
   }
 };
 
-export const getMyScanCountRPC = async () => {
+export const getMyScanCountRPC = async (eventId?: string) => {
   try {
-    const { data, error } = await supabase.rpc('reg_team_get_my_scan_count');
+    const { data, error } = await supabase.rpc('reg_team_get_my_scan_count', { p_event_id: eventId ?? null });
     if (error) {
       logger.error('❌ [MY SCAN COUNT RPC] Error:', error);
       return { count: 0, error: { message: error.message } };
@@ -1111,8 +1119,8 @@ export const buildTeamGetAttendeeByUUID = async (uuid: string) => {
   return { data: data as any, error: null };
 };
 
-export const buildTeamGetVolunteerStatsRPC = async () => {
-  const { data, error } = await supabase.rpc('build_team_get_volunteer_stats').single();
+export const buildTeamGetVolunteerStatsRPC = async (eventId?: string) => {
+  const { data, error } = await supabase.rpc('build_team_get_volunteer_stats', { p_event_id: eventId ?? null }).single();
   if (error) {
     logger.error('❌ [BUILD TEAM STATS RPC] Error:', error);
     return { data: null, error: { message: error.message } };
@@ -1136,19 +1144,20 @@ export const buildTeamGetNotificationsRPC = async (eventId: string) => {
   };
 };
 
-export const buildTeamGetSessionsRPC = async () => {
-  const { data, error } = await supabase.rpc('build_team_get_sessions');
+export const buildTeamGetSessionsRPC = async (eventId?: string) => {
+  const { data, error } = await supabase.rpc('build_team_get_sessions', { p_event_id: eventId ?? null });
   return {
     data: (data as any[]) || [],
     error: error ? { message: error.message } : null,
   };
 };
 
-export const buildTeamSearchSessionBookings = async (sessionId: string, query: string) => {
+export const buildTeamSearchSessionBookings = async (sessionId: string, query: string, eventId?: string) => {
   if (!query || query.length < 2) return { data: [], error: null };
   const { data, error } = await supabase.rpc('build_team_search_session_bookings', {
     p_session_id: sessionId,
     p_query: sanitizeSearchQuery(query),
+    p_event_id: eventId ?? null,
   });
   return {
     data: (data as any[]) || [],
