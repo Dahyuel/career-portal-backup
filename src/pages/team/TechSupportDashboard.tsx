@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
+import FeedbackTab from '../../components/shared/FeedbackTab';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import DashboardLoading from '../../components/DashboardLoading';
 import Toast from '../../components/shared/Toast';
 import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileModal';
-import { supabase, DEFAULT_EVENT_ID } from '../../lib/supabase';
+import { supabase } from '../../lib/supabase';
+import { teamOptions, namedRoleOptions, volunteerTeamOptions } from '../../lib/eventTeams';
 import { logger } from '../../utils/logger';
 
 // ─── Animation Variants ────────────────────────────────────────────────────────
@@ -42,41 +44,9 @@ interface UserResult {
   created_at?: string;
 }
 
-// ─── All Teams (must match volunteer_teams in DB) ─────────────────────────────
-const TEAM_OPTIONS = [
-  { id: '394b8631-7948-49f1-87ba-bc7e3ead12b9', name: 'Feedback' },
-  { id: '481237b5-45ef-463f-8460-b6f848835756', name: 'Stage' },
-  { id: '587e30ea-20b2-4292-81fe-02945f6d2a3f', name: 'Marketing' },
-  { id: '8052492b-55bb-46d0-ab4c-52a6df81c4c9', name: 'Media' },
-  { id: '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33', name: 'Info Desk' },
-  { id: '97ab5a37-557e-4a81-ae81-9dcc6bbae87a', name: 'Usher' },
-  { id: 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1', name: 'Verification' },
-  { id: 'ae0e251c-81f5-4763-a9db-39ca511fd03c', name: 'Catering' },
-  { id: 'be96f64f-6674-421d-84f3-791a27bd4121', name: 'ER' },
-  { id: 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f', name: 'Building' },
-  { id: 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed', name: 'Registration' },
-  { id: '9bfd710f-202d-4706-a9ee-5178d0fd7843', name: 'Technical Support' },
-];
-
-// Roles that have a fixed team (1-to-1 mapping)
-const NAMED_ROLE_OPTIONS = [
-  { role: 'building',      teamId: 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f', label: 'Building',          icon: 'construction' },
-  { role: 'registration',  teamId: 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed', label: 'Registration',       icon: 'how_to_reg' },
-  { role: 'info_desk',     teamId: '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33', label: 'Info Desk',          icon: 'info' },
-  { role: 'verification',  teamId: 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1', label: 'Verification',       icon: 'verified_user' },
-  { role: 'tech_support',  teamId: '9bfd710f-202d-4706-a9ee-5178d0fd7843', label: 'Technical Support',  icon: 'support_agent' },
-];
-
-// Generic volunteer assignments (role = volunteer, different teams)
-const VOLUNTEER_TEAM_OPTIONS = [
-  { role: 'volunteer', teamId: 'ae0e251c-81f5-4763-a9db-39ca511fd03c', label: 'Catering',   icon: 'restaurant' },
-  { role: 'volunteer', teamId: 'be96f64f-6674-421d-84f3-791a27bd4121', label: 'ER',         icon: 'local_hospital' },
-  { role: 'volunteer', teamId: '394b8631-7948-49f1-87ba-bc7e3ead12b9', label: 'Feedback',   icon: 'rate_review' },
-  { role: 'volunteer', teamId: '587e30ea-20b2-4292-81fe-02945f6d2a3f', label: 'Marketing',  icon: 'campaign' },
-  { role: 'volunteer', teamId: '8052492b-55bb-46d0-ab4c-52a6df81c4c9', label: 'Media',      icon: 'camera' },
-  { role: 'volunteer', teamId: '481237b5-45ef-463f-8460-b6f848835756', label: 'Stage',      icon: 'theater_comedy' },
-  { role: 'volunteer', teamId: '97ab5a37-557e-4a81-ae81-9dcc6bbae87a', label: 'Usher',      icon: 'waving_hand' },
-];
+// Teams come from the database for the current event (see lib/eventTeams.ts).
+// They used to be hard-coded ids, which cannot work now that every event has its
+// own volunteer_teams rows.
 
 // ─── Confirmation Modal ────────────────────────────────────────────────────────
 interface ConfirmModalProps {
@@ -329,6 +299,14 @@ export const TechSupportDashboard: React.FC = () => {
 
     const handleRoleChangeConfirm = async () => {
         if (!searchResult || !selectedOption) return;
+
+        // Roles are stored per event, so we need to know which event this is for.
+        const eventId = profile?.event_id;
+        if (!eventId) {
+            setToast({ message: 'No event is selected for your account, so the role cannot be changed.', type: 'error' });
+            return;
+        }
+
         setRoleChangePending(true);
         try {
             let data: any;
@@ -337,7 +315,7 @@ export const TechSupportDashboard: React.FC = () => {
             if (selectedOption.role === 'team_leader') {
                 const result = await supabase.rpc('promote_to_team_leader', {
                     _user_id: searchResult.id,
-                    _event_id: DEFAULT_EVENT_ID,
+                    _event_id: eventId,
                     _team_id: selectedOption.teamId,
                 });
                 data = result.data;
@@ -345,7 +323,7 @@ export const TechSupportDashboard: React.FC = () => {
             } else {
                 const result = await supabase.rpc('change_volunteer_team', {
                     _user_id: searchResult.id,
-                    _event_id: DEFAULT_EVENT_ID,
+                    _event_id: eventId,
                     _team_id: selectedOption.teamId,
                 });
                 data = result.data;
@@ -355,7 +333,7 @@ export const TechSupportDashboard: React.FC = () => {
             if (error) throw error;
             if (!data?.success) throw new Error(data?.error || 'Role change failed');
 
-            const newTeamName = TEAM_OPTIONS.find(t => t.id === selectedOption.teamId)?.name || '';
+            const newTeamName = teamOptions().find(t => t.id === selectedOption.teamId)?.name || '';
             setVolunteerInfo(prev => prev ? {
                 ...prev,
                 role: selectedOption.role,
@@ -406,6 +384,7 @@ export const TechSupportDashboard: React.FC = () => {
   const navItems: NavItem[] = [
     { key: 'home', label: 'Home', icon: 'home' },
     { key: 'search', label: 'Search User', icon: 'manage_search' },
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' },
   ];
 
   // ─── TAB: Home ────────────────────────────────────────────────────────────────
@@ -620,7 +599,12 @@ export const TechSupportDashboard: React.FC = () => {
                     <div>
                       <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-3">Select New Role</p>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {[...NAMED_ROLE_OPTIONS, ...VOLUNTEER_TEAM_OPTIONS]
+                        {[...namedRoleOptions(), ...volunteerTeamOptions()].length === 0 && (
+                          <p className="col-span-full text-sm text-gray-500 dark:text-gray-400">
+                            This event has no volunteer teams yet. Add them in the super admin dashboard under Events → Volunteer teams.
+                          </p>
+                        )}
+                        {[...namedRoleOptions(), ...volunteerTeamOptions()]
                           .filter(opt =>
                             !(opt.role === volunteerInfo?.role && opt.teamId === volunteerInfo?.team_id)
                           )
@@ -649,7 +633,7 @@ export const TechSupportDashboard: React.FC = () => {
                     <div>
                       <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-3">Team Leader of</p>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {TEAM_OPTIONS
+                        {teamOptions()
                           .filter(team =>
                             !(volunteerInfo?.role === 'team_leader' && team.id === volunteerInfo?.team_id)
                           )
@@ -724,6 +708,7 @@ export const TechSupportDashboard: React.FC = () => {
     switch (activeTab) {
       case 'home': return renderHomeTab();
       case 'search': return renderSearchTab();
+      case 'feedback': return <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />;
       default: return renderHomeTab();
     }
   };

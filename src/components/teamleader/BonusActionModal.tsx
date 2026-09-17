@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import Toast from '../shared/Toast';
 import { logger } from '../../utils/logger';
 
-const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+// The event comes from profile.event_id at the point of use (see handleSubmit).
 const POINT_OPTIONS = [5, 10, 15, 20];
 
 interface VolunteerInfo {

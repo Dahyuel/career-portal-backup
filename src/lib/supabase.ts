@@ -1233,3 +1233,236 @@ export const signUpTeamLeader = async (data: VolunteerSignupData): Promise<AuthR
     };
   }
 };
+
+// ============================================================================
+// EVENT FEEDBACK
+// `eventId` is always passed in by the caller (the active event), so this file
+// never imports currentEvent.ts — that would be a circular import.
+// ============================================================================
+
+export type FeedbackQuestionType = 'text' | 'rating';
+
+export interface FeedbackQuestion {
+  id: string;
+  question_text: string;
+  question_type: FeedbackQuestionType;
+  display_order: number;
+  is_required: boolean;
+  is_active?: boolean;
+  created_at?: string;
+  answer_count?: number;
+}
+
+export interface FeedbackAnswerInput {
+  question_id: string;
+  answer_text?: string | null;
+  rating?: number | null;
+}
+
+export interface FeedbackSubmissionAnswer extends FeedbackAnswerInput {
+  question_text: string;
+  question_type: FeedbackQuestionType;
+  display_order: number;
+}
+
+export interface FeedbackSubmission {
+  id: string;
+  user_id: string;
+  respondent_role: string;
+  submitted_at: string;
+  full_name: string;
+  personal_id: string | null;
+  email: string | null;
+  phone: string | null;
+  faculty: string | null;
+  university: string | null;
+  department: string | null;
+  volunteer_id: string | null;
+  team_name: string | null;
+  answers: FeedbackSubmissionAnswer[];
+}
+
+/** Unwraps the `{ success, error, ... }` envelope every feedback RPC returns. */
+const FEEDBACK_GENERIC_ERROR = 'Something went wrong. Please try again later.';
+
+// Server messages that are safe to show as-is. Anything else (Postgres,
+// PostgREST, network) is logged and replaced with a generic message, so schema
+// and function names never reach the screen.
+const FEEDBACK_SAFE_ERRORS: Record<string, string> = {
+  'Unauthorized': 'You are not allowed to perform this action.',
+  'Already submitted': 'You have already submitted your feedback.',
+  'Feedback is closed': 'Feedback is closed at the moment.',
+  'No answers provided': 'Answer at least one question before submitting.',
+  'No valid answers provided': 'Answer at least one question before submitting.',
+  'Question text is required': 'Question text is required.',
+  'Invalid question type': 'Please choose a valid answer type.',
+  'Invalid visibility': 'Please choose whether to show or hide the questions.',
+  'Question not found': 'This question no longer exists. Refresh and try again.'
+};
+
+const feedbackFailure = (label: string, detail: unknown) => {
+  logger.error(`[${label}]`, detail);
+  const safe = typeof detail === 'string' ? FEEDBACK_SAFE_ERRORS[detail] : undefined;
+  return { data: null, error: { message: safe || FEEDBACK_GENERIC_ERROR } };
+};
+
+const unwrapFeedbackRPC = <T,>(label: string, data: any, error: any): { data: T | null; error: { message: string } | null } => {
+  if (error) return feedbackFailure(label, error);
+  if (!data?.success) return feedbackFailure(label, data?.error);
+  return { data: data as T, error: null };
+};
+
+/** Active questions shown to attendees and volunteers. */
+export const getFeedbackQuestionsRPC = async (eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('get_feedback_questions', { p_event_id: eventId });
+    const result = unwrapFeedbackRPC<{ questions: FeedbackQuestion[]; open?: boolean }>('FEEDBACK QUESTIONS RPC', data, error);
+    // `open` is false when a super admin has closed feedback.
+    return { data: result.data?.questions || null, open: result.data?.open !== false, error: result.error };
+  } catch (error: any) {
+    return { ...feedbackFailure('FEEDBACK QUESTIONS RPC', error), open: true };
+  }
+};
+
+/** The caller's own submission, used to pre-fill and to show the submitted state. */
+export const getMyFeedbackRPC = async (eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('get_my_feedback', { p_event_id: eventId });
+    return unwrapFeedbackRPC<{
+      submitted: boolean;
+      submitted_at?: string;
+      updated_at?: string;
+      answers: FeedbackAnswerInput[];
+    }>('MY FEEDBACK RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('MY FEEDBACK RPC', error);
+  }
+};
+
+/** Submit the whole feedback form. */
+export const submitFeedbackRPC = async (answers: FeedbackAnswerInput[], eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('submit_feedback', {
+      p_event_id: eventId,
+      p_answers: answers
+    });
+    return unwrapFeedbackRPC<{ submission_id: string; answers_saved: number }>('SUBMIT FEEDBACK RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('SUBMIT FEEDBACK RPC', error);
+  }
+};
+
+/** Admin: every question, including hidden ones. */
+export const adminGetFeedbackQuestionsRPC = async (eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_get_feedback_questions', { p_event_id: eventId });
+    const result = unwrapFeedbackRPC<{ questions: FeedbackQuestion[] }>('ADMIN FEEDBACK QUESTIONS RPC', data, error);
+    return { data: result.data?.questions || null, error: result.error };
+  } catch (error: any) {
+    return feedbackFailure('ADMIN FEEDBACK QUESTIONS RPC', error);
+  }
+};
+
+/** Admin: create (omit `questionId`) or update a question. */
+export const adminUpsertFeedbackQuestionRPC = async (params: {
+  questionText: string;
+  questionType: FeedbackQuestionType;
+  questionId?: string | null;
+  isRequired?: boolean;
+  isActive?: boolean;
+  eventId: string;
+}) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_upsert_feedback_question', {
+      p_event_id: params.eventId,
+      p_question_text: params.questionText,
+      p_question_type: params.questionType,
+      p_question_id: params.questionId || null,
+      p_is_required: params.isRequired ?? false,
+      p_is_active: params.isActive ?? false
+    });
+    return unwrapFeedbackRPC<{ question_id: string }>('UPSERT FEEDBACK QUESTION RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('UPSERT FEEDBACK QUESTION RPC', error);
+  }
+};
+
+export const adminDeleteFeedbackQuestionRPC = async (questionId: string, eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_delete_feedback_question', {
+      p_event_id: eventId,
+      p_question_id: questionId
+    });
+    return unwrapFeedbackRPC<{ success: boolean }>('DELETE FEEDBACK QUESTION RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('DELETE FEEDBACK QUESTION RPC', error);
+  }
+};
+
+/** Admin: persist a new order. `questionIds` must be the full ordered list. */
+export const adminReorderFeedbackQuestionsRPC = async (questionIds: string[], eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_reorder_feedback_questions', {
+      p_event_id: eventId,
+      p_question_ids: questionIds
+    });
+    return unwrapFeedbackRPC<{ success: boolean }>('REORDER FEEDBACK QUESTIONS RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('REORDER FEEDBACK QUESTIONS RPC', error);
+  }
+};
+
+/** Admin: show (`true`) or hide (`false`) every question of the event at once. */
+export const adminSetAllFeedbackQuestionsVisibilityRPC = async (isActive: boolean, eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_set_all_feedback_questions_visibility', {
+      p_event_id: eventId,
+      p_is_active: isActive
+    });
+    return unwrapFeedbackRPC<{ updated: number }>('SET ALL FEEDBACK VISIBILITY RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('SET ALL FEEDBACK VISIBILITY RPC', error);
+  }
+};
+
+/** Admin: paginated submissions with respondent identity and inlined answers. */
+export const adminGetFeedbackSubmissionsRPC = async (params: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  role?: string;
+  eventId: string;
+}) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_get_feedback_submissions', {
+      p_event_id: params.eventId,
+      p_limit: params.limit ?? 20,
+      p_offset: params.offset ?? 0,
+      p_search: params.search ? sanitizeSearchQuery(params.search) : null,
+      p_role: params.role || null
+    });
+    return unwrapFeedbackRPC<{
+      total: number;
+      limit: number;
+      offset: number;
+      submissions: FeedbackSubmission[];
+    }>('ADMIN FEEDBACK SUBMISSIONS RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('ADMIN FEEDBACK SUBMISSIONS RPC', error);
+  }
+};
+
+/** Admin: totals and per-question rating averages. */
+export const adminGetFeedbackStatsRPC = async (eventId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('admin_get_feedback_stats', { p_event_id: eventId });
+    return unwrapFeedbackRPC<{
+      total_submissions: number;
+      attendee_count: number;
+      volunteer_count: number;
+      rating_summary: { id: string; question_text: string; average_rating: number; response_count: number }[];
+    }>('ADMIN FEEDBACK STATS RPC', data, error);
+  } catch (error: any) {
+    return feedbackFailure('ADMIN FEEDBACK STATS RPC', error);
+  }
+};

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import FeedbackTab from '../../components/shared/FeedbackTab';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import {
@@ -117,7 +118,8 @@ export const VerificationDashboard: React.FC = () => {
     const navItems: NavItem[] = [
         { key: 'home', label: 'Home', icon: 'dashboard' },
         { key: 'verification-asu', label: 'ASU Students', icon: 'school' },
-        { key: 'verification-others', label: 'Other Unis', icon: 'apartment' }
+        { key: 'verification-others', label: 'Other Unis', icon: 'apartment' },
+        { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
     ];
 
     // Popup state
@@ -897,6 +899,7 @@ export const VerificationDashboard: React.FC = () => {
                 <motion.div key={activeTab} className="h-full">
                     {activeTab === 'home' && renderHomeTab()}
                     {(activeTab === 'verification-asu' || activeTab === 'verification-others') && renderVerificationTab()}
+                    {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
                 </motion.div>
             </AnimatePresence>
 

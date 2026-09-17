@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { getActiveEventId } from '../../lib/currentEvent';
 import { motion, Variants, AnimatePresence } from 'framer-motion';
 import { User } from '../../components/icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -40,7 +41,7 @@ export const VolunteerDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+  const EVENT_ID = getActiveEventId();
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id) return;
     try {

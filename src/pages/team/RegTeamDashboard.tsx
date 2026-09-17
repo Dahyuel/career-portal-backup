@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import FeedbackTab from '../../components/shared/FeedbackTab';
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import {
   Search,
@@ -121,7 +122,8 @@ export const RegTeamDashboard: React.FC = () => {
 
   const navItems: NavItem[] = [
     { key: 'home', label: 'Home', icon: 'home' },
-    { key: 'check-in', label: 'Check-In', icon: 'qr_code_scanner' }
+    { key: 'check-in', label: 'Check-In', icon: 'qr_code_scanner' },
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
   ];
 
   // Scanner state
@@ -1022,6 +1024,7 @@ export const RegTeamDashboard: React.FC = () => {
         <motion.div key={activeTab} className="h-full">
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'check-in' && renderCheckInTab()}
+          {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
         </motion.div>
       </AnimatePresence>
 

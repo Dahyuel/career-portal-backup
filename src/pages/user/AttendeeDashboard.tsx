@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import FeedbackTab from '../../components/shared/FeedbackTab';
 import { useAuth } from '../../contexts/AuthContext';
 import AttendeeProfileCard from '../../components/AttendeeProfileCard';
 import NotificationModal from '../../components/NotificationModal';
@@ -445,7 +446,8 @@ const AttendeeDashboard = () => {
     { key: 'schedule', label: 'Schedule', icon: 'calendar_month' },
     { key: 'sessions', label: 'Sessions', icon: 'event' },
     { key: 'jobs', label: 'Jobs', icon: 'work' },
-    { key: 'companies', label: 'Companies', icon: 'business' }
+    { key: 'companies', label: 'Companies', icon: 'business' },
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
   ];
 
 
@@ -2030,6 +2032,7 @@ const AttendeeDashboard = () => {
       case 'sessions': return renderSessionsTab();
       case 'jobs': return renderJobsTab();
       case 'companies': return renderCompaniesTab();
+      case 'feedback': return <FeedbackTab subtitle="Tell us how the event went for you. Your answers help us improve." />;
       default: return renderHomeTab();
     }
   };

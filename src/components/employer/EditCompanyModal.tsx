@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getActiveEventId } from '../../lib/currentEvent';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
@@ -144,7 +145,7 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
                 return;
             }
 
-            const EVENT_ID = profile?.event_id || 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+            const EVENT_ID = profile?.event_id || getActiveEventId();
             await refreshProfile(EVENT_ID, undefined, undefined, true);
 
             onSave();

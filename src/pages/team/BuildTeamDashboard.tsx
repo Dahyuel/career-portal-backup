@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import FeedbackTab from '../../components/shared/FeedbackTab';
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import {
   Calendar,
@@ -102,7 +103,8 @@ export const BuildTeamDashboard: React.FC = () => {
   // Navigation items (Building tab removed)
   const navItems: NavItem[] = [
     { key: 'home', label: 'Home', icon: 'home' },
-    { key: 'sessions', label: 'Sessions', icon: 'calendar_month' }
+    { key: 'sessions', label: 'Sessions', icon: 'calendar_month' },
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
   ];
 
   // Scanner & Search State
@@ -738,6 +740,7 @@ export const BuildTeamDashboard: React.FC = () => {
         <motion.div key={activeTab} className="h-full">
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'sessions' && renderSessionsTab()}
+          {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
         </motion.div>
       </AnimatePresence >
 

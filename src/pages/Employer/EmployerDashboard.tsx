@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { getActiveEventId } from '../../lib/currentEvent';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -94,7 +95,7 @@ export const EmployerDashboard: React.FC = () => {
     const [isInitializing, setIsInitializing] = useState(true);
     const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-    const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+    const EVENT_ID = getActiveEventId();
 
     const navItems: NavItem[] = [
         { key: 'home', label: 'Home', icon: 'dashboard' },

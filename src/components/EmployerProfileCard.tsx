@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { getActiveEventId } from '../lib/currentEvent';
 import { motion, AnimatePresence } from 'framer-motion';
 import EditCompanyModal from './employer/EditCompanyModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,7 +45,7 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
 
     const handleCompanyUpdate = async () => {
         // Get event_id from profile or use default
-        const EVENT_ID = profile?.event_id || 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+        const EVENT_ID = profile?.event_id || getActiveEventId();
         // Force refresh to get updated company data
         await refreshProfile(EVENT_ID, undefined, undefined, true);
         setShowEditCompany(false);

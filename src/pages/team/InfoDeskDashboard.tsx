@@ -1,4 +1,6 @@
 // src/pages/team/InfoDeskDashboard.tsx
+import { getActiveEventId } from '../../lib/currentEvent';
+import FeedbackTab from '../../components/shared/FeedbackTab';
 // OPTIMIZED VERSION with improved queries and event filtering
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
@@ -11,7 +13,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTheme } from "../../contexts/ThemeContext";
 import {
   searchAttendeesByPersonalId,
-  getAttendeeByUUID,
+  buildTeamGetAttendeeByUUID,
   getBuildingNotificationsRPC,
   getInfoDeskStatsRPC,
   getInfoDeskSessionsRPC,
@@ -70,6 +72,7 @@ export const InfoDeskDashboard: React.FC = () => {
   const navItems: NavItem[] = [
     { key: "home", label: "Home", icon: "home" },
     { key: "sessions", label: "Sessions", icon: "calendar_month" },
+    { key: "feedback", label: "Feedback", icon: "rate_review" },
   ];
 
   const [activeTab, setActiveTab] = useState("home");
@@ -129,7 +132,7 @@ export const InfoDeskDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+  const EVENT_ID = getActiveEventId();
 
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id || !profile?.roles) return;
@@ -234,7 +237,7 @@ export const InfoDeskDashboard: React.FC = () => {
   // --- OPTIMIZED: Fetch attendee by UUID with helper ---
   const fetchAttendeeByUUID = async (uuid: string): Promise<ScannedAttendee | null> => {
     try {
-      const { data, error } = await getAttendeeByUUID(uuid);
+      const { data, error } = await buildTeamGetAttendeeByUUID(uuid);
 
       if (error || !data) {
         logger.error("Error fetching attendee:", error);
@@ -734,6 +737,7 @@ export const InfoDeskDashboard: React.FC = () => {
           <motion.div key={activeTab} className="h-full">
             {activeTab === "home" && renderHomeTab()}
             {activeTab === "sessions" && renderSessionsTab()}
+            {activeTab === "feedback" && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
           </motion.div>
         </AnimatePresence>
 

@@ -36,6 +36,9 @@ import {
 } from '../../components/icons';
 import JobApplicantsModal from '../../components/employer/JobApplicantsModal';
 import { logger } from '../../utils/logger';
+import StatisticsTab from '../../components/admin/StatisticsTab';
+import FeedbackManagement from '../../components/admin/FeedbackManagement';
+import { getActiveEventId } from '../../lib/currentEvent';
 
 // --- Animation Variants ---
 const containerVariants: Variants = {
@@ -258,7 +261,8 @@ const JOB_TYPE_COLORS: Record<string, string> = {
   'Freelance': 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-300',
 };
 
-const EVENT_ID = 'aeddbdef-dc7b-406d-9a86-e3ed2e6b3ca5';
+// The event id is read inside the component from the active event
+// (system_config → active_event_id), not hard-coded to one past event.
 
 // Helper: format a date as YYYY-MM-DDTHH:mm in local timezone for datetime-local inputs
 // Also normalizes date strings for Safari compatibility (Safari rejects "2026-03-08 14:00" format)
@@ -669,6 +673,10 @@ const CompanyLogoSelector: React.FC<{
 export function AdminPanel() {
   useTheme();
 
+  // Whatever the super admin has made the current event. Read here (not at module
+  // level) so it is resolved after the active event has loaded at start-up.
+  const EVENT_ID = getActiveEventId();
+
 
   const navItems: NavItem[] = [
     { key: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
@@ -677,7 +685,8 @@ export function AdminPanel() {
     { key: 'events', label: 'Events', icon: 'campaign' },
     { key: 'companies', label: 'Companies', icon: 'business' },
     { key: 'jobs', label: 'Jobs', icon: 'work' },
-    { key: 'points', label: 'Points', icon: 'stars' }
+    { key: 'points', label: 'Points', icon: 'stars' },
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
   ];
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -1071,7 +1080,8 @@ export function AdminPanel() {
     if (activeTab === 'companies') { fetchCompanies(); }
     if (activeTab === 'jobs') { fetchJobs(); }
     if (activeTab === 'events') { fetchEvents(); fetchSpeakers(); }
-    if (activeTab === 'statistics') { fetchStatistics(); }
+    // The Statistics tab now loads itself through StatisticsTab
+    // (admin_get_event_statistics). The old fetch is not run any more.
   }, [activeTab, fetchSessions, fetchSpeakers, fetchCompanies, fetchJobs, fetchEvents, fetchStatistics]);
 
 
@@ -2527,6 +2537,11 @@ export function AdminPanel() {
 
 
   // ===== SESSIONS TAB =====
+  // Superseded by StatisticsTab. Kept for reference only — nothing renders it,
+  // and admin_get_enhanced_statistics is locked from v2_04 onwards. Safe to
+  // delete this block (and its chartMode / statisticsView / statsData state).
+  void renderStatistics;
+
   const renderSessions = () => (
     <motion.div
       className="space-y-6"
@@ -6241,12 +6256,13 @@ export function AdminPanel() {
       <AnimatePresence mode="wait">
         <motion.div key={activeTab} className="max-w-7xl mx-auto">
           {activeTab === 'dashboard' && renderDashboard()}
-          {activeTab === 'statistics' && renderStatistics()}
+          {activeTab === 'statistics' && <StatisticsTab eventId={getActiveEventId()} />}
           {activeTab === 'sessions' && renderSessions()}
           {activeTab === 'events' && renderEvents()}
           {activeTab === 'companies' && renderCompanies()}
           {activeTab === 'jobs' && renderJobs()}
           {activeTab === 'points' && renderPoints()}
+          {activeTab === 'feedback' && <FeedbackManagement eventId={getActiveEventId()} />}
         </motion.div>
       </AnimatePresence>
 

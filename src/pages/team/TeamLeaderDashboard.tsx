@@ -1,4 +1,5 @@
 // pages/team/TeamLeaderDashboard.tsx
+import FeedbackTab from '../../components/shared/FeedbackTab';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
@@ -32,7 +33,7 @@ const itemVariants = {
 };
 
 // Define the dashboard tabs
-type TabKey = 'home' | 'team' | 'announcements';
+type TabKey = 'home' | 'team' | 'announcements' | 'feedback';
 
 interface TeamInfo {
   team_id: string;
@@ -81,7 +82,8 @@ export const TeamLeaderDashboard: React.FC = () => {
   const navItems: NavItem[] = [
     { key: 'home', label: 'Home', icon: 'home' },
     { key: 'team', label: 'Team', icon: 'groups' },
-    { key: 'announcements', label: 'Announcements', icon: 'campaign' }
+    { key: 'announcements', label: 'Announcements', icon: 'campaign' },
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
   ];
 
   // Fetch team leader data on mount
@@ -560,6 +562,7 @@ export const TeamLeaderDashboard: React.FC = () => {
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'team' && renderTeamTab()}
           {activeTab === 'announcements' && renderAnnouncementsTab()}
+          {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
         </AnimatePresence>
       </SharedNavigation>
 
