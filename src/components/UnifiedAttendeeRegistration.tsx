@@ -12,12 +12,12 @@ import { logger } from '../utils/logger';
 import { sanitizeName, sanitizeEmail, sanitizePhone, sanitizeNumeric } from '../utils/sanitize';
 import { SearchableSelect } from './shared/SearchableSelect';
 
-const GENDER_OPTIONS = [
+export const GENDER_OPTIONS = [
   { value: 'male', label: 'Male' },
   { value: 'female', label: 'Female' }
 ];
 
-const NATIONALITY_OPTIONS = [
+export const NATIONALITY_OPTIONS = [
   { value: 'egyptian', label: 'Egyptian' },
   { value: 'afghan', label: 'Afghan' },
   { value: 'albanian', label: 'Albanian' },

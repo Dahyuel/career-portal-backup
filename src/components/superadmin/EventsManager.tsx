@@ -1,7 +1,7 @@
 // Events: every Career Expo and Career Week, and which one the website shows.
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  buttonClass, callSadmin, errorText, formatDateTime, fromLocalInput, inputClass, labelClass,
+  buttonClass, callSadmin, errorText, eventHasEnded, formatDateTime, fromLocalInput, inputClass, labelClass,
   type EventSummary, type Notify
 } from './sadminApi';
 import { Badge, ConfirmDialog, EmptyState, ErrorBlock, LoadingBlock, MIcon, PageHeader, RefreshButton } from './ui';
@@ -122,6 +122,7 @@ const EventsManager: React.FC<{ notify: Notify }> = ({ notify }) => {
                 <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
                   {isLiveStatus(e.status) ? <Badge tone="green">Live</Badge> : <Badge>{statusLabel(e.status)}</Badge>}
                   {e.is_current && <Badge tone="amber">Current</Badge>}
+                  {eventHasEnded(e.status, e.end_date) && <Badge tone="red">Ended</Badge>}
                 </div>
               </div>
               <p className="text-sm text-slate-600 dark:text-slate-300 mt-3 flex items-center gap-1.5">

@@ -6,9 +6,11 @@ import { useAuth } from '../contexts/AuthContext';
 
 interface EmployerProfileCardProps {
     onClose: () => void;
+    /** Ended event: company details can't be edited */
+    readOnly?: boolean;
 }
 
-const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) => {
+const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose, readOnly = false }) => {
     const { profile, refreshProfile } = useAuth();
     const [activeTab, setActiveTab] = useState<'personal' | 'company'>('personal');
     const [showEditCompany, setShowEditCompany] = useState(false);
@@ -273,7 +275,7 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
                                             <span className="material-symbols-outlined text-red-500 text-lg">apartment</span>
                                             Company Details
                                         </h3>
-                                        {employerData.company_id && (
+                                        {employerData.company_id && !readOnly && (
                                             <motion.button
                                                 whileHover={{ scale: 1.05 }}
                                                 whileTap={{ scale: 0.95 }}
@@ -348,7 +350,7 @@ const EmployerProfileCard: React.FC<EmployerProfileCardProps> = ({ onClose }) =>
             </motion.div>
 
             <AnimatePresence>
-                {showEditCompany && employerData.company_id && (
+                {showEditCompany && !readOnly && employerData.company_id && (
                     <EditCompanyModal
                         companyId={employerData.company_id}
                         initialData={{

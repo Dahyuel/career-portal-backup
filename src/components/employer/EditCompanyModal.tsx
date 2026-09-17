@@ -134,7 +134,8 @@ const EditCompanyModal: React.FC<EditCompanyModalProps> = ({ companyId, initialD
                 p_website: formData.website,
                 p_description: formData.description,
                 p_logo_url: formData.logo_url,
-                p_target_faculties: formData.target_faculties
+                p_target_faculties: formData.target_faculties,
+                p_event_id: profile?.event_id || getActiveEventId()
             });
 
             if (rpcError) throw rpcError;

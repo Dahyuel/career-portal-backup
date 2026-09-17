@@ -10,7 +10,7 @@ import {
 } from '../components/icons';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  registerForEvent, EventRegistrationPayload, getActiveEvents, FairEvent
+  supabase, registerForEvent, EventRegistrationPayload, getActiveEvents, FairEvent
 } from '../lib/supabase';
 import { FACULTIES, CLASS_YEARS, DEGREE_LEVEL_OPTIONS, UNIVERSITIES } from '../utils/constants';
 import { logger } from '../utils/logger';
@@ -18,6 +18,19 @@ import DashboardLoading from '../components/DashboardLoading';
 
 interface FormErrors {
   [key: string]: string;
+}
+
+// Latest registration of this user in another event (get_my_previous_registration)
+interface PreviousRegistration {
+  found: boolean;
+  event_name?: string;
+  university?: string | null;
+  faculty?: string | null;
+  department?: string | null;
+  student_status?: string | null;
+  year?: number | null;
+  is_asu_student?: boolean | null;
+  verified?: boolean;
 }
 
 const ALLOWED_PROOF_TYPES = '.jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff,.tif,.heic,.heif,.pdf';
@@ -135,6 +148,13 @@ export const EventRegistration: React.FC = () => {
   const [enrollmentProofFile, setEnrollmentProofFile] = useState<File | undefined>();
   const [cvFile, setCvFile] = useState<File | undefined>();
 
+  // Returning students: details come from their earlier registration and
+  // verified ASU students only update their year and proof.
+  const [previous, setPrevious] = useState<PreviousRegistration | null>(null);
+  const [editDetails, setEditDetails] = useState(false);
+  const returningVerified = !!previous?.found && !!previous.verified && !!previous.is_asu_student;
+  const showAcademicFields = !returningVerified || editDetails;
+
   useEffect(() => {
     const loadData = async () => {
       if (!eventId) {
@@ -144,13 +164,32 @@ export const EventRegistration: React.FC = () => {
 
       try {
         setLoading(true);
-        const { data: events } = await getActiveEvents();
+        const [{ data: events }, previousResult] = await Promise.all([
+          getActiveEvents(),
+          supabase.rpc('get_my_previous_registration', { p_event_id: eventId })
+        ]);
         const selected = events.find(e => e.id === eventId);
         if (!selected) {
           navigate('/select-event', { replace: true });
           return;
         }
         setEvent(selected);
+
+        const prev = previousResult.data as PreviousRegistration | null;
+        if (prev?.found) {
+          setPrevious(prev);
+          const knownUniversity = UNIVERSITIES.find(u => u.toLowerCase() === (prev.university || '').toLowerCase());
+          setFormData(current => ({
+            ...current,
+            university: prev.university ? (knownUniversity || 'Other') : '',
+            customUniversity: prev.university && !knownUniversity ? prev.university : '',
+            faculty: prev.faculty || '',
+            department: prev.department || '',
+            studentStatus: prev.student_status || '',
+            // The class year has usually changed, so it is chosen again
+            year: ''
+          }));
+        }
       } catch (err: any) {
         logger.error('EventRegistration load error:', err);
         setError('Could not load event details. Please try again.');
@@ -205,6 +244,11 @@ export const EventRegistration: React.FC = () => {
       if (fileErr) errors.cvFile = fileErr;
     }
 
+    // A returning student's earlier details were incomplete: show those fields
+    if (['university', 'customUniversity', 'faculty', 'department'].some(f => errors[f])) {
+      setEditDetails(true);
+    }
+
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -256,7 +300,7 @@ export const EventRegistration: React.FC = () => {
       }
 
       await refreshProfile(eventId, user.id, user.email, true);
-      navigate('/pending-approval', { replace: true });
+      navigate(result.registration_status === 'approved' ? '/attendee' : '/pending-approval', { replace: true });
     } catch (err: any) {
       logger.error('Event registration submit error:', err);
       setError(err.message || 'Something went wrong. Please try again.');
@@ -305,14 +349,43 @@ export const EventRegistration: React.FC = () => {
             <div className="pb-2 border-b border-gray-100 dark:border-gray-700">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
                 <GraduationCap className="w-5 h-5 text-asu-red" />
-                Attendee Registration
+                {returningVerified ? 'Welcome back' : 'Attendee Registration'}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Complete your attendee details and upload your enrollment proof.
+                {returningVerified
+                  ? 'Update your class year and upload your current enrollment proof.'
+                  : 'Complete your attendee details and upload your enrollment proof.'}
               </p>
             </div>
 
+            {returningVerified && (
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-green-800 dark:text-green-200 min-w-0">
+                  <p>
+                    You were already verified as an Ain Shams student{previous?.event_name ? <> in <strong>{previous.event_name}</strong></> : null}, so you won't wait for verification again.
+                  </p>
+                  {!editDetails && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-green-900 dark:text-green-100">
+                      <span className="font-medium truncate">
+                        {[formData.university === 'Other' ? formData.customUniversity : formData.university, formData.faculty, formData.department]
+                          .filter(Boolean).join(' · ')}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditDetails(true)}
+                        className="text-xs font-semibold underline hover:no-underline"
+                      >
+                        Change details
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-5">
+              {showAcademicFields && (<>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   University <span dir="rtl" className="text-gray-500 dark:text-gray-400">(الجامعة)</span> <span className="text-asu-red">*</span>
@@ -378,6 +451,7 @@ export const EventRegistration: React.FC = () => {
                 </div>
                 {formErrors.department && <p className="mt-1 text-sm text-asu-red">{formErrors.department}</p>}
               </div>
+              </>)}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
@@ -417,6 +491,9 @@ export const EventRegistration: React.FC = () => {
                       ))}
                     </select>
                   </div>
+                  {previous?.found && previous.year && !formData.year && (
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Last time you registered as year {previous.year}.</p>
+                  )}
                   {formErrors.year && <p className="mt-1 text-sm text-asu-red">{formErrors.year}</p>}
                 </motion.div>
               )}

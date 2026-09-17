@@ -9,6 +9,7 @@ import { signInUser } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logger } from '../utils/logger';
 import { sanitizeEmail } from '../utils/sanitize';
+import { shouldUseEmployerStart } from '../lib/employer';
 
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
@@ -26,7 +27,9 @@ export const LoginForm: React.FC = () => {
   // ── Shared redirect decision ─────────────────────────────────────────────
   // Attendees ALWAYS go through event selection after login, even if they
   // have a previously-bound event_id. This makes the selector authoritative.
-  // Everyone else (volunteer, staff, admin, employer) → role dashboard.
+  // Employer accounts (created by an admin) → /employer-start, where they fill
+  // in their profile and pick an event.
+  // Everyone else (volunteer, staff, admin) → role dashboard.
   const redirectBasedOnRole = (p: { role: string; event_id?: string } | null) => {
     if (!p?.role) return;
 
@@ -48,16 +51,24 @@ export const LoginForm: React.FC = () => {
     if (!isAuthenticated || !sessionLoaded) return;
     if (!profile?.role) return;
     if (isRedirecting) return;
+    // A submit in progress routes on its own (handleSubmit)
+    if (loading) return;
 
     setIsRedirecting(true);
 
     const role = profile.role;
-    // Attendees always go through event selection after login.
-    const target = role === 'attendee' ? '/select-event' : getRoleBasedRedirect(role);
-
-    logger.log(`➡️ ${role} → ${target}`);
-    navigate(target, { replace: true });
-  }, [isAuthenticated, sessionLoaded, profile, isRedirecting, navigate, getRoleBasedRedirect]);
+    (async () => {
+      if (await shouldUseEmployerStart(role)) {
+        logger.log(`➡️ ${role} (employer account) → /employer-start`);
+        navigate('/employer-start', { replace: true });
+        return;
+      }
+      // Attendees always go through event selection after login.
+      const target = role === 'attendee' ? '/select-event' : getRoleBasedRedirect(role);
+      logger.log(`➡️ ${role} → ${target}`);
+      navigate(target, { replace: true });
+    })();
+  }, [isAuthenticated, sessionLoaded, profile, isRedirecting, loading, navigate, getRoleBasedRedirect]);
 
   const updateField = (field: keyof LoginData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -121,6 +132,27 @@ export const LoginForm: React.FC = () => {
       }
 
       logger.log('✅ Auth successful — waiting for AuthContext to load profile...');
+
+      // Employer accounts are created by admins and may have no profile yet,
+      // so they are routed before waiting for one. Staff roles still win.
+      if (await shouldUseEmployerStart()) {
+        let staffRole = false;
+        for (let i = 0; i < 5 && !staffRole; i++) {
+          try {
+            const stored = JSON.parse(localStorage.getItem('currentUser') || 'null');
+            // The cache can still hold a previous user's profile
+            const role = stored?.id === result.data.user.id ? stored.role : null;
+            staffRole = !!role && !['attendee', 'employer'].includes(role);
+          } catch { /* ignore */ }
+          if (!staffRole) await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        if (!staffRole) {
+          setIsRedirecting(true);
+          logger.log('➡️ Employer account → /employer-start');
+          navigate('/employer-start', { replace: true });
+          return;
+        }
+      }
 
       // Poll localStorage for the cached profile. AuthContext's SIGNED_IN
       // handler runs asynchronously and may still be in-flight. We wait

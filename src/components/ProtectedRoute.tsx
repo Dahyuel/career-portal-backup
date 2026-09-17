@@ -8,6 +8,11 @@ import { logger } from '../utils/logger';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredRole?: string | string[];
+  /**
+   * Only require a signed-in user. For pages that work before a profile or an
+   * event role exists (employer onboarding).
+   */
+  allowWithoutProfile?: boolean;
 }
 
 // Paths reachable without an active event / without roles
@@ -23,6 +28,7 @@ const PUBLIC_EVENT_PATHS = [
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requiredRole,
+  allowWithoutProfile = false,
 }) => {
   const {
     user, profile, loading, sessionLoaded,
@@ -31,7 +37,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const location = useLocation();
 
   // Is the current location a public event path?
-  const onPublicPath = PUBLIC_EVENT_PATHS.includes(location.pathname);
+  const onPublicPath = allowWithoutProfile || PUBLIC_EVENT_PATHS.includes(location.pathname);
 
   // Read localStorage ONCE at mount — used ONLY as a pre-load fallback.
   const localUserData = React.useMemo(() => {
@@ -72,6 +78,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   if ((sessionLoaded && !isAuthenticated) || (!loading && !user)) {
     logger.log('🔐 Not authenticated, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // ── 2b. Signed in is all this page needs ─────────────────────────────────
+  if (allowWithoutProfile) {
+    return <>{children}</>;
   }
 
   // ── 3. Pre-load fast redirect using localStorage (before profile arrives) ─

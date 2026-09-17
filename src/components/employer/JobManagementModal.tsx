@@ -19,9 +19,11 @@ interface JobManagementModalProps {
     onClose: () => void;
     onEdit: () => void;
     onDelete: () => void;
+    /** Ended event: details only, no edit/delete */
+    readOnly?: boolean;
 }
 
-const JobManagementModal: React.FC<JobManagementModalProps> = ({ job, onClose, onEdit, onDelete }) => {
+const JobManagementModal: React.FC<JobManagementModalProps> = ({ job, onClose, onEdit, onDelete, readOnly = false }) => {
     return (
         <div className="fixed inset-0 flex items-center justify-center p-4 z-[110]">
             <motion.div
@@ -135,6 +137,20 @@ const JobManagementModal: React.FC<JobManagementModalProps> = ({ job, onClose, o
                 </div>
 
                 {/* Footer Actions */}
+                {readOnly ? (
+                <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between gap-3">
+                    <p className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-base">lock</span>
+                        This event has ended. Jobs can no longer be changed.
+                    </p>
+                    <button
+                        onClick={onClose}
+                        className="px-6 py-3 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors"
+                    >
+                        Close
+                    </button>
+                </div>
+                ) : (
                 <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex flex-col sm:flex-row gap-3">
                     <button
                         onClick={onDelete}
@@ -154,6 +170,7 @@ const JobManagementModal: React.FC<JobManagementModalProps> = ({ job, onClose, o
                         Edit Job Details
                     </button>
                 </div>
+                )}
             </motion.div>
         </div>
     );

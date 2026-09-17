@@ -16,6 +16,7 @@ import {
   ROLE_OPTIONS,
   timeAgo,
   type AccountRow,
+  type EventDetail,
   type EventSummary,
   type Notify
 } from './sadminApi';
@@ -52,6 +53,38 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
   const [events, setEvents] = useState<EventSummary[]>([]);
   const [targetEventId, setTargetEventId] = useState<string>(eventId());
   const requestId = useRef(0);
+
+  // Employers need a company and volunteers may get a team in the chosen event
+  const [roleCompanies, setRoleCompanies] = useState<{ id: string; company_name: string }[]>([]);
+  const [roleTeams, setRoleTeams] = useState<{ id: string; team_name: string }[]>([]);
+  const [roleCompanyId, setRoleCompanyId] = useState('');
+  const [roleTeamId, setRoleTeamId] = useState('');
+  const [roleOptionsLoading, setRoleOptionsLoading] = useState(false);
+
+  const roleDialogOpen = pending?.action === 'role';
+  useEffect(() => {
+    if (!roleDialogOpen || !targetEventId || (newRole !== 'employer' && newRole !== 'volunteer')) return;
+    let cancelled = false;
+    setRoleOptionsLoading(true);
+    (async () => {
+      try {
+        if (newRole === 'employer') {
+          const { data, error: rpcError } = await supabase.rpc('admin_get_companies', { _event_id: targetEventId });
+          if (rpcError) throw rpcError;
+          if (!cancelled) setRoleCompanies(((data as { id: string; company_name: string }[]) || [])
+            .map((c) => ({ id: c.id, company_name: c.company_name })));
+        } else {
+          const r = await callSadmin<EventDetail>('sadmin_get_event', { _event_id: targetEventId }, 'Could not load the teams.');
+          if (!cancelled) setRoleTeams(r.teams.map((t) => ({ id: t.id, team_name: t.team_name })));
+        }
+      } catch (err) {
+        if (!cancelled) notify(errorText(err, 'Could not load the options for this role.'), 'error');
+      } finally {
+        if (!cancelled) setRoleOptionsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [roleDialogOpen, newRole, targetEventId, notify]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
@@ -108,6 +141,8 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
 
   const open = (action: Action, account: AccountRow) => {
     setNewRole(account.role === 'none' ? '' : account.role);
+    setRoleCompanyId('');
+    setRoleTeamId('');
     setPending({ action, account });
   };
 
@@ -117,7 +152,10 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
     setBusy(true);
     try {
       if (action === 'role') {
-        await callSadmin('sadmin_change_role', { _event_id: targetEventId, _user_id: account.id, _new_role: newRole, _reason: reason }, 'The role could not be changed.');
+        const options = newRole === 'employer'
+          ? { company_id: roleCompanyId }
+          : newRole === 'volunteer' && roleTeamId ? { team_id: roleTeamId } : null;
+        await callSadmin('sadmin_change_role', { _event_id: targetEventId, _user_id: account.id, _new_role: newRole, _reason: reason, _options: options }, 'The role could not be changed.');
         notify(
           newRole === 'sadmin'
             ? `${account.full_name || 'Account'} is now a super admin (every event).`
@@ -312,6 +350,7 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
         onClose={() => setPending(null)}
         onConfirm={(reason, typed) => {
           if (!newRole || newRole === target?.role) return notify('Choose a different role.', 'warning');
+          if (newRole === 'employer' && !roleCompanyId) return notify('Choose the company for this employer.', 'warning');
           run(reason, typed);
         }}
         description={
@@ -334,6 +373,34 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
         {newRole === 'sadmin' && !isSuperAdminRole(target?.role) && (
           <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
             Super admins have full control over every event. They will need the secret key and an authenticator app before they can open this dashboard.
+          </p>
+        )}
+        {newRole === 'employer' && (
+          <div>
+            <label className={labelClass}>Company in {selectedEventName}</label>
+            <select value={roleCompanyId} onChange={(e) => setRoleCompanyId(e.target.value)} className={inputClass} disabled={roleOptionsLoading}>
+              <option value="">{roleOptionsLoading ? 'Loading companies...' : 'Choose a company'}</option>
+              {roleCompanies.map((c) => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+            </select>
+            {!roleOptionsLoading && roleCompanies.length === 0 && (
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                No companies take part in this event yet. An admin of the event can add them under Companies.
+              </p>
+            )}
+          </div>
+        )}
+        {newRole === 'volunteer' && (
+          <div>
+            <label className={labelClass}>Team (optional)</label>
+            <select value={roleTeamId} onChange={(e) => setRoleTeamId(e.target.value)} className={inputClass} disabled={roleOptionsLoading}>
+              <option value="">{roleOptionsLoading ? 'Loading teams...' : 'No team'}</option>
+              {roleTeams.map((t) => <option key={t.id} value={t.id}>{t.team_name}</option>)}
+            </select>
+          </div>
+        )}
+        {(newRole === 'attendee' || newRole === 'volunteer') && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            If they have no registration in this event yet, one is created as approved, copying the details of their latest registration.
           </p>
         )}
         {newRole !== '' && newRole !== 'sadmin' && (

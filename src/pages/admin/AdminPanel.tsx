@@ -5,6 +5,8 @@ import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigat
 
 import { useTheme } from '../../contexts/ThemeContext';
 import { FACULTIES } from '../../utils/constants';
+import { validateEmail } from '../../utils/validation';
+import { copyText, selectElementText } from '../../utils/clipboard';
 import Toast from '../../components/shared/Toast';
 
 import { supabase, getSessionBookingsRPC } from '../../lib/supabase';
@@ -32,7 +34,8 @@ import {
   Briefcase,
   Eye,
   ChevronRight,
-  Trash2
+  Trash2,
+  UserPlus
 } from '../../components/icons';
 import JobApplicantsModal from '../../components/employer/JobApplicantsModal';
 import { logger } from '../../utils/logger';
@@ -74,6 +77,27 @@ interface Company {
   company_key: string | null;
   created_at: string | null;
   faculties: string[] | null;
+  employers?: CompanyEmployer[];
+}
+
+interface CompanyEmployer {
+  user_id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  job_title: string | null;
+  profile_complete: boolean;
+  added_at: string | null;
+}
+
+interface LibraryCompany {
+  id: string;
+  company_name: string;
+  industry: string | null;
+  logo_url: string | null;
+  website: string | null;
+  in_event: boolean;
+  events_count: number;
 }
 
 interface AdminJob {
@@ -476,6 +500,9 @@ const SpeakerPhotoSelector: React.FC<{
   );
 };
 
+const COMPANY_LOGO_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+const COMPANY_LOGO_MAX_BYTES = 5 * 1024 * 1024;
+
 const CompanyLogoSelector: React.FC<{
   value: string;
   onChange: (url: string) => void;
@@ -491,14 +518,26 @@ const CompanyLogoSelector: React.FC<{
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Must match the Companies bucket limits
+    if (!COMPANY_LOGO_TYPES.includes(file.type)) {
+      setUploadError('Logo must be a PNG, JPG or WEBP image');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > COMPANY_LOGO_MAX_BYTES) {
+      setUploadError('Logo must be 5 MB or smaller');
+      e.target.value = '';
+      return;
+    }
+
     const localUrl = URL.createObjectURL(file);
     setPreview(localUrl);
     setUploadError('');
     setIsUploading(true);
 
     try {
-      const ext = file.name.split('.').pop();
-      const fileName = `company_${Date.now()}.${ext}`;
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const fileName = `company_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
       const { error: uploadErr } = await supabase.storage
         .from('Companies')
@@ -566,7 +605,7 @@ const CompanyLogoSelector: React.FC<{
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept="image/png,image/jpeg,image/webp"
               className="hidden"
               onChange={handleFileChange}
             />
@@ -592,7 +631,7 @@ const CompanyLogoSelector: React.FC<{
                 <>
                   <span className="material-symbols-outlined text-2xl">cloud_upload</span>
                   <span className="text-xs font-semibold">Click to upload logo</span>
-                  <span className="text-[10px]">PNG, JPG, WEBP, SVG</span>
+                  <span className="text-[10px]">PNG, JPG, WEBP · up to 5 MB</span>
                 </>
               )}
             </motion.button>
@@ -839,6 +878,25 @@ export function AdminPanel() {
   const [showViewCompanyModal, setShowViewCompanyModal] = useState(false);
   const [companySearchQuery, setCompanySearchQuery] = useState('');
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+  const [copyFailedId, setCopyFailedId] = useState<string | null>(null);
+  const loginDetailsRef = useRef<HTMLPreElement>(null);
+
+  // Employers of the company open in the details modal
+  const [showEmployerForm, setShowEmployerForm] = useState(false);
+  const [employerEmail, setEmployerEmail] = useState('');
+  const [employerError, setEmployerError] = useState('');
+  const [isAddingEmployer, setIsAddingEmployer] = useState(false);
+  const [removingEmployerId, setRemovingEmployerId] = useState<string | null>(null);
+  // Shown once after an account is created so the admin can hand it over
+  const [createdEmployer, setCreatedEmployer] = useState<{ email: string; password: string | null } | null>(null);
+
+  // "Add existing companies" picker
+  const [showLinkCompaniesModal, setShowLinkCompaniesModal] = useState(false);
+  const [libraryCompanies, setLibraryCompanies] = useState<LibraryCompany[]>([]);
+  const [isLoadingLibrary, setIsLoadingLibrary] = useState(false);
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [librarySelection, setLibrarySelection] = useState<string[]>([]);
+  const [isLinkingCompanies, setIsLinkingCompanies] = useState(false);
 
   // Add Company form state
   const [companyForm, setCompanyForm] = useState({
@@ -959,7 +1017,9 @@ export function AdminPanel() {
     try {
       const { data, error } = await supabase.rpc('admin_get_companies', { _event_id: EVENT_ID });
       if (error) { logger.error('Error fetching companies:', error); return; }
-      setCompanies((data as Company[]) || []);
+      const list = (data as Company[]) || [];
+      setCompanies(list);
+      setSelectedCompany((prev) => (prev ? list.find((c) => c.id === prev.id) ?? null : prev));
     } catch (err) { logger.error('Error fetching companies:', err); }
     finally { setIsLoadingCompanies(false); }
   }, []);
@@ -1459,7 +1519,7 @@ export function AdminPanel() {
     setIsSubmittingCompany(true);
     setCompanyFormError('');
     try {
-      const { error } = await supabase.rpc('admin_add_company', {
+      const { data, error } = await supabase.rpc('admin_add_company', {
         _event_id: EVENT_ID,
         _company_name: companyForm.company_name.trim(),
         _industry: companyForm.industry.trim() || null,
@@ -1472,6 +1532,14 @@ export function AdminPanel() {
         _faculties: companyForm.faculties || []
       });
       if (error) { setCompanyFormError(error.message); return; }
+      if (data?.success === false) { setCompanyFormError(data.error || 'Failed to add company'); return; }
+      setToast({
+        show: true,
+        message: data?.created === false
+          ? `${data.company_name} already existed and was added to this event (key ${data.company_key})`
+          : `Company added. Key: ${data?.company_key ?? '—'}`,
+        type: 'success'
+      });
 
       setCompanyForm({
         company_name: '', industry: '', email: '', website: '',
@@ -1486,11 +1554,119 @@ export function AdminPanel() {
   };
 
   // ===== COPY COMPANY KEY =====
-  const handleCopyKey = (companyId: string, key: string) => {
-    navigator.clipboard.writeText(key).then(() => {
-      setCopiedKeyId(companyId);
+  // copyId marks which copy button shows the "copied" tick
+  // When copying is blocked the text is selected instead (textEl), so Ctrl+C works
+  const handleCopyKey = async (copyId: string, text: string, textEl?: HTMLElement | null) => {
+    if (await copyText(text)) {
+      setCopyFailedId(null);
+      setCopiedKeyId(copyId);
       setTimeout(() => setCopiedKeyId(null), 2000);
-    });
+    } else {
+      selectElementText(textEl ?? null);
+      setCopyFailedId(copyId);
+      if (!textEl) {
+        setToast({ show: true, message: 'Could not copy. Select the text and copy it manually.', type: 'error' });
+      }
+    }
+  };
+
+  // ===== COMPANY EMPLOYERS =====
+  const resetEmployerPanel = () => {
+    setShowEmployerForm(false);
+    setEmployerEmail('');
+    setEmployerError('');
+    setCreatedEmployer(null);
+    setCopyFailedId(null);
+  };
+
+  const handleAddEmployer = async (companyId: string) => {
+    const email = employerEmail.trim().toLowerCase();
+    const emailErr = validateEmail(email);
+    if (emailErr) { setEmployerError(emailErr); return; }
+
+    setIsAddingEmployer(true);
+    setEmployerError('');
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-create-employer', {
+        body: { eventId: EVENT_ID, companyId, email }
+      });
+
+      let result: any = data;
+      if (!result && error) {
+        try { result = await (error as any).context?.json?.(); } catch { /* not JSON */ }
+      }
+      if (!result?.success) {
+        setEmployerError(result?.error || error?.message || 'Failed to add employer');
+        return;
+      }
+
+      setCreatedEmployer({ email, password: result.existingAccount ? null : result.password });
+      setEmployerEmail('');
+      setShowEmployerForm(false);
+      setToast({ show: true, message: 'Employer added', type: 'success' });
+      await fetchCompanies();
+    } catch (err: any) {
+      setEmployerError(err.message || 'Failed to add employer');
+    } finally {
+      setIsAddingEmployer(false);
+    }
+  };
+
+  const handleRemoveEmployer = async (employer: CompanyEmployer) => {
+    const who = employer.full_name || employer.email || 'this employer';
+    if (!window.confirm(`Remove ${who}? They will lose employer access for this event. Their account is kept.`)) return;
+    setRemovingEmployerId(employer.user_id);
+    try {
+      const { data, error } = await supabase.rpc('admin_remove_employer', {
+        _event_id: EVENT_ID,
+        _user_id: employer.user_id
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Failed to remove employer');
+      setToast({ show: true, message: 'Employer removed', type: 'success' });
+      await fetchCompanies();
+    } catch (err: any) {
+      setToast({ show: true, message: err.message || 'Failed to remove employer', type: 'error' });
+    } finally {
+      setRemovingEmployerId(null);
+    }
+  };
+
+  // ===== ADD EXISTING COMPANIES =====
+  const openLinkCompanies = async () => {
+    setShowLinkCompaniesModal(true);
+    setLibrarySearch('');
+    setLibrarySelection([]);
+    setIsLoadingLibrary(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_get_all_companies', { _event_id: EVENT_ID });
+      if (error) throw error;
+      setLibraryCompanies((data as LibraryCompany[]) || []);
+    } catch (err: any) {
+      setToast({ show: true, message: err.message || 'Failed to load companies', type: 'error' });
+    } finally {
+      setIsLoadingLibrary(false);
+    }
+  };
+
+  const handleLinkCompanies = async () => {
+    if (librarySelection.length === 0) return;
+    setIsLinkingCompanies(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_link_companies', {
+        _event_id: EVENT_ID,
+        _company_ids: librarySelection
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Failed to add companies');
+      setToast({ show: true, message: `${data.linked} ${data.linked === 1 ? 'company' : 'companies'} added to this event`, type: 'success' });
+      setShowLinkCompaniesModal(false);
+      fetchCompanies();
+    } catch (err: any) {
+      setToast({ show: true, message: err.message || 'Failed to add companies', type: 'error' });
+    } finally {
+      setIsLinkingCompanies(false);
+    }
   };
 
   // ===== OPEN EDIT COMPANY =====
@@ -3088,6 +3264,13 @@ export function AdminPanel() {
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
           <button
+            onClick={openLinkCompanies}
+            className="w-full sm:w-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all whitespace-nowrap"
+          >
+            <Building2 className="h-5 w-5" />
+            Add Existing
+          </button>
+          <button
             onClick={() => setShowAddCompanyModal(true)}
             className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-red-500/20 whitespace-nowrap"
           >
@@ -3158,6 +3341,7 @@ export function AdminPanel() {
               whileHover={{ y: -4 }}
               onClick={() => {
                 setSelectedCompany(company);
+                resetEmployerPanel();
                 setShowViewCompanyModal(true);
               }}
               className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-sm border border-slate-200 dark:border-slate-700 hover:shadow-lg transition-all cursor-pointer group"
@@ -3214,6 +3398,27 @@ export function AdminPanel() {
                   </button>
                 </div>
               )}
+
+              {/* Employers */}
+              <div className="flex items-center justify-between mb-4 px-3 py-2 bg-slate-50 dark:bg-slate-900/50 rounded-xl">
+                <span className="text-sm text-slate-600 dark:text-slate-400 flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  {company.employers?.length ?? 0} {(company.employers?.length ?? 0) === 1 ? 'employer' : 'employers'}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedCompany(company);
+                    resetEmployerPanel();
+                    setShowEmployerForm(true);
+                    setShowViewCompanyModal(true);
+                  }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 transition-colors"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  Add Employer
+                </button>
+              </div>
 
               {/* Footer */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
@@ -4123,7 +4328,7 @@ export function AdminPanel() {
               >
                 <Key className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  A unique <span className="font-mono font-bold">COMP###</span> key will be auto-generated for this company.
+                  A unique company key is generated automatically for this company.
                 </p>
               </motion.div>
             </motion.div>
@@ -4390,6 +4595,123 @@ export function AdminPanel() {
   };
 
   // ===== VIEW COMPANY MODAL =====
+  // ===== ADD EXISTING COMPANIES MODAL =====
+  const renderLinkCompaniesModal = () => {
+    if (!showLinkCompaniesModal) return null;
+
+    const q = librarySearch.trim().toLowerCase();
+    const visible = libraryCompanies.filter((c) =>
+      !q || c.company_name.toLowerCase().includes(q) || (c.industry || '').toLowerCase().includes(q)
+    );
+    const toggle = (id: string) =>
+      setLibrarySelection((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+    return (
+      <div className="fixed inset-0 flex items-center justify-center p-4 z-[9999]">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !isLinkingCompanies && setShowLinkCompaniesModal(false)} />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ type: 'spring', duration: 0.5 }}
+          className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col"
+        >
+          <div className="border-b border-slate-200 dark:border-slate-700 px-6 py-5 flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">Add Existing Companies</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Choose from every company to add to this event</p>
+            </div>
+            <button
+              onClick={() => setShowLinkCompaniesModal(false)}
+              className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+            </button>
+          </div>
+
+          <div className="px-6 pt-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                value={librarySearch}
+                onChange={(e) => setLibrarySearch(e.target.value)}
+                placeholder="Search companies..."
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900/40 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              />
+            </div>
+          </div>
+
+          <div className="px-6 py-4 overflow-y-auto flex-1 min-h-[12rem]">
+            {isLoadingLibrary ? (
+              <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-red-500" /></div>
+            ) : visible.length === 0 ? (
+              <p className="text-center text-sm text-slate-500 dark:text-slate-400 py-10">No companies found</p>
+            ) : (
+              <ul className="space-y-2">
+                {visible.map((c) => {
+                  const checked = librarySelection.includes(c.id);
+                  return (
+                    <li key={c.id}>
+                      <label className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${c.in_event
+                        ? 'border-slate-100 dark:border-slate-700 opacity-60 cursor-not-allowed'
+                        : checked
+                          ? 'border-red-300 bg-red-50 dark:border-red-700 dark:bg-red-900/20 cursor-pointer'
+                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40 cursor-pointer'}`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-red-600 w-4 h-4"
+                          checked={c.in_event || checked}
+                          disabled={c.in_event}
+                          onChange={() => toggle(c.id)}
+                        />
+                        {c.logo_url ? (
+                          <img src={c.logo_url} alt="" className="w-9 h-9 rounded-lg object-cover shrink-0" />
+                        ) : (
+                          <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                            <Building2 className="w-4 h-4 text-slate-400" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{c.company_name}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {c.in_event ? 'Already in this event' : [c.industry, `${c.events_count} event${c.events_count === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="border-t border-slate-200 dark:border-slate-700 px-6 py-4 flex items-center justify-between gap-3">
+            <span className="text-sm text-slate-500 dark:text-slate-400">{librarySelection.length} selected</span>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLinkCompaniesModal(false)}
+                disabled={isLinkingCompanies}
+                className="px-5 py-2.5 rounded-xl font-semibold bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleLinkCompanies}
+                disabled={isLinkingCompanies || librarySelection.length === 0}
+                className="px-5 py-2.5 rounded-xl font-semibold bg-red-600 hover:bg-red-700 text-white flex items-center gap-2 disabled:opacity-50 transition-all"
+              >
+                {isLinkingCompanies ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                Add to Event
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  };
+
   const renderViewCompanyModal = () => {
     if (!showViewCompanyModal || !selectedCompany) return null;
 
@@ -4534,6 +4856,138 @@ export function AdminPanel() {
                   <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{selectedCompany.description}</p>
                 </motion.div>
               )}
+
+              {/* Employers */}
+              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Employers ({selectedCompany.employers?.length ?? 0})
+                  </p>
+                  {!showEmployerForm && (
+                    <button
+                      onClick={() => { setShowEmployerForm(true); setCreatedEmployer(null); setEmployerError(''); }}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Add Employer
+                    </button>
+                  )}
+                </div>
+
+                {createdEmployer && (
+                  <div className="mb-3 p-3 rounded-xl bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-sm">
+                    {createdEmployer.password ? (
+                      <>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <p className="font-semibold text-green-800 dark:text-green-200">Account created. Send these login details to the employer:</p>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyKey(
+                              'login-details',
+                              loginDetailsRef.current?.textContent ?? '',
+                              loginDetailsRef.current
+                            )}
+                            className="shrink-0 px-2 py-1 rounded-md text-xs font-semibold text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/40 flex items-center gap-1"
+                            title="Copy login details"
+                          >
+                            {copiedKeyId === 'login-details'
+                              ? <><Check className="w-4 h-4" />Copied</>
+                              : <><Copy className="w-4 h-4" />Copy</>}
+                          </button>
+                        </div>
+                        <pre
+                          ref={loginDetailsRef}
+                          className="font-mono text-slate-800 dark:text-slate-100 whitespace-pre-wrap break-all select-all bg-white/60 dark:bg-slate-900/40 rounded-lg px-3 py-2"
+                        >{`Login: ${window.location.origin}/login\nEmail: ${createdEmployer.email}\nPassword: ${createdEmployer.password}`}</pre>
+                        {copyFailedId === 'login-details' && (
+                          <p className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                            Your browser blocked copying here. The details are selected: press Ctrl+C (Cmd+C on Mac).
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-green-700 dark:text-green-300">
+                          This password won't be shown again. The employer logs in at /login and fills in their own details.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-green-800 dark:text-green-200">
+                        <span className="font-semibold">{createdEmployer.email}</span> already had an account, so it was linked to this company. They log in with their existing password.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {showEmployerForm && (
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); handleAddEmployer(selectedCompany.id); }}
+                    className="mb-3 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40"
+                  >
+                    <label htmlFor="employer-email" className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      Employer email
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        id="employer-email"
+                        type="email"
+                        autoFocus
+                        value={employerEmail}
+                        onChange={(e) => { setEmployerEmail(e.target.value); setEmployerError(''); }}
+                        placeholder="employer@company.com"
+                        className={`flex-1 min-w-0 px-3 py-2 rounded-xl border bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 ${employerError ? 'border-red-400' : 'border-slate-200 dark:border-slate-600'}`}
+                      />
+                      <button
+                        type="submit"
+                        disabled={isAddingEmployer || !employerEmail.trim()}
+                        className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                      >
+                        {isAddingEmployer ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                        Create
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetEmployerPanel}
+                        disabled={isAddingEmployer}
+                        className="px-3 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    {employerError && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{employerError}</p>}
+                    <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                      A default password is generated for you to send. If this email already has an account, that account is linked instead.
+                    </p>
+                  </form>
+                )}
+
+                <ul className="space-y-2">
+                  {(selectedCompany.employers ?? []).map((emp) => (
+                    <li key={emp.user_id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                          {emp.full_name || emp.email}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                          {[emp.email, emp.phone, emp.job_title].filter(Boolean).join(' · ')}
+                        </p>
+                        {!emp.profile_complete && (
+                          <p className="text-[11px] font-semibold text-amber-600 dark:text-amber-400">Hasn't completed their profile yet</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleRemoveEmployer(emp)}
+                        disabled={removingEmployerId === emp.user_id}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors shrink-0"
+                        title="Remove employer"
+                        aria-label={`Remove ${emp.full_name || emp.email}`}
+                      >
+                        {removingEmployerId === emp.user_id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </li>
+                  ))}
+                  {(selectedCompany.employers?.length ?? 0) === 0 && !showEmployerForm && (
+                    <li className="text-sm text-slate-400 dark:text-slate-500">No employers yet.</li>
+                  )}
+                </ul>
+              </div>
             </div>
 
             {/* Footer */}
@@ -6268,6 +6722,7 @@ export function AdminPanel() {
 
       {renderAddCompanyModal()}
       {renderViewCompanyModal()}
+      {renderLinkCompaniesModal()}
       {renderEditCompanyModal()}
       {renderDeleteCompanyModal()}
       {renderAddSessionModal()}

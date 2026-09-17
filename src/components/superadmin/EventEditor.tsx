@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronLeft } from '../icons';
 import {
-  buttonClass, callSadmin, errorText, formatDateTime, fromLocalInput, inputClass, labelClass, toLocalInput,
+  buttonClass, callSadmin, errorText, eventHasEnded, formatDateTime, fromLocalInput, inputClass, labelClass, toLocalInput,
   type EventDetail, type EventReadiness, type EventTeamRow, type Notify
 } from './sadminApi';
 import { Badge, ConfirmDialog, ErrorBlock, LoadingBlock, MIcon, Panel, Toggle } from './ui';
@@ -25,8 +25,8 @@ const STATUS_HINTS: Record<string, string> = {
   draft: 'hidden from everyone',
   published: 'live — people can choose it',
   ongoing: 'hidden from the chooser',
-  completed: 'hidden from the chooser',
-  cancelled: 'hidden from the chooser'
+  completed: 'ended — hidden from the chooser, employers can view only',
+  cancelled: 'hidden from everyone'
 };
 
 const statusOptionLabel = (s: string) =>
@@ -110,6 +110,9 @@ const DetailsEditor: React.FC<{ detail: EventDetail; notify: Notify; onSaved: ()
         <div>
           <label className={labelClass}>Ends</label>
           <input type="datetime-local" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} className={inputClass} />
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            After this day the event counts as ended, even while published: employers can only view it.
+          </p>
         </div>
         <div>
           <label className={labelClass}>Venue</label>
@@ -390,6 +393,7 @@ const EventEditor: React.FC<{ eventId: string; notify: Notify; onBack: () => voi
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{event.name}</h2>
             {live ? <Badge tone="green">Live</Badge> : <Badge>Not live</Badge>}
             {event.is_current && <Badge tone="amber">Current event</Badge>}
+            {eventHasEnded(event.status, event.end_date) && <Badge tone="red">Ended · employers view only</Badge>}
             <Badge tone="blue">{EVENT_TYPE_LABELS[event.event_type ?? ''] ?? 'Event'}</Badge>
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">

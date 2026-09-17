@@ -24,6 +24,7 @@ const TeamLeaderDashboard = React.lazy(() => import('./pages/team/TeamLeaderDash
 const AdminPanel = React.lazy(() => import('./pages/admin/AdminPanel').then(module => ({ default: module.AdminPanel })));
 const SuperAdminPanel = React.lazy(() => import('./pages/admin/SuperAdminPanel').then(module => ({ default: module.SuperAdminPanel })));
 const TechSupportDashboard = React.lazy(() => import('./pages/team/TechSupportDashboard').then(module => ({ default: module.TechSupportDashboard })));
+const EmployerStart = React.lazy(() => import('./pages/Employer/EmployerStart').then(module => ({ default: module.EmployerStart })));
 const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
 const EventSelection = React.lazy(() => import('./pages/EventSelection').then(module => ({ default: module.EventSelection })));
 const EventRegistration = React.lazy(() => import('./pages/EventRegistration').then(module => ({ default: module.EventRegistration })));
@@ -264,6 +265,15 @@ const AppRouter: React.FC = () => {
         </ProtectedRoute>
       } />
 
+      {/* Employer onboarding: profile (first login) → event selection */}
+      <Route path="/employer-start" element={
+        <ProtectedRoute allowWithoutProfile>
+          <Suspense fallback={<DashboardLoading message="Loading..." />}>
+            <EmployerStart />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
       <Route path="/employer" element={
         <ProtectedRoute requiredRole="employer">
           <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
@@ -328,39 +338,54 @@ const LogoutPopup: React.FC = () => {
 };
 
 // Maintenance Mode Guard
+// The last answer is kept for the session, so pages are not blanked out while the
+// check runs; only a confirmed maintenance window covers the screen.
+const MAINTENANCE_CACHE_KEY = 'site.maintenance';
+const DEFAULT_MAINTENANCE_MSG = 'System is under maintenance. Please try again later.';
+
+const readMaintenanceCache = (): { enabled: boolean; message: string } | null => {
+  try {
+    const raw = sessionStorage.getItem(MAINTENANCE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
 const MaintenanceGuard: React.FC = () => {
   const { pathname } = useLocation();
-  const [isMaintenance, setIsMaintenance] = useState<boolean | null>(null);
-  const [maintenanceMsg, setMaintenanceMsg] = useState('System is under maintenance. Please try again later.');
+  const cached = readMaintenanceCache();
+  const [isMaintenance, setIsMaintenance] = useState<boolean>(cached?.enabled ?? false);
+  const [maintenanceMsg, setMaintenanceMsg] = useState(cached?.message || DEFAULT_MAINTENANCE_MSG);
 
   useEffect(() => {
     const checkMaintenance = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
         const { data } = await supabase.rpc('check_maintenance_status');
-        if (data?.enabled) {
-          setIsMaintenance(true);
-          setMaintenanceMsg(data.message || 'System is under maintenance. Please try again later.');
-        } else {
-          setIsMaintenance(false);
-        }
+        const enabled = !!data?.enabled;
+        const message = data?.message || DEFAULT_MAINTENANCE_MSG;
+        setIsMaintenance(enabled);
+        setMaintenanceMsg(message);
+        try {
+          sessionStorage.setItem(MAINTENANCE_CACHE_KEY, JSON.stringify({ enabled, message }));
+        } catch { /* storage unavailable */ }
       } catch {
         setIsMaintenance(false);
       }
     };
 
     checkMaintenance();
-    const interval = setInterval(checkMaintenance, 30000);
-    return () => clearInterval(interval);
-  }, [pathname]);
+    const interval = setInterval(checkMaintenance, 60000);
+    document.addEventListener('visibilitychange', checkMaintenance);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', checkMaintenance);
+    };
+  }, []);
 
   const exemptPaths = ['/super-ctrl-92k1x', '/login', '/forgot-password', '/reset-password', '/', '/partners', '/speakers', '/about'];
   if (exemptPaths.includes(pathname)) return null;
-
-  if (isMaintenance === null) {
-    return (
-      <div className="fixed inset-0 bg-slate-900 z-[9998]" />
-    );
-  }
 
   if (!isMaintenance) return null;
 

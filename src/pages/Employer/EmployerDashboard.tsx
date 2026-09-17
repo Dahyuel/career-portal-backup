@@ -13,6 +13,8 @@ import JobManagementModal from '../../components/employer/JobManagementModal';
 import Toast from '../../components/shared/Toast';
 import NotificationModal from '../../components/NotificationModal';
 import { logger } from '../../utils/logger';
+import { useNavigate } from 'react-router-dom';
+import { EmployerEvent, getEmployerStatus } from '../../lib/employer';
 
 const containerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -67,6 +69,7 @@ interface Stats {
 
 export const EmployerDashboard: React.FC = () => {
     const { user, profile } = useAuth();
+    const navigate = useNavigate();
 
     // REMOVED: useEmployerProfile hook - now using profile from AuthContext
     const [showProfile, setShowProfile] = useState(false);
@@ -95,7 +98,21 @@ export const EmployerDashboard: React.FC = () => {
     const [isInitializing, setIsInitializing] = useState(true);
     const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-    const EVENT_ID = getActiveEventId();
+    // The event the employer picked on /employer-start (bound into the profile)
+    const EVENT_ID = profile?.event_id || getActiveEventId();
+
+    // Ended events are view-only; the server refuses changes as well
+    const [eventInfo, setEventInfo] = useState<EmployerEvent | null>(null);
+    const readOnly = eventInfo?.is_ended ?? false;
+
+    useEffect(() => {
+        let cancelled = false;
+        getEmployerStatus().then((status) => {
+            if (cancelled || !status) return;
+            setEventInfo(status.events.find((e) => e.event_id === EVENT_ID) ?? null);
+        });
+        return () => { cancelled = true; };
+    }, [EVENT_ID]);
 
     const navItems: NavItem[] = [
         { key: 'home', label: 'Home', icon: 'dashboard' },
@@ -122,7 +139,7 @@ export const EmployerDashboard: React.FC = () => {
             email: profile.email || user?.email || '', // Fallback to user email
             phone: profile.phone || ''
         };
-    }, [profile, user]);
+    }, [profile, user, EVENT_ID]);
 
     // Fetch Jobs - via RPC
     const fetchJobs = useCallback(async () => {
@@ -130,7 +147,7 @@ export const EmployerDashboard: React.FC = () => {
 
         setLoadingJobs(true);
         try {
-            const { data, error } = await supabase.rpc('employer_get_my_jobs');
+            const { data, error } = await supabase.rpc('employer_get_my_jobs', { p_event_id: EVENT_ID });
 
             if (error) throw error;
 
@@ -154,7 +171,7 @@ export const EmployerDashboard: React.FC = () => {
         } finally {
             setLoadingJobs(false);
         }
-    }, [employerData?.employer_id]);
+    }, [employerData?.employer_id, EVENT_ID]);
 
     // Initial Data Load - via RPC
     useEffect(() => {
@@ -168,7 +185,7 @@ export const EmployerDashboard: React.FC = () => {
                 // Parallel fetch for better performance
                 const [notificationsResult, jobsResult] = await Promise.all([
                     supabase.rpc('get_employer_notifications', { p_event_id: EVENT_ID }),
-                    supabase.rpc('employer_get_my_jobs')
+                    supabase.rpc('employer_get_my_jobs', { p_event_id: EVENT_ID })
                 ]);
 
                 if (notificationsResult.data) {
@@ -190,7 +207,7 @@ export const EmployerDashboard: React.FC = () => {
         };
 
         fetchInitialData();
-    }, [profile, employerData]);
+    }, [profile, employerData, EVENT_ID]);
 
     // Lazy Loading Tab Data - OPTIMIZED
     useEffect(() => {
@@ -221,6 +238,7 @@ export const EmployerDashboard: React.FC = () => {
     }, []);
 
     const handleDeleteAttempt = useCallback((job: Job) => {
+        if (readOnly) return;
         if (job.no_of_applicants > 0) {
             setToast({
                 message: "Cannot delete a job with active applicants. Please review the applicants first.",
@@ -230,7 +248,7 @@ export const EmployerDashboard: React.FC = () => {
         }
         setDeleteJobId(job.id);
         setShowManagementModal(false);
-    }, []);
+    }, [readOnly]);
 
     const confirmDeleteJob = useCallback(async () => {
         if (!deleteJobId) return;
@@ -255,6 +273,36 @@ export const EmployerDashboard: React.FC = () => {
             });
         }
     }, [deleteJobId, fetchJobs]);
+
+    const renderEventBar = () => (
+        <div className={`mb-6 rounded-2xl border px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 ${readOnly
+            ? 'bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800'
+            : 'bg-white border-slate-200 dark:bg-slate-900 dark:border-slate-800'}`}
+        >
+            <div className="flex items-start gap-3 flex-1 min-w-0">
+                <span className={`material-symbols-outlined ${readOnly ? 'text-amber-600 dark:text-amber-400' : 'text-red-600'}`}>
+                    {readOnly ? 'lock' : 'event'}
+                </span>
+                <div className="min-w-0">
+                    <p className="font-bold text-slate-900 dark:text-white truncate">
+                        {eventInfo?.event_name || 'Selected event'}
+                    </p>
+                    <p className={`text-sm ${readOnly ? 'text-amber-800 dark:text-amber-200' : 'text-slate-500 dark:text-slate-400'}`}>
+                        {readOnly
+                            ? 'This event has ended. You can view its data, but posting, editing and reviewing are turned off.'
+                            : 'You are managing this event.'}
+                    </p>
+                </div>
+            </div>
+            <button
+                onClick={() => navigate('/employer-start')}
+                className="shrink-0 px-4 py-2 rounded-xl text-sm font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-1.5"
+            >
+                <span className="material-symbols-outlined text-base">swap_horiz</span>
+                Switch event
+            </button>
+        </div>
+    );
 
     const renderContent = useCallback(() => {
         switch (activeTab) {
@@ -360,12 +408,12 @@ export const EmployerDashboard: React.FC = () => {
                                     Job Postings
                                 </h2>
                                 <div className="flex items-center gap-2 mt-1">
-                                    <p className="text-slate-600 dark:text-slate-400">Manage your open positions</p>
+                                    <p className="text-slate-600 dark:text-slate-400">{readOnly ? 'Positions posted for this event' : 'Manage your open positions'}</p>
                                     <span className="text-slate-300">•</span>
                                     <span className="text-xs font-bold px-2 py-0.5 bg-primary/10 text-primary rounded-full">{stats.totalJobs} Active</span>
                                 </div>
                             </div>
-                            <button
+                            {!readOnly && <button
                                 onClick={() => {
                                     setSelectedJob(null);
                                     setShowJobModal(true);
@@ -375,7 +423,7 @@ export const EmployerDashboard: React.FC = () => {
                             >
                                 <span className="material-symbols-outlined">add</span>
                                 Post New Job
-                            </button>
+                            </button>}
                         </motion.div>
 
                         {loadingJobs ? (
@@ -386,8 +434,10 @@ export const EmployerDashboard: React.FC = () => {
                             <div className="text-center py-12 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
                                 <span className="material-symbols-outlined text-5xl text-slate-300 dark:text-slate-700 mb-4">work_off</span>
                                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-2">No jobs posted yet</h3>
-                                <p className="text-slate-500 mb-6">Start by adding your first job opportunity.</p>
-                                <button
+                                <p className="text-slate-500 mb-6">
+                                    {readOnly ? 'No jobs were posted for this event.' : 'Start by adding your first job opportunity.'}
+                                </p>
+                                {!readOnly && <button
                                     onClick={() => {
                                         setSelectedJob(null);
                                         setShowJobModal(true);
@@ -395,7 +445,7 @@ export const EmployerDashboard: React.FC = () => {
                                     className="text-indigo-600 font-bold hover:underline"
                                 >
                                     Create Job Listing
-                                </button>
+                                </button>}
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -457,7 +507,7 @@ export const EmployerDashboard: React.FC = () => {
                                                 </div>
 
                                                 <span className="text-red-600 dark:text-red-400 text-xs font-bold group-hover:translate-x-1 transition-transform flex items-center gap-1">
-                                                    Manage Job
+                                                    {readOnly ? 'View Job' : 'Manage Job'}
                                                     <span className="material-symbols-outlined text-sm">arrow_forward</span>
                                                 </span>
                                             </div>
@@ -539,7 +589,7 @@ export const EmployerDashboard: React.FC = () => {
             default:
                 return null;
         }
-    }, [activeTab, employerData, stats, loadingJobs, jobs, handleManagementAction, getTypeBadgeColor]);
+    }, [activeTab, employerData, stats, loadingJobs, jobs, handleManagementAction, getTypeBadgeColor, readOnly]);
 
     // Show loading while initializing
     if (isInitializing || !profile) {
@@ -557,8 +607,14 @@ export const EmployerDashboard: React.FC = () => {
                         Access Denied
                     </h2>
                     <p className="text-slate-600 dark:text-slate-400">
-                        You don't have employer access. Please contact support.
+                        You don't have employer access for this event.
                     </p>
+                    <button
+                        onClick={() => navigate('/employer-start')}
+                        className="mt-4 px-5 py-2.5 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 transition-colors"
+                    >
+                        Choose another event
+                    </button>
                 </div>
             </div>
         );
@@ -576,6 +632,7 @@ export const EmployerDashboard: React.FC = () => {
             hideDock={showProfile}
         >
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-8">
+                {renderEventBar()}
                 <AnimatePresence mode="wait">
                     {renderContent()}
                 </AnimatePresence>
@@ -585,6 +642,7 @@ export const EmployerDashboard: React.FC = () => {
             <AnimatePresence>
                 {showProfile && employerData && (
                     <EmployerProfileCard
+                        readOnly={readOnly}
                         onClose={() => setShowProfile(false)}
                     />
                 )}
@@ -592,7 +650,7 @@ export const EmployerDashboard: React.FC = () => {
 
             {/* Add/Edit Job Modal */}
             <AnimatePresence>
-                {showJobModal && employerData && (
+                {showJobModal && employerData && !readOnly && (
                     <AddEditJobModal
                         job={selectedJob}
                         companyId={employerData.company_id || ''}
@@ -609,6 +667,7 @@ export const EmployerDashboard: React.FC = () => {
                 {showManagementModal && jobForManagement && (
                     <JobManagementModal
                         job={jobForManagement}
+                        readOnly={readOnly}
                         onClose={() => setShowManagementModal(false)}
                         onEdit={() => {
                             setSelectedJob(jobForManagement);
@@ -638,14 +697,14 @@ export const EmployerDashboard: React.FC = () => {
                         jobId={selectedJobForApplicants.id}
                         jobTitle={selectedJobForApplicants.title}
                         onClose={() => setShowApplicantsModal(false)}
-                        isEmployer={true}
+                        isEmployer={!readOnly}
                     />
                 )}
             </AnimatePresence>
 
             {/* Delete Confirmation Modal */}
             <AnimatePresence>
-                {deleteJobId && (
+                {deleteJobId && !readOnly && (
                     <div className="fixed inset-0 flex items-center justify-center p-4 z-[100]">
                         <motion.div
                             initial={{ opacity: 0 }}
