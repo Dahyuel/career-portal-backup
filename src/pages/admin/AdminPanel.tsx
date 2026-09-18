@@ -1746,7 +1746,6 @@ export function AdminPanel() {
   const VOLUNTEER_TEAMS = [
     { key: 'registration', label: 'Registration', icon: 'app_registration', color: 'bg-blue-500', gradientFrom: 'from-blue-500', gradientTo: 'to-blue-600' },
     { key: 'building', label: 'Building', icon: 'construction', color: 'bg-amber-500', gradientFrom: 'from-amber-500', gradientTo: 'to-amber-600' },
-    { key: 'info desk', label: 'Info Desk', icon: 'info', color: 'bg-purple-500', gradientFrom: 'from-purple-500', gradientTo: 'to-purple-600' },
     { key: 'verification', label: 'Verification', icon: 'verified_user', color: 'bg-teal-500', gradientFrom: 'from-teal-500', gradientTo: 'to-teal-600' },
     { key: 'feedback', label: 'Feedback', icon: 'rate_review', color: 'bg-pink-500', gradientFrom: 'from-pink-500', gradientTo: 'to-pink-600' },
     { key: 'stage', label: 'Stage', icon: 'mic', color: 'bg-red-500', gradientFrom: 'from-red-500', gradientTo: 'to-red-600' },
@@ -1770,7 +1769,6 @@ export function AdminPanel() {
     { id: 'event_checkin_staff', name: 'Event Check-in', points: 1, type: 'per_task', description: 'Points for checking in an attendee at the event' },
     { id: 'event_checkout_staff', name: 'Event Check-out', points: 1, type: 'per_task', description: 'Points for checking out an attendee' },
     { id: 'session_checkin_staff', name: 'Session Check-in', points: 1, type: 'per_task', description: 'Points for checking an attendee into a session' },
-    { id: 'session_booking_infodesk', name: 'Info Desk: Session Booking', points: 1, type: 'per_task', description: 'Points for booking/unbooking a session via Info Desk' },
     { id: 'attendee_verification', name: 'Verification Action', points: 2, type: 'per_task', description: 'Points for approving or rejecting an attendee registration' },
   ]);
 
@@ -1790,7 +1788,6 @@ export function AdminPanel() {
     const getTaskRulesForTeam = (teamKey: string) => {
       if (teamKey === 'registration') return commonPoints.filter(r => ['event_checkin_staff', 'event_checkout_staff'].includes(r.id));
       if (teamKey === 'building') return commonPoints.filter(r => r.id === 'session_checkin_staff');
-      if (teamKey === 'info desk') return commonPoints.filter(r => r.id === 'session_booking_infodesk');
       if (teamKey === 'verification') return commonPoints.filter(r => r.id === 'attendee_verification');
       return [];
     };
@@ -5867,7 +5864,6 @@ export function AdminPanel() {
     const teams = [
       { id: 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed', name: 'Registration', icon: 'app_registration', color: 'bg-blue-500' },
       { id: 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f', name: 'Building', icon: 'construction', color: 'bg-amber-500' },
-      { id: '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33', name: 'Info Desk', icon: 'info', color: 'bg-purple-500' },
       { id: 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1', name: 'Verification', icon: 'verified_user', color: 'bg-teal-500' },
       { id: '394b8631-7948-49f1-87ba-bc7e3ead12b9', name: 'Feedback', icon: 'rate_review', color: 'bg-pink-500' },
       { id: '481237b5-45ef-463f-8460-b6f848835756', name: 'Stage', icon: 'stage', color: 'bg-red-500' },

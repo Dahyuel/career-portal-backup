@@ -18,7 +18,6 @@ const AttendeeDashboard = React.lazy(() => import('./pages/user/AttendeeDashboar
 const VolunteerDashboard = React.lazy(() => import('./pages/volunteer/VolunteerDashboard').then(module => ({ default: module.VolunteerDashboard })));
 const RegTeamDashboard = React.lazy(() => import('./pages/team/RegTeamDashboard').then(module => ({ default: module.RegTeamDashboard })));
 const BuildTeamDashboard = React.lazy(() => import('./pages/team/BuildTeamDashboard').then(module => ({ default: module.BuildTeamDashboard })));
-const InfoDeskDashboard = React.lazy(() => import('./pages/team/InfoDeskDashboard').then(module => ({ default: module.InfoDeskDashboard })));
 const VerificationDashboard = React.lazy(() => import('./pages/team/VerificationDashboard').then(module => ({ default: module.VerificationDashboard })));
 const TeamLeaderDashboard = React.lazy(() => import('./pages/team/TeamLeaderDashboard').then(module => ({ default: module.TeamLeaderDashboard })));
 const AdminPanel = React.lazy(() => import('./pages/admin/AdminPanel').then(module => ({ default: module.AdminPanel })));
@@ -167,7 +166,6 @@ const AppRouter: React.FC = () => {
             'volunteer',
             'registration',
             'building',
-            'info_desk',
             'verification',
             'tech_support',
             'team_leader'
@@ -213,14 +211,6 @@ const AppRouter: React.FC = () => {
         <ProtectedRoute requiredRole="volunteer">
           <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
             <VolunteerDashboard />
-          </Suspense>
-        </ProtectedRoute>
-      } />
-
-      <Route path="/info-desk" element={
-        <ProtectedRoute requiredRole="info_desk">
-          <Suspense fallback={<DashboardLoading message="Loading dashboard..." />}>
-            <InfoDeskDashboard />
           </Suspense>
         </ProtectedRoute>
       } />
@@ -305,7 +295,7 @@ const AppRouter: React.FC = () => {
       {/* Fallback for old paths if any */}
       <Route path="/regteam" element={<Navigate to="/registration" replace />} />
       <Route path="/buildteam" element={<Navigate to="/building" replace />} />
-      <Route path="/infodesk" element={<Navigate to="/info-desk" replace />} />
+      
       <Route path="/teamleader" element={<Navigate to="/team-leader" replace />} />
       <Route path="/employer-dashboard" element={<Navigate to="/employer" replace />} />
 

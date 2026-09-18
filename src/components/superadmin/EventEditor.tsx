@@ -218,7 +218,7 @@ const TeamsEditor: React.FC<{ eventId: string; teams: EventTeamRow[]; notify: No
   return (
     <Panel
       title="Volunteer teams"
-      subtitle="Shown in volunteer and team leader registration, team dashboards and role management. Staff roles such as Registration, Building, Info Desk, Verification and Technical Support are linked to the team with the same name."
+      subtitle="Shown in volunteer and team leader registration, team dashboards and role management. Staff roles such as Registration, Building, Verification and Technical Support are linked to the team with the same name."
     >
       <div className="hidden md:grid md:grid-cols-[1fr_1.5fr_120px_auto] gap-3 text-xs font-semibold text-slate-500 dark:text-slate-400 px-1 mb-2">
         <span>Team</span><span>Description</span><span>Points / hour</span><span className="w-40" />

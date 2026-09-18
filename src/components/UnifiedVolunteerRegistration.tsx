@@ -93,7 +93,6 @@ const VOLUNTEER_TEAMS = [
     { "idx": 1, "id": "481237b5-45ef-463f-8460-b6f848835756", "team_name": "Stage" },
     { "idx": 2, "id": "587e30ea-20b2-4292-81fe-02945f6d2a3f", "team_name": "Marketing" },
     { "idx": 3, "id": "8052492b-55bb-46d0-ab4c-52a6df81c4c9", "team_name": "Media" },
-    { "idx": 4, "id": "9269ac6a-7b2c-4be5-ab72-3f8278eb8e33", "team_name": "Info Desk" },
     { "idx": 5, "id": "97ab5a37-557e-4a81-ae81-9dcc6bbae87a", "team_name": "Usher" },
     { "idx": 6, "id": "a0abd4b7-7879-4a07-806d-fd0e2f4257f1", "team_name": "Verification" },
     { "idx": 7, "id": "ae0e251c-81f5-4763-a9db-39ca511fd03c", "team_name": "Catering" },
@@ -346,7 +345,6 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
             if (!formData.isTeamLeader) {
                 if (formData.teamId === 'f9419a07-f974-4f59-bba2-b2f9a2b2fa7f') assignedRole = 'building';
                 else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') assignedRole = 'registration';
-                else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') assignedRole = 'info_desk';
                 else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') assignedRole = 'verification';
             }
 
@@ -374,8 +372,6 @@ export const UnifiedVolunteerRegistration: React.FC = () => {
                 redirectPath = '/buildteam';
             } else if (formData.teamId === 'fc15e3bb-ceed-4aa3-acf5-004a7af664ed') {
                 redirectPath = '/registration';
-            } else if (formData.teamId === '9269ac6a-7b2c-4be5-ab72-3f8278eb8e33') {
-                redirectPath = '/info-desk';
             } else if (formData.teamId === 'a0abd4b7-7879-4a07-806d-fd0e2f4257f1') {
                 redirectPath = '/verification';
             }

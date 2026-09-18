@@ -612,7 +612,6 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, title, subt
       'volunteer': 'Volunteers',
       'registration': 'Registration Team',
       'building': 'Building Team',
-      'info_desk': 'Info Desk Team',
       'team_leader': 'Team Leaders',
       'ushers': 'Ushers',
       'marketing': 'Marketing Team',

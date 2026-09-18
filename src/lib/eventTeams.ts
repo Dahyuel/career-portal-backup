@@ -1,5 +1,5 @@
 // Volunteer team options for the current event, built from the database instead of
-// fixed team IDs. Staff roles are linked to their team by name (e.g. "Info Desk").
+// fixed team IDs. Staff roles are linked to their team by name.
 //
 // In v2 every event has its own volunteer_teams rows, so the same team name has a
 // different id per event. Hard-coded ids cannot work here.
@@ -10,7 +10,6 @@ const norm = (value: string) => value.trim().toLowerCase();
 const TEAM_ICONS: Record<string, string> = {
   registration: 'how_to_reg',
   building: 'construction',
-  'info desk': 'info',
   verification: 'verified_user',
   'technical support': 'support_agent',
   catering: 'restaurant',
@@ -26,7 +25,6 @@ const TEAM_ICONS: Record<string, string> = {
 const NAMED_ROLES = [
   { role: 'building', team: 'building', label: 'Building' },
   { role: 'registration', team: 'registration', label: 'Registration' },
-  { role: 'info_desk', team: 'info desk', label: 'Info Desk' },
   { role: 'verification', team: 'verification', label: 'Verification' },
   { role: 'tech_support', team: 'technical support', label: 'Technical Support' }
 ];

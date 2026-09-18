@@ -131,7 +131,6 @@ interface VolunteerFormData {
 const roleOptions = [
   { value: 'registration', label: 'Registration Desk' },
   { value: 'building', label: 'Building Assistance' },
-  { value: 'info_desk', label: 'Info Desk' },
   { value: 'ushers', label: 'Ushers' },
   { value: 'marketing', label: 'Marketing' },
   { value: 'media', label: 'Media' },
@@ -146,7 +145,6 @@ const roleOptions = [
 const teamOptions = [
   { value: 'registration', label: 'Registration Team' },
   { value: 'building', label: 'Building Team' },
-  { value: 'info_desk', label: 'Info Desk Team' },
   { value: 'ushers', label: 'Ushers Team' },
   { value: 'marketing', label: 'Marketing Team' },
   { value: 'media', label: 'Media Team' },

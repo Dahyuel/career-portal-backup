@@ -110,7 +110,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const ROLE_PRIORITY: Record<string, number> = {
   sadmin: 10, super_admin: 9, admin: 8, team_leader: 7, tech_support: 6,
   employer: 5, volunteer: 4, building: 3, registration: 3,
-  info_desk: 2, verification: 2, attendee: 0
+  verification: 2, attendee: 0
 };
 
 const getRolePriority = (role: string): number => ROLE_PRIORITY[role] ?? 0;
@@ -123,7 +123,7 @@ const isSuperAdminRole = (role?: string|null): boolean =>
 const getEffectiveRole = (roles: string[]): string => {
   if (!roles || roles.length === 0) return "attendee";
   const priority = ["sadmin", "super_admin", "admin", "team_leader", "tech_support", "employer",
-    "volunteer", "building", "registration", "info_desk", "verification", "attendee"];
+    "volunteer", "building", "registration", "verification", "attendee"];
   for (const role of priority) {
     if (roles.includes(role)) return role;
   }
@@ -513,7 +513,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         volunteer: "/volunteer",
         building: "/building",
         registration: "/registration",
-        info_desk: "/info-desk",
         verification: "/verification",
         attendee: "/attendee"
       };

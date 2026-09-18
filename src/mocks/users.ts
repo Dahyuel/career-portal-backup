@@ -6,7 +6,7 @@ export interface MockUser {
     last_name: string;
     email: string;
     personal_id: string;
-    role: 'attendee' | 'volunteer' | 'team_leader' | 'admin' | 'registration' | 'building' | 'info_desk' | 'employer';
+    role: 'attendee' | 'volunteer' | 'team_leader' | 'admin' | 'registration' | 'building' | 'employer';
     phone?: string;
     university?: string;
     faculty?: string;

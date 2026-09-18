@@ -9,6 +9,7 @@ import {
     checkEventRegistration,
     FairEvent,
 } from '../lib/supabase';
+import { getEmployerStatus, openEmployerEvent } from '../lib/employer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logger } from '../utils/logger';
 import { useAuth } from '../contexts/AuthContext';
@@ -39,14 +40,17 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'qrcode'>('overview');
     const [showRestrictionModal, setShowRestrictionModal] = useState(false);
 
-    // ── Event switcher state ─────────────────────────────────────────────
+// ── Event switcher state ─────────────────────────────────────────────
     const [showEventSwitcher, setShowEventSwitcher] = useState(false);
     const [events, setEvents] = useState<FairEvent[]>([]);
     const [eventsLoading, setEventsLoading] = useState(false);
-    const [eventsError, setEventsError] = useState<string | null>(null);
-    const [switchingEventId, setSwitchingEventId] = useState<string | null>(null);
-    const [currentEventName, setCurrentEventName] = useState<string | null>(null);
+    const [eventsError, setEventsError] = useState<string|null>(null);
+    const [switchingEventId, setSwitchingEventId] = useState<string|null>(null);
+    const [currentEventName, setCurrentEventName] = useState<string|null>(null);
     const [eventNameLoading, setEventNameLoading] = useState<boolean>(!!eventId);
+    // Employer events where the company takes part but the user has no employers
+    // row yet. Selecting one runs employer_open_event (mirrors EventSelection).
+    const [employerOpenable, setEmployerOpenable] = useState<Set<string>>(new Set());
 
     // Editable field states
     const [editingName, setEditingName] = useState(false);
@@ -321,21 +325,67 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
         }
     };
 
-    // ── Open the event switcher modal and load active events ────────────
+// ── Open the event switcher modal and load active events ────────────
+    // Mirrors EventSelection.tsx: merges employer-only events (company
+    // participates but the event isn't in get_active_events) and tracks which
+    // ones need employer_open_event, so the ended/role logic matches exactly.
     const handleOpenEventSwitcher = async () => {
         setShowEventSwitcher(true);
         setEventsError(null);
         setEventsLoading(true);
         try {
-            const { data, error } = await getActiveEvents();
+            const [{ data, error }, employerStatus] = await Promise.all([
+                getActiveEvents(),
+                getEmployerStatus().catch(() => null),
+            ]);
             if (error) {
                 setEventsError(error.message);
                 return;
             }
+
+            const merged: FairEvent[] = [
+                ...(Array.isArray(data) ? data : []),
+            ];
+            const seen = new Set(merged.map((e) => e.id));
+            const openable = new Set<string>();
+
+            if (employerStatus?.is_employer) {
+                for (const ev of employerStatus.events) {
+                    const existing = merged.find((m) => m.id === ev.event_id);
+                    if (existing) {
+                        // Company participates but the user has no employers row yet.
+                        if (authProfile?.employer?.company_id !== ev.company_id) {
+                            openable.add(ev.event_id);
+                        }
+                    } else if (!seen.has(ev.event_id)) {
+                        seen.add(ev.event_id);
+                        merged.push({
+                            id: ev.event_id,
+                            name: ev.event_name,
+                            event_type: ev.event_type,
+                            start_date: ev.start_date|undefined,
+                            end_date: ev.end_date|undefined,
+                            status: ev.status|undefined,
+                            venue_name: ev.venue_name,
+                            is_current: ev.is_current,
+                            is_ended: ev.is_ended,
+                            can_register: false,
+                        });
+                        openable.add(ev.event_id);
+                    }
+                }
+            }
+
+            merged.sort(
+                (a, b) =>
+                    new Date(b.start_date|0).getTime() -
+                    new Date(a.start_date|0).getTime()
+            );
+
             // Hide the currently-selected event from the list — no point
             // offering to switch to the one already bound.
-            const filtered = (data || []).filter(e => e.id !== eventId);
-            setEvents(filtered);
+            setEmployerOpenable(openable);
+            setEvents(merged.filter((e) => e.id !== eventId));
         } catch (err: any) {
             logger.error('Failed to load events for switcher:', err);
             setEventsError('Could not load events. Please try again.');
@@ -380,16 +430,51 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                     return;
                 }
 
-                // Close modal + card, then reload the dashboard so every
+// Close modal + card, then reload the dashboard so every
                 // hook and RPC picks up the new EVENT_ID.
                 setShowEventSwitcher(false);
                 onClose();
-                const role = updated.role || 'attendee';
+                const role = updated.role|'attendee';
                 navigate(getRoleBasedRedirect(role), { replace: true });
                 return;
             }
 
-            // 2b. Not registered → send to registration form for that event.
+            // 2b. Employer company event with no employers row: complete the
+            //     profile first, then open the event (mirrors EventSelection).
+            if (employerOpenable.has(event.id)) {
+                if (!authProfile.profile_complete) {
+                    setShowEventSwitcher(false);
+                    onClose();
+                    navigate(`/employer-start?eventId=${event.id}`, { replace: false });
+                    return;
+                }
+
+                const opened = await openEmployerEvent(event.id);
+                if (opened.success) {
+                    const updated = await refreshProfile(
+                        event.id,
+                        authProfile.id,
+                        authProfile.email,
+                        true
+                    );
+                    if (updated?.roles?.includes('employer')) {
+                        setShowEventSwitcher(false);
+                        onClose();
+                        navigate('/employer', { replace: true });
+                        return;
+                    }
+                }
+                // Otherwise fall through to ended handling / registration.
+            }
+
+            // 2c. Event has ended and the user has no role there → blocked.
+            if (event.is_ended) {
+                setEventsError('This event has ended and you cannot join it.');
+                setSwitchingEventId(null);
+                return;
+            }
+
+            // 2d. Not registered → send to registration form for that event.
             setShowEventSwitcher(false);
             onClose();
             navigate(`/register-event?eventId=${event.id}`, { replace: false });

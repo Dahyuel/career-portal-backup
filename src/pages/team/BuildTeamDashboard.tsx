@@ -18,14 +18,17 @@ import { QRScanner } from "../../components/shared/QRScanner";
 import { useTheme } from "../../contexts/ThemeContext";
 import { useAuth } from "../../contexts/AuthContext";
 import {
-  getUserProfileByUUID,
-  getVolunteerStatsRPC,
-  searchSessionBookings,
-  getBuildingNotificationsRPC,
+  buildTeamGetAttendeeByUUID,
+  buildTeamGetVolunteerStatsRPC,
+  buildTeamGetNotificationsRPC,
   getBuildingActivitiesRPC,
-  getBuildingSessionsRPC,
-  getSessionBookingForCheckinRPC,
-  buildingSessionCheckinRPC
+  buildTeamGetSessionsRPC,
+  buildTeamSearchSessionBookings,
+  buildTeamGetSessionBookingForCheckin,
+  buildTeamSessionCheckinRPC,
+  buildTeamBookSessionAndLogRPC,
+  getBuildingStatsRPC,
+  searchAttendeesByPersonalIdBuildingRPC
 } from "../../lib/supabase";
 import Toast from "../../components/shared/Toast";
 import SettingsModal from "../../components/shared/SettingsModal";
@@ -59,7 +62,8 @@ const itemVariants: Variants = {
 interface Session {
   id: string;
   title: string;
-  description: string | null;
+  description: string|null;
+  speaker: { id: string; first_name: string; last_name: string; title: string }|null;
   speaker_id: string;
   start_time: string;
   end_time: string;
@@ -159,6 +163,14 @@ export const BuildTeamDashboard: React.FC = () => {
   // Refresh Trigger
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // Merged Building stats
+  const [buildingStats, setBuildingStats] = useState<{
+    totalSessions: number;
+    totalBookings: number;
+    actionsToday: number;
+    recentActivities: any[];
+  }|null>(null);
+
   const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
@@ -166,7 +178,7 @@ export const BuildTeamDashboard: React.FC = () => {
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id || !profile?.event_id) return;
     try {
-      const { data, error } = await getBuildingNotificationsRPC(profile.event_id);
+      const { data, error } = await buildTeamGetNotificationsRPC(profile.event_id);
       if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
@@ -203,14 +215,15 @@ export const BuildTeamDashboard: React.FC = () => {
       setUserStats(prev => ({ ...prev, loading: true }));
 
       try {
-        // Parallel fetch: Stats + Activities
-        const [statsResult, activitiesResult] = await Promise.all([
-          getVolunteerStatsRPC(userId),
+        // Parallel fetch: Stats + Building stats + Activities
+        const [statsResult, buildingStatsResult, activitiesResult] = await Promise.all([
+          buildTeamGetVolunteerStatsRPC(profile.event_id),
+          getBuildingStatsRPC(profile.event_id),
           profile?.role !== 'attendee' ? getBuildingActivitiesRPC(3) : Promise.resolve({ data: [], error: null })
         ]);
 
         // Process Stats
-        if (statsResult.error || !statsResult.data) {
+        if (statsResult.error||!statsResult.data) {
           logger.error('❌ [DASHBOARD] Failed to fetch stats:', statsResult.error);
         } else {
           setUserStats(prev => ({
@@ -219,6 +232,11 @@ export const BuildTeamDashboard: React.FC = () => {
             rank: statsResult.data.team_rank,
             teamSize: statsResult.data.team_size,
           }));
+        }
+
+        // Process Building stats
+        if (!buildingStatsResult.error && buildingStatsResult.data) {
+          setBuildingStats(buildingStatsResult.data as any);
         }
 
         // Process Activities
@@ -242,7 +260,7 @@ export const BuildTeamDashboard: React.FC = () => {
     if (!profile?.event_id) return;
     try {
       setIsLoadingSessions(true);
-      const { data, error } = await getBuildingSessionsRPC(profile.event_id);
+      const { data, error } = await buildTeamGetSessionsRPC(profile.event_id);
 
       if (error) {
         logger.error('Error fetching sessions:', error);
@@ -280,7 +298,7 @@ export const BuildTeamDashboard: React.FC = () => {
 
     setIsSessionProcessing(true);
     try {
-      const { error } = await buildingSessionCheckinRPC(sessionBooking.id);
+      const { error } = await buildTeamSessionCheckinRPC(sessionBooking.id);
 
       if (error) {
         throw new Error(error.message);
@@ -318,57 +336,121 @@ export const BuildTeamDashboard: React.FC = () => {
     }
   };
 
-  // Handle Session QR Scan - Uses getUserProfileByUUID (optimized with PK lookup)
+  // Unified scan flow: auto-detect book vs check-in
   const handleSessionQRScan = async (uuid: string) => {
-    if (!selectedSessionForScan) return;
+    if (!selectedSessionForScan||!profile?.event_id) return;
 
     try {
-      // Use optimized function from supabase.ts
-      const { data: attendeeData, error: attendeeError } = await getUserProfileByUUID(uuid);
+      // 1. Resolve the attendee
+      const { data: attendeeData, error: attendeeError } = await buildTeamGetAttendeeByUUID(uuid);
 
-      if (attendeeError || !attendeeData) {
-        showToast(attendeeError?.message || 'Attendee not found', 'error');
+      if (attendeeError||!attendeeData) {
+        showToast(attendeeError?.message||'Attendee not found', 'error');
         return;
       }
 
-      // Check if user has attendee role
-      if (attendeeData?.role !== 'attendee') {
-        showToast('This user is not registered as an attendee', 'error');
-        return;
-      }
+      const attendeeId = attendeeData.id||attendeeData.user_id;
 
-      // Check for booking via RPC
-      const { data: booking, error } = await getSessionBookingForCheckinRPC(
+      // 2. Look up an existing booking for this session
+      const { data: booking } = await buildTeamGetSessionBookingForCheckin(
         selectedSessionForScan.id,
-        uuid
+        attendeeId,
+        profile.event_id
       );
 
-      if (error || !booking) {
-        showToast('No confirmed booking found for this session', 'error');
-        return;
-      }
-
-      if (booking.checked_in) {
+      if (booking?.checked_in) {
         showToast('Attendee already checked in', 'error');
         return;
       }
 
       // Map to ScannedAttendee interface
       const scannedAttendee: ScannedAttendee = {
-        id: attendeeData.id,
+        id: attendeeId,
         full_name: attendeeData.full_name,
-        phone: attendeeData.phone || 'N/A',
-        email: attendeeData.email || 'N/A',
+        phone: attendeeData.phone||'N/A',
+        email: attendeeData.email||'N/A',
         personal_id: attendeeData.personal_id
       };
 
       setSessionAttendee(scannedAttendee);
-      setSessionBooking(booking);
+      setSessionBooking(booking||null);
       setShowSessionCard(true);
 
     } catch (err) {
       logger.error('Session scan error:', err);
       showToast('Error verifying booking', 'error');
+    }
+  };
+
+  // Handle Book (no existing booking)
+  const handleSessionBook = async () => {
+    if (!selectedSessionForScan||!sessionAttendee||!profile?.event_id) {
+      showToast('Unable to process booking', 'error');
+      return;
+    }
+
+    setIsSessionProcessing(true);
+    try {
+      const { error } = await buildTeamBookSessionAndLogRPC(
+        selectedSessionForScan.id,
+        sessionAttendee.id,
+        profile.event_id,
+        'book'
+      );
+
+      if (error) throw new Error(error.message);
+
+      showToast(`${sessionAttendee.full_name} booked successfully!`, 'success');
+      setShowSessionCard(false);
+      setSessionBooking(null);
+      setSessionAttendee(null);
+
+      fetchSessions();
+      setRefreshTrigger(prev => prev + 1);
+      if (profile?.event_id && profile?.id) {
+        refreshProfile(profile.event_id, profile.id, undefined, true);
+      }
+    } catch (err) {
+      logger.error('Booking error:', err);
+      showToast('Failed to book session', 'error');
+    } finally {
+      setIsSessionProcessing(false);
+    }
+  };
+
+  // Handle Cancel Booking (existing booking)
+  const handleSessionCancelBooking = async () => {
+    if (!selectedSessionForScan||!sessionAttendee||!profile?.event_id) {
+      showToast('Unable to cancel booking', 'error');
+      return;
+    }
+
+    setIsSessionProcessing(true);
+    try {
+      const { error } = await buildTeamBookSessionAndLogRPC(
+        selectedSessionForScan.id,
+        sessionAttendee.id,
+        profile.event_id,
+        'unbook'
+      );
+
+      if (error) throw new Error(error.message);
+
+      showToast(`${sessionAttendee.full_name}'s booking cancelled`, 'success');
+      setShowSessionCard(false);
+      setSessionBooking(null);
+      setSessionAttendee(null);
+
+      fetchSessions();
+      setRefreshTrigger(prev => prev + 1);
+      if (profile?.event_id && profile?.id) {
+        refreshProfile(profile.event_id, profile.id, undefined, true);
+      }
+    } catch (err) {
+      logger.error('Cancel booking error:', err);
+      showToast('Failed to cancel booking', 'error');
+    } finally {
+      setIsSessionProcessing(false);
     }
   };
 
@@ -408,8 +490,19 @@ export const BuildTeamDashboard: React.FC = () => {
 
     setIsSessionSearching(true);
     try {
-      // Use optimized function from supabase.ts - Scoped to session bookings (2-step)
-      const { data, error } = await searchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim(), profile?.event_id ?? undefined);
+      // Booked attendees for the session, plus general Personal ID lookup
+      const [bookedResult, generalResult] = await Promise.all([
+        buildTeamSearchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim(), profile?.event_id),
+        searchAttendeesByPersonalIdBuildingRPC(sessionSearchTerm.trim(), profile?.event_id)
+      ]);
+
+      const error = bookedResult.error||generalResult.error;
+      const data = [
+        ...(bookedResult.data||[]),
+        ...(generalResult.data||[]).filter(
+          (g: any) => !(bookedResult.data||[]).some((b: any) => b.id === g.id)
+        )
+      ];
 
       if (error) {
         logger.error('Error searching:', error);
@@ -437,21 +530,7 @@ export const BuildTeamDashboard: React.FC = () => {
     setSessionSearchResults([]);
     setSessionSearchTerm('');
     setShowSessionSearch(false);
-    if (selectedSessionForScan) {
-      // If we have booking info in attendee object (from searchSessionBookings), use it
-      // But handleSessionQRScan expects UUID and fetches profile again.
-      // We can bypass that if we already have the data, but for consistency let's just trigger the scan logic
-      // which validates booking anyway.
-      // However, handleSessionQRScan is designed for QR code which is just UUID.
-      // We should check if handleSessionQRScan handles booking validation.
-      // Checking handleSessionQRScan implementation... it calls getUserProfileByUUID then checks if user is attendee.
-      // It DOES NOT seem to check if they are booked for the session currently.
-      // We should probably invoke check-in logic directly if we know they are booked.
-      // But let's reuse handleSessionQRScan for now as it sets up the Session Card.
-
-      // WAIT: The searchSessionBookings returns result having booking_id.
-      // We can set relevant state directly to avoid re-fetching if we want optimization.
-      // Let's call handleSessionQRScan(attendee.id) for now to keep flow unified.
+    if (selectedSessionForScan && attendee.id) {
       await handleSessionQRScan(attendee.id);
     }
   };
@@ -1082,30 +1161,72 @@ export const BuildTeamDashboard: React.FC = () => {
                   </div>
                 </motion.div>
 
-                {/* Action Button */}
-                <motion.button
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6 }}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={handleSessionCheckIn}
-                  disabled={isSessionProcessing}
-                  className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-emerald-500/30"
-                >
-                  {isSessionProcessing ? (
-                    <motion.div
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      className="rounded-full h-5 w-5 border-b-2 border-white"
-                    />
-                  ) : (
+                {/* Action Buttons */}
+                <div className="flex flex-col gap-3">
+                  {sessionBooking ? (
                     <>
-                      <CheckCircle className="w-5 h-5" />
-                      Confirm Check-in
+                      <motion.button
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.6 }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleSessionCheckIn}
+                        disabled={isSessionProcessing}
+                        className="w-full flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-emerald-500/30"
+                      >
+                        {isSessionProcessing ? (
+                          <motion.div
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                            className="rounded-full h-5 w-5 border-b-2 border-white"
+                          />
+                        ) : (
+                          <>
+                            <CheckCircle className="w-5 h-5" />
+                            Confirm Check-in
+                          </>
+                        )}
+                      </motion.button>
+                      <motion.button
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.7 }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleSessionCancelBooking}
+                        disabled={isSessionProcessing}
+                        className="w-full flex items-center justify-center gap-2 bg-red-100 hover:bg-red-200 text-red-600 py-3 px-6 rounded-2xl font-bold transition-colors"
+                      >
+                        Cancel Booking
+                      </motion.button>
                     </>
+                  ) : (
+                    <motion.button
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.6 }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={handleSessionBook}
+                      disabled={isSessionProcessing}
+                      className="w-full flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white py-4 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-blue-500/30"
+                    >
+                      {isSessionProcessing ? (
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          className="rounded-full h-5 w-5 border-b-2 border-white"
+                        />
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined">event_seat</span>
+                          Book Session
+                        </>
+                      )}
+                    </motion.button>
                   )}
-                </motion.button>
+                </div>
               </motion.div>
             </div>
           )

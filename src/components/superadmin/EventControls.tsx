@@ -38,7 +38,7 @@ const SWITCHES: { key: EventControlName; effective: keyof EventControlsState; ti
     effective: 'booking_open',
     title: 'Session booking',
     on: 'Attendees can book sessions.',
-    off: 'Attendees cannot book sessions. Staff (for example the info desk) still can. Existing bookings stay.'
+    off: 'Attendees cannot book sessions. Staff (for example the building team) still can. Existing bookings stay.'
   },
   {
     key: 'feedback',

@@ -109,17 +109,16 @@ export interface EventRegistrationResult {
 
 type FileCategory = 'CV' | 'Uni_ID' | 'Companies';
 
-export const infodeskBookSessionAndLogRPC = (
+// Building team: book or cancel an attendee's session booking.
+export const buildTeamBookSessionAndLogRPC = (
   sessionId: string,
   attendeeId: string,
-  volunteerId: string,
   eventId: string,
-  action: 'book' | 'unbook'
+  action: 'book'|'unbook'
 ) =>
-  supabase.rpc('infodesk_book_session_and_log', {
+  supabase.rpc('build_team_book_session_and_log', {
     p_session_id: sessionId,
     p_attendee_id: attendeeId,
-    p_volunteer_id: volunteerId,
     p_event_id: eventId,
     p_action: action,
   });
@@ -973,11 +972,12 @@ export const getBuildingSessionsRPC = async (eventId?: string) => {
   }
 };
 
-export const getSessionBookingForCheckinRPC = async (sessionId: string, attendeeId: string) => {
+export const getSessionBookingForCheckinRPC = async (sessionId: string, attendeeId: string, eventId?: string) => {
   try {
     const { data, error } = await supabase.rpc('build_team_get_session_booking_for_checkin', {
       p_session_id: sessionId,
-      p_attendee_id: attendeeId
+      p_attendee_id: attendeeId,
+      p_event_id: eventId ?? null
     });
     if (error) {
       logger.error('❌ [SESSION BOOKING CHECKIN RPC] Error:', error);
@@ -1020,7 +1020,7 @@ export const getMyScanCountRPC = async (eventId?: string) => {
 };
 
 // ============================================================================
-// INFO DESK RPC WRAPPERS
+// BUILDING TEAM — BOOKING
 // ============================================================================
 
 export const logUserActivityRPC = async (eventId: string, activityType: string, description: string, points: number = 1) => {
@@ -1042,50 +1042,39 @@ export const logUserActivityRPC = async (eventId: string, activityType: string, 
   }
 };
 
-export const getInfoDeskStatsRPC = async (eventId: string) => {
+// Merged Building dashboard stats.
+export const getBuildingStatsRPC = async (eventId: string) => {
   try {
-    const { data, error } = await supabase.rpc('get_infodesk_stats', { p_event_id: eventId });
+    const { data, error } = await supabase.rpc('build_team_get_stats', { p_event_id: eventId });
     if (error) {
-      logger.error('❌ [INFODESK STATS RPC] Error:', error);
+      logger.error('❌ [BUILDING STATS RPC] Error:', error);
       return { data: null, error: { message: error.message } };
     }
     return { data, error: null };
   } catch (error: any) {
-    logger.error('💥 [INFODESK STATS RPC] Exception:', error);
+    logger.error('💥 [BUILDING STATS RPC] Exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
 
-export const getInfoDeskSessionsRPC = async (eventId: string) => {
+// Building team: search attendees by Personal ID.
+export const searchAttendeesByPersonalIdBuildingRPC = async (personalId: string, eventId?: string) => {
   try {
-    const { data, error } = await supabase.rpc('get_infodesk_sessions', { p_event_id: eventId });
-    if (error) {
-      logger.error('❌ [INFODESK SESSIONS RPC] Error:', error);
-      return { data: null, error: { message: error.message } };
-    }
-    return { data: data || [], error: null };
-  } catch (error: any) {
-    logger.error('💥 [INFODESK SESSIONS RPC] Exception:', error);
-    return { data: null, error: { message: error.message } };
-  }
-};
-
-export const checkSessionBookingRPC = async (sessionId: string, attendeeId: string) => {
-  try {
-    const { data, error } = await supabase.rpc('check_session_booking', {
-      p_session_id: sessionId,
-      p_attendee_id: attendeeId
+    const { data, error } = await supabase.rpc('build_team_search_attendees_by_personal_id', {
+      p_personal_id: personalId,
+      p_event_id: eventId ?? null
     });
     if (error) {
-      logger.error('❌ [CHECK BOOKING RPC] Error:', error);
+      logger.error('❌ [BUILDING ATTENDEE SEARCH RPC] Error:', error);
       return { data: null, error: { message: error.message } };
     }
-    return { data, error: null };
+    return { data: (data as any[])|[], error: null };
   } catch (error: any) {
-    logger.error('💥 [CHECK BOOKING RPC] Exception:', error);
+    logger.error('💥 [BUILDING ATTENDEE SEARCH RPC] Exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
+
 // In supabase.ts - add these helpers
 export const getVolunteerNotificationsRPC = async (eventId: string) => {
   const { data, error } = await supabase.rpc('get_volunteer_notifications', { p_event_id: eventId });
@@ -1178,10 +1167,11 @@ export const buildTeamSearchSessionBookings = async (sessionId: string, query: s
   };
 };
 
-export const buildTeamGetSessionBookingForCheckin = async (sessionId: string, attendeeId: string) => {
+export const buildTeamGetSessionBookingForCheckin = async (sessionId: string, attendeeId: string, eventId?: string) => {
   const { data, error } = await supabase.rpc('build_team_get_session_booking_for_checkin', {
     p_session_id: sessionId,
     p_attendee_id: attendeeId,
+    p_event_id: eventId ?? null,
   });
   if (error) return { data: null, error: { message: error.message } };
   const booking = Array.isArray(data) && data.length > 0 ? data[0] : null;

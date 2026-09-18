@@ -36,7 +36,6 @@ const ROLE_LABELS: Record<string, string> = {
   team_leader: 'Team Leader',
   building: 'Building Team',
   registration: 'Registration Team',
-  info_desk: 'Info Desk',
   verification: 'Verification',
   tech_support: 'Technical Support'
 };

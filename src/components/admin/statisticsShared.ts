@@ -66,7 +66,6 @@ export const ROLE_LABELS: Record<string, string> = {
   team_leader: 'Team leaders',
   building: 'Building team',
   registration: 'Registration team',
-  info_desk: 'Info desk',
   verification: 'Verification team',
   tech_support: 'Technical support',
   admin: 'Admins',

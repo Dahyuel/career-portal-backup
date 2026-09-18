@@ -38,7 +38,7 @@ export const ENUM_VALUES = {
   ] as const,
   USER_ROLE: [
     'admin', 'team_leader', 'registration', 'building',
-    'attendee', 'volunteer', 'info_desk'
+    'attendee', 'volunteer'
   ] as const
 };
 

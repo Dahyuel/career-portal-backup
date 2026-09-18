@@ -234,7 +234,7 @@ export interface EventDetail {
 // ---------------------------------------------------------------------------
 export const ROLE_OPTIONS = [
   'sadmin', 'admin', 'tech_support', 'team_leader', 'verification', 'registration',
-  'info_desk', 'building', 'volunteer', 'employer', 'attendee'
+  'building', 'volunteer', 'employer', 'attendee'
 ] as const;
 
 const ROLE_LABELS: Record<string, string> = {
@@ -244,7 +244,6 @@ const ROLE_LABELS: Record<string, string> = {
   team_leader: 'Team leader',
   verification: 'Verification',
   registration: 'Registration',
-  info_desk: 'Info desk',
   building: 'Building',
   volunteer: 'Volunteer',
   employer: 'Employer',

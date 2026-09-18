@@ -216,13 +216,13 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
 
     // Determine if user can view leaderboard based on roles
     const canViewLeaderboard = hasAnyRole([
-        'volunteer', 'registration', 'building', 'info_desk', 'verification',
+        'volunteer', 'registration', 'building', 'verification',
         'team_leader', 'admin', 'super_admin', 'sadmin'
     ]);
 
     // Determine if user has volunteer-style profile view
     const hasVolunteerProfile = hasAnyRole([
-        'volunteer', 'registration', 'building', 'info_desk', 'verification', 'tech_support'
+        'volunteer', 'registration', 'building', 'verification', 'tech_support'
     ]);
 
     // Click outside to close dropdowns

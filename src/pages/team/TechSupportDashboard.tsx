@@ -27,7 +27,6 @@ const VOLUNTEER_ROLES = [
   { value: 'volunteer', label: 'Volunteer', icon: 'volunteer_activism', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
   { value: 'registration', label: 'Registration', icon: 'how_to_reg', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
   { value: 'building', label: 'Building', icon: 'construction', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
-  { value: 'info_desk', label: 'Info Desk', icon: 'info', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
   { value: 'verification', label: 'Verification', icon: 'verified_user', color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300' },
   { value: 'team_leader', label: 'Team Leader', icon: 'manage_accounts', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
 ];
