@@ -51,6 +51,8 @@ export const SuperAdminPanel: React.FC = () => {
   const [mfaCode, setMfaCode] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [secretKeyInput, setSecretKeyInput] = useState('');
+  // While the requirement is switched off (testing) no code is asked for.
+  const [twoFaRequired, setTwoFaRequired] = useState(true);
   const isVerified = mfaStage === 'unlocked';
 
   const notify = useCallback((message: string, type: ToastType) => {
@@ -64,9 +66,10 @@ export const SuperAdminPanel: React.FC = () => {
 
   const refreshMfaState = useCallback(async () => {
     try {
-      const [aalResult, factorsResult] = await Promise.all([
+      const [aalResult, factorsResult, stateResult] = await Promise.all([
         supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
-        supabase.auth.mfa.listFactors()
+        supabase.auth.mfa.listFactors(),
+        supabase.rpc('sadmin_2fa_state')
       ]);
       if (aalResult.error) throw aalResult.error;
       if (factorsResult.error) throw factorsResult.error;
@@ -75,7 +78,11 @@ export const SuperAdminPanel: React.FC = () => {
       const verified = factorsResult.data?.totp?.[0] ?? null;
       setTotpFactor(verified ? { id: verified.id, created_at: verified.created_at } : null);
 
-      if (aalResult.data?.currentLevel === 'aal2') setMfaStage('unlocked');
+      const required = stateResult.error ? true : stateResult.data?.required !== false;
+      setTwoFaRequired(required);
+
+      if (!required) setMfaStage('unlocked');
+      else if (aalResult.data?.currentLevel === 'aal2') setMfaStage('unlocked');
       else if (verified) setMfaStage('verify');
       else setMfaStage('secret');
     } catch (err) {
@@ -370,7 +377,13 @@ export const SuperAdminPanel: React.FC = () => {
                 {activeTab === 'controls' && <EventControls notify={notify} />}
                 {activeTab === 'health' && <DataHealth notify={notify} />}
                 {activeTab === 'security' && (
-                  <SecurityCenter notify={notify} totpFactor={totpFactor} onResetAuthenticator={handleResetAuthenticator} />
+                  <SecurityCenter
+                    notify={notify}
+                    totpFactor={totpFactor}
+                    onResetAuthenticator={handleResetAuthenticator}
+                    twoFaRequired={twoFaRequired}
+                    onRequirementChanged={refreshMfaState}
+                  />
                 )}
                 {COMING_SOON[activeTab] && (
                   <EmptyState

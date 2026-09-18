@@ -4,16 +4,19 @@ import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { logger } from '../../utils/logger';
 import { buttonClass, inputClass, labelClass, formatDateTime, type Notify } from './sadminApi';
-import { Badge, ConfirmDialog, MIcon, PageHeader, Panel } from './ui';
+import { Badge, ConfirmDialog, MIcon, PageHeader, Panel, Toggle } from './ui';
 
 interface Props {
   notify: Notify;
   totpFactor: { id: string; created_at: string } | null;
   onResetAuthenticator: () => Promise<void>;
+  /** Whether a super admin must enter an authenticator code for this dashboard. */
+  twoFaRequired: boolean;
+  onRequirementChanged: () => Promise<void> | void;
 }
 
-const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthenticator }) => {
-  const [dialog, setDialog] = useState<'reset' | 'signout' | 'secret' | null>(null);
+const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthenticator, twoFaRequired, onRequirementChanged }) => {
+  const [dialog, setDialog] = useState<'reset' | 'signout' | 'secret' | 'disable2fa' | null>(null);
   const [busy, setBusy] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [newKeyRepeat, setNewKeyRepeat] = useState('');
@@ -28,6 +31,31 @@ const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthentica
     } catch (err) {
       logger.error('Error signing out other sessions:', err);
       notify('Could not sign out your other sessions. Please try again.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setRequirement = async (enabled: boolean, reason?: string) => {
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.rpc('sadmin_set_2fa_requirement', {
+        _enabled: enabled,
+        _reason: reason ?? null
+      });
+      if (error) throw error;
+      if (data?.success !== true) throw new Error(data?.error || 'failed');
+      notify(
+        enabled
+          ? 'The authenticator code is required again.'
+          : 'The authenticator code is switched off. Turn it back on before going live.',
+        enabled ? 'success' : 'warning'
+      );
+      setDialog(null);
+      await onRequirementChanged();
+    } catch (err) {
+      logger.error('Could not change the two-factor requirement:', err);
+      notify(err instanceof Error && err.message !== 'failed' ? err.message : 'Could not change the requirement. Please try again.', 'error');
     } finally {
       setBusy(false);
     }
@@ -99,6 +127,33 @@ const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthentica
           </div>
         </Panel>
 
+        <Panel title="Ask for a code" subtitle="Turn this off only while testing.">
+          <div className="flex items-start gap-4">
+            <span className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${twoFaRequired ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+              <MIcon name={twoFaRequired ? 'lock' : 'lock_open'} className="text-2xl" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                {twoFaRequired ? 'Required' : 'Switched off'}
+                {twoFaRequired ? <Badge tone="green">Protected</Badge> : <Badge tone="amber">Testing</Badge>}
+              </p>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                {twoFaRequired
+                  ? 'Every super admin enters a code from their authenticator app to open this dashboard.'
+                  : 'No code is asked for. Anyone who signs in to a super admin account has full control. Turn this back on before going live.'}
+              </p>
+              <div className="mt-3">
+                <Toggle
+                  checked={twoFaRequired}
+                  disabled={busy}
+                  onChange={(next) => (next ? setRequirement(true) : setDialog('disable2fa'))}
+                  label="Require an authenticator code"
+                />
+              </div>
+            </div>
+          </div>
+        </Panel>
+
         <Panel title="My sessions" subtitle="Sign out everywhere except this device.">
           <button className={buttonClass.ghost} onClick={() => setDialog('signout')}>
             <MIcon name="logout" className="text-lg" /> Sign out my other sessions
@@ -133,6 +188,23 @@ const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthentica
         onClose={() => setDialog(null)}
         onConfirm={resetAuthenticator}
         description={<p>The current authenticator is removed straight away. You will need the secret key and your new phone to get back in.</p>}
+      />
+      <ConfirmDialog
+        open={dialog === 'disable2fa'}
+        title="Switch off the authenticator code"
+        confirmLabel="Switch it off"
+        danger
+        reason="required"
+        typeToConfirm="TESTING"
+        busy={busy}
+        onClose={() => setDialog(null)}
+        onConfirm={(reason) => setRequirement(false, reason)}
+        description={
+          <>
+            <p>Super admin pages and actions will stop asking for a code. The password alone will be enough for every super admin account.</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Meant for testing. Turn it back on before going live; the switch is recorded in the activity log.</p>
+          </>
+        }
       />
       <ConfirmDialog
         open={dialog === 'signout'}
