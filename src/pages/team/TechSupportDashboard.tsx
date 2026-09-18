@@ -27,6 +27,7 @@ const VOLUNTEER_ROLES = [
   { value: 'volunteer', label: 'Volunteer', icon: 'volunteer_activism', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' },
   { value: 'registration', label: 'Registration', icon: 'how_to_reg', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' },
   { value: 'building', label: 'Building', icon: 'construction', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' },
+  { value: 'info_desk', label: 'Info Desk', icon: 'info', color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' },
   { value: 'verification', label: 'Verification', icon: 'verified_user', color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300' },
   { value: 'team_leader', label: 'Team Leader', icon: 'manage_accounts', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300' },
 ];
@@ -228,6 +229,17 @@ export const TechSupportDashboard: React.FC = () => {
     setSelectedOption(null);
     setVolunteerInfo(null);
 
+    // Frontend check: prevent searching for own account
+    if (
+      trimmed.toLowerCase() === profile?.email?.toLowerCase() ||
+      (profile?.phone && trimmed === profile.phone) ||
+      (profile?.personal_id && trimmed === profile.personal_id)
+    ) {
+      setSearchError('Cannot search for your own account');
+      setSearchLoading(false);
+      return;
+    }
+
     try {
       const { data, error } = await supabase
         .rpc('tech_support_search_user', { p_query: trimmed });
@@ -306,28 +318,24 @@ export const TechSupportDashboard: React.FC = () => {
             return;
         }
 
+        if (searchResult.id === profile?.id) {
+            setToast({ message: 'Cannot change your own role.', type: 'error' });
+            return;
+        }
+
         setRoleChangePending(true);
         try {
             let data: any;
             let error: any;
 
-            if (selectedOption.role === 'team_leader') {
-                const result = await supabase.rpc('promote_to_team_leader', {
-                    _user_id: searchResult.id,
-                    _event_id: eventId,
-                    _team_id: selectedOption.teamId,
-                });
-                data = result.data;
-                error = result.error;
-            } else {
-                const result = await supabase.rpc('change_volunteer_team', {
-                    _user_id: searchResult.id,
-                    _event_id: eventId,
-                    _team_id: selectedOption.teamId,
-                });
-                data = result.data;
-                error = result.error;
-            }
+            const result = await supabase.rpc('tech_support_change_role', {
+                _event_id: eventId,
+                _user_id: searchResult.id,
+                _new_role: selectedOption.role,
+                _team_id: selectedOption.teamId || null,
+            });
+            data = result.data;
+            error = result.error;
 
             if (error) throw error;
             if (!data?.success) throw new Error(data?.error || 'Role change failed');
@@ -417,11 +425,11 @@ export const TechSupportDashboard: React.FC = () => {
           </p>
           <div className="flex flex-wrap gap-3">
             <button
-              onClick={() => setActiveTab('search')}
+              onClick={() => setShowProfile(true)}
               className="bg-white text-red-600 hover:bg-red-50 px-8 py-3 rounded-full font-bold transition-all flex items-center gap-2 shadow-lg active:scale-95"
             >
-              <span className="material-symbols-outlined">manage_search</span>
-              Search User
+              <span className="material-symbols-outlined">person</span>
+              Show Profile
             </button>
           </div>
         </div>
