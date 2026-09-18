@@ -94,10 +94,7 @@ const AuditLog: React.FC = () => {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => { setDebouncedSearch(search.trim()); setPage(0); }, 300);
-    return () => window.clearTimeout(t);
-  }, [search]);
+
 
   const load = useCallback(async () => {
     const id = ++requestId.current;
@@ -136,8 +133,10 @@ const AuditLog: React.FC = () => {
           <div className="xl:col-span-1">
             <label className={labelClass}>Search</label>
             <div className="relative">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Email, setting, reason..." className={`${inputClass} pl-10`} />
+              <button onClick={() => { setDebouncedSearch(search.trim()); setPage(0); }} className="absolute left-3.5 top-1/2 -translate-y-1/2 hover:text-red-500 transition-colors">
+                <Search className="w-4 h-4 text-slate-400 hover:text-red-500 transition-colors" />
+              </button>
+              <input value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (() => { setDebouncedSearch(search.trim()); setPage(0); })()} placeholder="Email, setting, reason..." className={`${inputClass} pl-10`} />
             </div>
           </div>
           <div>

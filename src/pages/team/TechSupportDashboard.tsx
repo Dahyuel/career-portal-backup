@@ -197,7 +197,8 @@ export const TechSupportDashboard: React.FC = () => {
 
   // ── Search State ──────────────────────────────────────────────────────────────
   const [searchInput, setSearchInput] = useState('');
-  const [searchResult, setSearchResult] = useState<UserResult | null>(null);
+  const [searchResults, setSearchResults] = useState<UserResult[]>([]);
+  const [selectedUser, setSelectedUser] = useState<UserResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -223,7 +224,8 @@ export const TechSupportDashboard: React.FC = () => {
 
     setSearchLoading(true);
     setSearchError(null);
-    setSearchResult(null);
+    setSearchResults([]);
+    setSelectedUser(null);
     setHasSearched(true);
     setShowRoleChange(false);
     setSelectedOption(null);
@@ -247,15 +249,15 @@ export const TechSupportDashboard: React.FC = () => {
 
       if (!data?.success) {
         if (data?.error === 'not_found') {
-          setSearchResult(null);
+          setSearchResults([]);
         } else {
           throw new Error(data?.error || 'Search failed');
         }
         return;
       }
 
-      const u = data.user;
-      setSearchResult({
+      const users = data.users || [];
+      setSearchResults(users.map((u: any) => ({
         id: u.id,
         full_name: u.full_name,
         email: u.email,
@@ -264,7 +266,7 @@ export const TechSupportDashboard: React.FC = () => {
         created_at: u.created_at,
         roles: u.roles || [],
         role: u.roles?.[0] || 'unknown',
-      });
+      })));
     } catch (err: any) {
       logger.error('Error searching user:', err);
       setSearchError(err?.message || 'Search failed. Please try again.');
@@ -309,7 +311,7 @@ export const TechSupportDashboard: React.FC = () => {
   };
 
     const handleRoleChangeConfirm = async () => {
-        if (!searchResult || !selectedOption) return;
+        if (!selectedUser || !selectedOption) return;
 
         // Roles are stored per event, so we need to know which event this is for.
         const eventId = profile?.event_id;
@@ -318,7 +320,7 @@ export const TechSupportDashboard: React.FC = () => {
             return;
         }
 
-        if (searchResult.id === profile?.id) {
+        if (selectedUser.id === profile?.id) {
             setToast({ message: 'Cannot change your own role.', type: 'error' });
             return;
         }
@@ -330,7 +332,7 @@ export const TechSupportDashboard: React.FC = () => {
 
             const result = await supabase.rpc('tech_support_change_role', {
                 _event_id: eventId,
-                _user_id: searchResult.id,
+                _user_id: selectedUser.id,
                 _new_role: selectedOption.role,
                 _team_id: selectedOption.teamId || null,
             });
@@ -375,7 +377,8 @@ export const TechSupportDashboard: React.FC = () => {
 
       setToast({ message: `User "${userToDelete.full_name}" has been permanently deleted.`, type: 'success' });
       setUserToDelete(null);
-      setSearchResult(null);
+      setSelectedUser(null);
+      setSearchResults([]);
       setHasSearched(false);
       setSearchInput('');
       setShowRoleChange(false);
@@ -548,18 +551,42 @@ export const TechSupportDashboard: React.FC = () => {
           </motion.div>
         )}
 
-        {!searchLoading && !searchError && hasSearched && !searchResult && (
+        {!searchLoading && !searchError && hasSearched && searchResults.length === 0 && (
           <motion.div key="not-found" variants={itemVariants} initial="hidden" animate="visible" exit="exit" className="text-center py-16">
             <span className="material-symbols-outlined text-6xl text-gray-300 dark:text-slate-700 block mb-3">person_off</span>
-            <p className="font-bold text-gray-700 dark:text-gray-300">No user found</p>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">No user matching that query exists in the system.</p>
+            <p className="font-bold text-gray-700 dark:text-gray-300">No users found</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">No users matching that query exist in the system.</p>
           </motion.div>
         )}
 
-        {!searchLoading && searchResult && (
+        {!searchLoading && searchResults.length > 0 && !selectedUser && (
+          <motion.div key="results-list" variants={containerVariants} initial="hidden" animate="visible" exit="exit" className="space-y-4">
+            <h3 className="font-bold text-gray-900 dark:text-white">Matching Users ({searchResults.length})</h3>
+            <div className="grid grid-cols-1 gap-4">
+              {searchResults.map(user => (
+                <button
+                  key={user.id}
+                  onClick={() => setSelectedUser(user)}
+                  className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 p-4 rounded-xl text-left hover:border-blue-500 transition-colors shadow-sm"
+                >
+                  <p className="font-bold text-gray-900 dark:text-white">{user.full_name}</p>
+                  <p className="text-sm text-gray-500 dark:text-slate-400 mt-1">{user.email} &bull; {user.phone} &bull; {user.personal_id}</p>
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
+        {!searchLoading && selectedUser && (
           <motion.div key="result" variants={containerVariants} initial="hidden" animate="visible" exit="exit" className="space-y-5">
+            <div className="flex items-center gap-2 mb-2">
+              <button onClick={() => setSelectedUser(null)} className="text-sm font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1">
+                <span className="material-symbols-outlined text-sm">arrow_back</span>
+                Back to results
+              </button>
+            </div>
             <UserResultCard
-              user={searchResult}
+              user={selectedUser}
               onChangeRole={handleStartRoleChange}
               onDeleteUser={setUserToDelete}
             />
@@ -694,10 +721,10 @@ export const TechSupportDashboard: React.FC = () => {
 
       {/* Role Confirm Modal */}
       <AnimatePresence>
-        {showRoleConfirm && searchResult && (
+        {showRoleConfirm && selectedUser && (
           <ConfirmModal
             title="Confirm Role Change"
-            message={`Change "${searchResult.full_name}" to "${selectedOption?.label}"?`}
+            message={`Change "${selectedUser.full_name}" to "${selectedOption?.label}"?`}
             confirmLabel="Yes, Change Role"
             confirmClass="bg-asu-red hover:bg-red-700"
             icon="manage_accounts"

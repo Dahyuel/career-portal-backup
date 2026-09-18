@@ -105,13 +105,7 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedSearch(search.trim());
-      setPage(0);
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [search]);
+
 
   const load = useCallback(async () => {
     const id = ++requestId.current;
@@ -235,16 +229,19 @@ const PeopleAccess: React.FC<{ notify: Notify }> = ({ notify }) => {
             ))}
           </div>
           <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <button onClick={() => { setDebouncedSearch(search.trim()); setPage(0); }} className="absolute left-3.5 top-1/2 -translate-y-1/2 hover:text-blue-500 transition-colors z-10">
+              <Search className="w-4 h-4 text-slate-400 hover:text-blue-500 transition-colors" />
+            </button>
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && (() => { setDebouncedSearch(search.trim()); setPage(0); })()}
               placeholder="Search by name, email or personal ID"
               className={`${inputClass} pl-10 pr-10`}
             />
             {search && (
-              <button onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
+              <button onClick={() => { setSearch(''); setDebouncedSearch(''); setPage(0); }} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700">
                 <X className="w-4 h-4 text-slate-400" />
               </button>
             )}

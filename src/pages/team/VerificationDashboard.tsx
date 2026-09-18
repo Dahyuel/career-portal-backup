@@ -80,6 +80,7 @@ export const VerificationDashboard: React.FC = () => {
 
     const [isLoading, setIsLoading] = useState(false);
     const [homeDataLoaded, setHomeDataLoaded] = useState(false);
+    const [searchTermDraft, setSearchTermDraft] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [statusSubTab, setStatusSubTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
     const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -353,11 +354,7 @@ export const VerificationDashboard: React.FC = () => {
     // OPTIMIZED: Search with debounce — also triggers on sub-tab and page changes
     useEffect(() => {
         if (activeTab === 'verification-asu' || activeTab === 'verification-others') {
-            const timer = setTimeout(() => {
-                fetchAttendees();
-            }, 300); // Debounce search
-
-            return () => clearTimeout(timer);
+            fetchAttendees();
         }
     }, [activeTab, searchTerm, statusSubTab, asuPages, otherPages, fetchAttendees]);
 
@@ -774,13 +771,16 @@ export const VerificationDashboard: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-4 w-full md:w-auto">
                         <div className="relative w-full md:w-72">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                            <button onClick={() => setSearchTerm(searchTermDraft)} className="absolute left-3 top-1/2 -translate-y-1/2 hover:text-primary transition-colors">
+                                <Search className="text-slate-400 w-5 h-5 hover:text-primary transition-colors" />
+                            </button>
                             <input
                                 className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary shadow-sm dark:text-white"
                                 placeholder="Search by name or ID..."
                                 type="text"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
+                                value={searchTermDraft}
+                                onChange={(e) => setSearchTermDraft(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && setSearchTerm(searchTermDraft)}
                             />
                         </div>
                     </div>

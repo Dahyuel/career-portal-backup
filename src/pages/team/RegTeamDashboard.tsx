@@ -217,49 +217,7 @@ export const RegTeamDashboard: React.FC = () => {
   // ============================================================================
   // OPTIMIZED: Dynamic Search with Debouncing
   // ============================================================================
-  const debouncedSearch = useMemo(
-    () => debounce(async (query: string) => {
-      if (query.length < 2) {
-        setSearchResults([]);
-        setShowSearchResults(false);
-        return;
-      }
 
-      setSearchLoading(true);
-      try {
-        const { data, error } = await searchAttendeesByPersonalId(query, profile?.event_id ?? undefined);
-
-        if (error) {
-          logger.error('Search error:', error);
-          setSearchResults([]);
-          return;
-        }
-
-        setSearchResults(data || []);
-        setShowSearchResults(true);
-      } catch (error) {
-        logger.error('Search exception:', error);
-        setSearchResults([]);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 300),
-    // The search is scoped to this staff member's event, so it must be rebuilt
-    // when that changes — otherwise the closure keeps searching the old event.
-    [profile?.event_id]
-  );
-
-  useEffect(() => {
-    const term = searchTerm.trim();
-    if (term.length >= 2) {
-      setSearchLoading(true);
-      setShowSearchResults(true);
-    } else {
-      setShowSearchResults(false);
-    }
-    debouncedSearch(term);
-    return () => debouncedSearch.cancel();
-  }, [searchTerm, debouncedSearch]);
 
   // Focus mobile search when opened
   useEffect(() => {
@@ -383,7 +341,7 @@ export const RegTeamDashboard: React.FC = () => {
   };
 
   const validateAttendee = (attendee: any): { isValid: boolean; error?: string } => {
-    if (attendee.role !== 'attendee') {
+    if (attendee.role && attendee.role !== 'attendee') {
       return { isValid: false, error: 'Only attendees can be processed through this system' };
     }
     // Registration status check — must be 'approved' to enter
@@ -425,13 +383,17 @@ export const RegTeamDashboard: React.FC = () => {
         return;
       }
 
-      const validation = validateAttendee(data);
+      const fullAttendee = castToAttendee(data);
+      const validation = validateAttendee(fullAttendee);
+      
       if (!validation.isValid) {
         showToast(validation.error || 'Validation failed', 'error');
+        // We can optionally show the card anyway for rejected states if they want, 
+        // but the old logic just returned. Let's keep the old behavior for handleSearchByPersonalId.
         return;
       }
 
-      setSelectedAttendee(castToAttendee(data));
+      setSelectedAttendee(fullAttendee);
       setShowAttendeeCard(true);
       setSearchTerm("");
       setShowSearchResults(false);
