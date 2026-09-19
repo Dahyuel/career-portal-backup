@@ -164,12 +164,12 @@ export const BuildTeamDashboard: React.FC = () => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Merged Building stats
-  const [buildingStats, setBuildingStats] = useState<{
+  const [_buildingStats, setBuildingStats] = useState<{
     totalSessions: number;
     totalBookings: number;
     actionsToday: number;
     recentActivities: any[];
-  }|null>(null);
+  } | null>(null);
 
   const [showAllActivitiesModal, setShowAllActivitiesModal] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -223,7 +223,7 @@ export const BuildTeamDashboard: React.FC = () => {
         ]);
 
         // Process Stats
-        if (statsResult.error||!statsResult.data) {
+        if (statsResult.error || !statsResult.data) {
           logger.error('❌ [DASHBOARD] Failed to fetch stats:', statsResult.error);
         } else {
           setUserStats(prev => ({
@@ -496,11 +496,11 @@ export const BuildTeamDashboard: React.FC = () => {
         searchAttendeesByPersonalIdBuildingRPC(sessionSearchTerm.trim(), profile?.event_id)
       ]);
 
-      const error = bookedResult.error||generalResult.error;
+      const error = bookedResult.error || generalResult.error;
       const data = [
-        ...(bookedResult.data||[]),
-        ...(generalResult.data||[]).filter(
-          (g: any) => !(bookedResult.data||[]).some((b: any) => b.id === g.id)
+        ...(bookedResult.data || []),
+        ...(generalResult.data || []).filter(
+          (g: any) => !(bookedResult.data || []).some((b: any) => b.id === g.id)
         )
       ];
 

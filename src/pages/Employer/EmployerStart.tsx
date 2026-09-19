@@ -120,7 +120,7 @@ export const EmployerStart: React.FC = () => {
     await load();
   };
 
-  const handleOpenEvent = async (event: EmployerEvent) => {
+  const handleOpenEvent = useCallback(async (event: EmployerEvent) => {
     if (!user || openingId) return;
     setOpeningId(event.event_id);
     setOpenError(null);
@@ -144,7 +144,16 @@ export const EmployerStart: React.FC = () => {
     } finally {
       setOpeningId(null);
     }
-  };
+  }, [user, openingId, refreshProfile, navigate]);
+
+  useEffect(() => {
+    if (!status?.profile_complete || !targetEventId || autoOpenedRef.current) return;
+    const ev = status.events.find((e) => e.event_id === targetEventId);
+    if (ev) {
+      autoOpenedRef.current = true;
+      handleOpenEvent(ev);
+    }
+  }, [status, targetEventId, handleOpenEvent]);
 
   const handleSignOut = async () => {
     await signOut();

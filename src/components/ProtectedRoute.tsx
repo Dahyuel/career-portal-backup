@@ -39,20 +39,10 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // Is the current location a public event path?
   const onPublicPath = allowWithoutProfile || PUBLIC_EVENT_PATHS.includes(location.pathname);
 
-  // Read localStorage ONCE at mount — used ONLY as a pre-load fallback.
-  const localUserData = React.useMemo(() => {
-    try {
-      const stored = localStorage.getItem('currentUser');
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  }, []);
-
   const isSuperAdmin = (role?: string) =>
     role === 'sadmin' || role === 'super_admin';
 
-  // Safety timeout: force logout only if stuck with no data at all.
+  // Safety timeout: force logout only if stuck with no profile at all.
   // IMPORTANT: never arm this while on a public event path — those are
   // legitimate destinations that don't require an event_id, and the user
   // may be mid-selection.
@@ -60,14 +50,14 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     if (onPublicPath) return;
 
     let timeout: NodeJS.Timeout;
-    if ((loading || (isAuthenticated && !profile)) && !localUserData) {
+    if ((loading || (isAuthenticated && !profile))) {
       timeout = setTimeout(async () => {
         await signOut();
         window.location.href = '/login';
       }, 5000);
     }
     return () => { if (timeout) clearTimeout(timeout); };
-  }, [loading, isAuthenticated, profile, signOut, localUserData, onPublicPath]);
+  }, [loading, isAuthenticated, profile, signOut, onPublicPath]);
 
   // ── 1. Initial bootstrap spinner ─────────────────────────────────────────
   if (loading && !sessionLoaded) {
@@ -84,22 +74,18 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   if (allowWithoutProfile) {
     return <>{children}</>;
   }
-
-  // ── 3. Pre-load fast redirect using localStorage (before profile arrives) ─
-  if (requiredRole && !profile && localUserData?.role) {
-    if (!isSuperAdmin(localUserData.role)) {
-      const requiredRoles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-      if (!requiredRoles.includes(localUserData.role)) {
-        const correctPath = getRoleBasedRedirect(localUserData.role);
-        if (location.pathname !== correctPath) {
-          return <Navigate to={correctPath} replace />;
-        }
-      }
+  // ── 3. Wait for the server-confirmed profile ─────────────────────────────
+  // Routing decisions are made ONLY from the authoritative profile returned by
+  // the live RPC/session. localStorage is never consulted for roles.
+  //
+  // Exception: on public event paths (e.g. /select-event), a null profile is
+  // legitimate — it means "no event chosen yet", not "not authenticated".
+  // Those pages are the ones that produce the event_id the rest of the app
+  // needs, so they must be allowed to render while profile is still null.
+  if (isAuthenticated && !profile) {
+    if (onPublicPath) {
+      return <>{children}</>;
     }
-  }
-
-  // ── 4. Wait for profile if still loading ─────────────────────────────────
-  if (isAuthenticated && !profile && !localUserData?.role) {
     return (
       <DashboardLoading
         message="Loading Your Dashboard"
@@ -108,13 +94,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  // ── 5. Authoritative routing (uses live profile) ─────────────────────────
+  // ── 4. Authoritative routing (uses live profile) ─────────────────────────
   if (profile) {
     const role = profile.role;
     const isAdmin = isSuperAdmin(role);
     const isAttendee = role === 'attendee';
 
-    // ── 5a. Non-attendee without active event → /select-event ─────────────
+    // ── 4a. Non-attendee without active event → /select-event ─────────────
     // Every non-attendee (volunteer, staff, employer, etc.) REQUIRES an
     // active event. Only sadmin / super_admin are exempt. Selection is the
     // single source of truth, so send them to the picker.
@@ -125,16 +111,13 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     }
 
-    // ── 5b. Attendee without an event → /select-event ─────────────────────
-    // This is the KEY check: even if login races or stale cache sneaks
-    // through, an attendee with no bound event is always pushed back to
-    // the selector.
+    // ── 4b. Attendee without an event → /select-event ─────────────────────
     if (isAttendee && !profile.event_id && !onPublicPath) {
       logger.log('👤 Attendee has no event — redirecting to selection');
       return <Navigate to="/select-event" replace />;
     }
 
-    // ── 5c. Non-attendee with event_id but empty roles → /select-event ────
+    // ── 4c. Non-attendee with event_id but empty roles → /select-event ────
     if (!isAdmin && !isAttendee && profile.event_id && profile.roles.length === 0) {
       logger.log('⚠️ Non-attendee with event but empty roles — redirecting to selection');
       if (!onPublicPath) {
@@ -142,7 +125,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     }
 
-    // ── 5d. Attendee status redirects ─────────────────────────────────────
+    // ── 4d. Attendee status redirects ─────────────────────────────────────
     if (isAttendee && profile.attendee && !isAdmin) {
       const { registration_status, is_asu_student } = profile.attendee;
       const currentPath = location.pathname;
@@ -172,7 +155,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     }
 
-    // ── 5e. Authoritative role check (skipped for sadmin) ─────────────────
+    // ── 4e. Authoritative role check (skipped for sadmin) ─────────────────
     if (requiredRole && !isAdmin) {
       const hasRequiredRole = hasRole(requiredRole);
 

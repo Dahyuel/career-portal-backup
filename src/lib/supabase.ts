@@ -60,27 +60,8 @@ export interface SignupData {
   teamId?: string;
 }
 
-// Single-step volunteer signup payload (multipart — includes files)
-// Single-step volunteer signup payload (multipart — includes files)
-export interface VolunteerSignupData {
-  email: string;
-  password: string;
-  fullName: string;
-  phone: string;
-  personalId: string;
-  nationality: string;
-  gender: string;
-  faculty: string;
-  department: string;
-  studentStatus: 'undergraduate' | 'postgraduate' | 'phd' | 'graduate';
-  year?: number;
-  teamId: string;
-  enrollmentProofFile: File;
-  cvFile?: File;
-}
-
 export interface EventRegistrationPayload {
-  type: 'attendee'; // volunteers use signUpVolunteer instead
+  type: 'attendee';
   eventId: string;
   university?: string;
   faculty?: string;
@@ -114,7 +95,7 @@ export const buildTeamBookSessionAndLogRPC = (
   sessionId: string,
   attendeeId: string,
   eventId: string,
-  action: 'book'|'unbook'
+  action: 'book' | 'unbook'
 ) =>
   supabase.rpc('build_team_book_session_and_log', {
     p_session_id: sessionId,
@@ -318,86 +299,6 @@ export const signUpUser = async (data: SignupData): Promise<AuthResult> => {
   }
 };
 // ============================================================================
-// VOLUNTEER SIGNUP (single-step, multipart via register-user edge function)
-// ============================================================================
-
-export const signUpVolunteer = async (
-  data: VolunteerSignupData
-): Promise<AuthResult> => {
-  try {
-    logger.log('🚀 [VOLUNTEER SIGNUP] Starting single-step registration...');
-
-    const formData = new FormData();
-    formData.append('email', data.email.trim().toLowerCase());
-    formData.append('password', data.password);
-    formData.append('fullName', data.fullName.trim());
-    formData.append('phone', data.phone.trim());
-    formData.append('personalId', data.personalId.trim());
-    formData.append('nationality', data.nationality.trim());
-    formData.append('gender', data.gender.trim());
-    formData.append('registrationType', 'volunteer');
-    // university not sent — RPC hardcodes 'Ain Shams University'
-    formData.append('faculty', data.faculty);
-    formData.append('department', data.department);
-    formData.append('studentStatus', data.studentStatus);
-    if (data.year !== undefined) {
-      formData.append('year', data.year.toString());
-    }
-    formData.append('teamId', data.teamId);
-    formData.append('enrollmentProofFile', data.enrollmentProofFile);
-    if (data.cvFile) {
-      formData.append('cvFile', data.cvFile);
-    }
-
-    const { data: invokeData, error: fnError } = await supabase.functions.invoke(
-      'register-volunteer',
-      { body: formData }
-    );
-
-    let result: any = invokeData;
-    if (!result && fnError) {
-      try {
-        const contextBody = await fnError.context?.json?.();
-        if (contextBody) result = contextBody;
-      } catch { /* context not parseable */ }
-    }
-
-    if (!result?.success) {
-      const errorMessage = result?.error || result?.message
-        || fnError?.message
-        || 'Registration failed. Please try again.';
-      const errorField = result?.field || 'general';
-
-      logger.error(`❌ [VOLUNTEER SIGNUP] Failed — field: ${errorField}, message: ${errorMessage}`);
-      return {
-        success: false,
-        data: null,
-        error: {
-          message: errorMessage,
-          field: errorField,
-          validationErrors: errorField !== 'general'
-            ? [{ field: errorField, message: errorMessage }]
-            : [],
-        },
-      };
-    }
-
-    logger.log('✅ [VOLUNTEER SIGNUP] Account created:', result.userId);
-    return {
-      success: true,
-      data: { user: { id: result.userId }, session: null },
-      error: null,
-    };
-  } catch (error: any) {
-    logger.error('💥 [VOLUNTEER SIGNUP] Unexpected error:', error.message);
-    return {
-      success: false,
-      data: null,
-      error: { message: error.message || 'Something went wrong. Please check your details and try again.' },
-    };
-  }
-};
-// ============================================================================
 // POST-LOGIN EVENT REGISTRATION (register-for-event edge function — JWT required)
 // ============================================================================
 
@@ -501,7 +402,7 @@ export const getActiveEvents = async (): Promise<{ data: FairEvent[]; error: { m
     if (typeof data === 'string') {
       try {
         parsedData = JSON.parse(data);
-      } catch (e) {
+      } catch {
         // ignore JSON parse error
       }
     }
@@ -532,19 +433,12 @@ export const getCurrentEvent = async (): Promise<{ data: FairEvent | null; error
 export const checkEventRegistration = async (eventId: string): Promise<{ data: any | null; error: { message: string } | null }> => {
   try {
     const { data, error } = await supabase
-      .from('user_roles')
-      .select('role, assigned_at, events!inner(id, name, status)')
-      .eq('event_id', eventId)
+      .rpc('get_my_role_for_event', { p_event_id: eventId })
       .maybeSingle();
 
-    if (error) {
-      logger.error('❌ [EVENT REG CHECK] Error:', error);
-      return { data: null, error: { message: error.message } };
-    }
-
+    if (error) return { data: null, error: { message: error.message } };
     return { data, error: null };
   } catch (error: any) {
-    logger.error('💥 [EVENT REG CHECK] Exception:', error);
     return { data: null, error: { message: error.message } };
   }
 };
@@ -553,22 +447,12 @@ export const checkEventRegistration = async (eventId: string): Promise<{ data: a
 // AUTH
 // ============================================================================
 
-const MAX_LOGIN_ATTEMPTS = 5;
-let loginAttempts = 0;
-let lockoutUntil = 0;
-
+// Login rate limiting is handled by Supabase Auth's built-in server-side rate
+// limiter. The previous in-memory attempt counter was removed: it lived only in
+// the browser tab, so a reload bypassed it entirely while real protection
+// already exists server-side.
 export const signInUser = async (email: string, password: string): Promise<AuthResult> => {
   try {
-    const now = Date.now();
-    if (now < lockoutUntil) {
-      const waitSeconds = Math.ceil((lockoutUntil - now) / 1000);
-      return {
-        success: false,
-        data: null,
-        error: { message: `Too many login attempts. Please try again in ${waitSeconds} seconds.` }
-      };
-    }
-
     logger.log('🔐 [LOGIN] Signing in:', email);
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -577,27 +461,19 @@ export const signInUser = async (email: string, password: string): Promise<AuthR
     });
 
     if (error) {
-      loginAttempts++;
-      if (loginAttempts >= MAX_LOGIN_ATTEMPTS) {
-        lockoutUntil = now + Math.min(30000 * Math.pow(2, loginAttempts - MAX_LOGIN_ATTEMPTS), 300000);
-      }
       logger.error('❌ [LOGIN] Auth error:', error.message);
       return { success: false, data: null, error: { message: error.message } };
     }
 
     if (!data.user) {
-      loginAttempts++;
       logger.error('❌ [LOGIN] No user returned');
       return { success: false, data: null, error: { message: 'Login failed - no user returned' } };
     }
 
-    loginAttempts = 0;
-    lockoutUntil = 0;
     logger.log('✅ [LOGIN] Auth successful');
 
     return { success: true, data: { user: data.user, session: data.session, profile: null }, error: null };
   } catch (error: any) {
-    loginAttempts++;
     logger.error('💥 [LOGIN] Exception:', error.message);
     return { success: false, data: null, error: { message: error.message } };
   }
@@ -1068,7 +944,7 @@ export const searchAttendeesByPersonalIdBuildingRPC = async (personalId: string,
       logger.error('❌ [BUILDING ATTENDEE SEARCH RPC] Error:', error);
       return { data: null, error: { message: error.message } };
     }
-    return { data: (data as any[])|[], error: null };
+    return { data: (data as any[]) || [], error: null };
   } catch (error: any) {
     logger.error('💥 [BUILDING ATTENDEE SEARCH RPC] Exception:', error);
     return { data: null, error: { message: error.message } };
@@ -1184,66 +1060,6 @@ export const buildTeamSessionCheckinRPC = async (bookingId: string) => {
     data,
     error: error ? { message: error.message } : null,
   };
-};
-
-export const signUpTeamLeader = async (data: VolunteerSignupData): Promise<AuthResult> => {
-  try {
-    const formData = new FormData();
-    formData.append('email', data.email.trim().toLowerCase());
-    formData.append('password', data.password);
-    formData.append('fullName', data.fullName.trim());
-    formData.append('phone', data.phone.trim());
-    formData.append('personalId', data.personalId.trim());
-    formData.append('nationality', data.nationality.trim());
-    formData.append('gender', data.gender.trim());
-    formData.append('registrationType', 'team_leader');
-    formData.append('faculty', data.faculty);
-    formData.append('department', data.department);
-    formData.append('studentStatus', data.studentStatus);
-    if (data.year !== undefined) formData.append('year', data.year.toString());
-    formData.append('teamId', data.teamId);
-    formData.append('enrollmentProofFile', data.enrollmentProofFile);
-    if (data.cvFile) formData.append('cvFile', data.cvFile);
-
-    const { data: invokeData, error: fnError } = await supabase.functions.invoke(
-      'register-team-leader',
-      { body: formData }
-    );
-
-    let result: any = invokeData;
-    if (!result && fnError) {
-      try {
-        const ctx = await fnError.context?.json?.();
-        if (ctx) result = ctx;
-      } catch { /* ignore */ }
-    }
-
-    if (!result?.success) {
-      return {
-        success: false,
-        data: null,
-        error: {
-          message: result?.error || fnError?.message || 'Registration failed. Please try again.',
-          field: result?.field || 'general',
-          validationErrors: result?.field && result.field !== 'general'
-            ? [{ field: result.field, message: result.error }]
-            : [],
-        },
-      };
-    }
-
-    return {
-      success: true,
-      data: { user: { id: result.userId }, session: null },
-      error: null,
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      data: null,
-      error: { message: error.message || 'Something went wrong.' },
-    };
-  }
 };
 
 // ============================================================================

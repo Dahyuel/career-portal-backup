@@ -88,7 +88,7 @@ export const ResetPasswordForm: React.FC = () => {
       logger.log('Updating user password...');
 
       const { error } = await supabase.auth.updateUser({
-        password: formData.password.trim()
+        password: formData.password
       });
 
       if (error) {

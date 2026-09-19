@@ -79,7 +79,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                     logger.warn('Failed to load active events for name:', eventsError);
                     return;
                 }
-                const match = (events|[]).find((e) => e.id === eventId);
+                const match = (events || []).find((e) => e.id === eventId);
                 if (match?.name) setCurrentEventName(match.name);
             } catch (err) {
                 logger.warn('Failed to load current event name:', err);
@@ -128,10 +128,10 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                         merged.push({
                             id: ev.event_id,
                             name: ev.event_name,
-                            event_type: ev.event_type,
-                            start_date: ev.start_date|undefined,
-                            end_date: ev.end_date|undefined,
-                            status: ev.status|undefined,
+                            event_type: ev.event_type ?? undefined,
+                            start_date: ev.start_date ?? undefined,
+                            end_date: ev.end_date ?? undefined,
+                            status: ev.status ?? undefined,
                             venue_name: ev.venue_name,
                             is_current: ev.is_current,
                             is_ended: ev.is_ended,
@@ -144,8 +144,8 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
 
             merged.sort(
                 (a, b) =>
-                    new Date(b.start_date|0).getTime() -
-                    new Date(a.start_date|0).getTime()
+                    new Date(b.start_date ?? 0).getTime() -
+                    new Date(a.start_date ?? 0).getTime()
             );
 
             // Hide the currently-selected event from the list — no point
@@ -162,7 +162,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
 
     // ── Switch to a different event ─────────────────────────────────────
     const handleSwitchEvent = async (event: FairEvent) => {
-        if (!authProfile?.id|!authProfile?.email) return;
+        if (!authProfile?.id || !authProfile?.email) return;
 
         setSwitchingEventId(event.id);
 
@@ -198,7 +198,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
 
                 setShowEventSwitcher(false);
                 onClose();
-                const role = updated.role|'attendee';
+                const role = updated.role || 'attendee';
                 navigate(getRoleBasedRedirect(role), { replace: true });
                 return;
             }
@@ -244,7 +244,7 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
             navigate(`/register-event?eventId=${event.id}`, { replace: false });
         } catch (err: any) {
             logger.error('Error switching event:', err);
-            setEventsError(err.message|'Something went wrong. Please try again.');
+            setEventsError(err.message || 'Something went wrong. Please try again.');
         } finally {
             setSwitchingEventId(null);
         }

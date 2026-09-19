@@ -6,7 +6,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ValidationError } from '../types';
 import { validateName, validateEmail, validatePassword, validateConfirmPassword, validatePhone, validatePersonalId } from '../utils/validation';
-import { signUpUser, signInUser, SignupData } from '../lib/supabase';
+import { signUpUser, SignupData } from '../lib/supabase';
 import Toast from '../components/shared/Toast';
 import { logger } from '../utils/logger';
 import { sanitizeName, sanitizeEmail, sanitizePhone, sanitizeNumeric } from '../utils/sanitize';
@@ -289,7 +289,7 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
     setErrors([]);
 
     try {
-      let finalNationality: string | null = formData.nationality || null;
+      const finalNationality: string | null = formData.nationality || null;
 
       const result = await signUpUser({
         email: sanitizeEmail(formData.email) || formData.email.trim(),

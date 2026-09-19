@@ -18,7 +18,7 @@ import DashboardLoading from '../components/DashboardLoading';
 // but the event isn't in get_active_events) are merged in as well.
 interface PickableEvent extends FairEvent {
   isEmployerEvent?: boolean;
-  companyName?: string|null;
+  companyName?: string | null;
 }
 
 export const EventSelection: React.FC = () => {
@@ -27,8 +27,8 @@ export const EventSelection: React.FC = () => {
 
   const [events, setEvents] = useState<PickableEvent[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectingId, setSelectingId] = useState<string|null>(null);
-  const [error, setError] = useState<string|null>(null);
+  const [selectingId, setSelectingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   // Employer events where the company takes part but the user has no employers
   // row yet. Selecting one runs employer_open_event.
   const [employerOpenable, setEmployerOpenable] = useState<Set<string>>(new Set());
@@ -37,9 +37,16 @@ export const EventSelection: React.FC = () => {
     const loadEvents = async () => {
       try {
         setLoading(true);
+        // Timebox the employer-status lookup so a hanging RPC can never keep
+        // the event picker stuck on its loading state.
+        const employerStatusPromise = Promise.race([
+          getEmployerStatus().catch(() => null),
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 4000)),
+        ]);
+
         const [{ data: activeEvents, error: fetchError }, employerStatus] = await Promise.all([
           getActiveEvents(),
-          getEmployerStatus().catch(() => null),
+          employerStatusPromise,
         ]);
 
         if (fetchError) {
@@ -62,7 +69,7 @@ export const EventSelection: React.FC = () => {
               existing.isEmployerEvent = true;
               existing.companyName = ev.company_name;
               // Company participates but the user has no employers row yet.
-              if (!profile?.employer|profile.employer.company_id !== ev.company_id) {
+              if (!profile?.employer || profile.employer.company_id !== ev.company_id) {
                 openable.add(ev.event_id);
               }
             } else if (!seen.has(ev.event_id)) {
@@ -71,9 +78,9 @@ export const EventSelection: React.FC = () => {
                 id: ev.event_id,
                 name: ev.event_name,
                 event_type: ev.event_type,
-                start_date: ev.start_date|undefined,
-                end_date: ev.end_date|undefined,
-                status: ev.status|undefined,
+                start_date: ev.start_date ?? undefined,
+                end_date: ev.end_date ?? undefined,
+                status: ev.status ?? undefined,
                 venue_name: ev.venue_name,
                 is_current: ev.is_current,
                 is_ended: ev.is_ended,
@@ -87,7 +94,7 @@ export const EventSelection: React.FC = () => {
         }
 
         merged.sort(
-          (a, b) => new Date(b.start_date|0).getTime() - new Date(a.start_date|0).getTime()
+          (a, b) => new Date(b.start_date ?? 0).getTime() - new Date(a.start_date ?? 0).getTime()
         );
 
         setEmployerOpenable(openable);
@@ -131,7 +138,7 @@ export const EventSelection: React.FC = () => {
           return;
         }
 
-        const role = registration.role|updated.role|'attendee';
+        const role = registration.role || updated.role || 'attendee';
         const redirectPath = getRoleBasedRedirect(role);
         logger.log(`✅ Event ${event.id} bound. Redirecting ${role} → ${redirectPath}`);
         navigate(redirectPath, { replace: true });
@@ -170,7 +177,7 @@ export const EventSelection: React.FC = () => {
       navigate(`/register-event?eventId=${event.id}`, { replace: false });
     } catch (err: any) {
       logger.error('Error selecting event:', err);
-      setError(err.message|'Something went wrong. Please try again.');
+      setError(err.message || 'Something went wrong. Please try again.');
       setSelectingId(null);
     }
   };

@@ -116,8 +116,8 @@ const ROLE_PRIORITY: Record<string, number> = {
 const getRolePriority = (role: string): number => ROLE_PRIORITY[role] ?? 0;
 
 // Super admins are exempt from event selection: they keep their admin scope.
-const isSuperAdminRole = (role?: string|null): boolean =>
-  role === 'sadmin'|role === 'super_admin';
+const isSuperAdminRole = (role?: string | null): boolean =>
+  role === 'sadmin' || role === 'super_admin';
 
 // ----- Helper: Determine effective role from roles array -----
 const getEffectiveRole = (roles: string[]): string => {
@@ -130,7 +130,11 @@ const getEffectiveRole = (roles: string[]): string => {
   return roles[0] || "attendee";
 };
 
-// ----- Helper: Restore minimal routing data from localStorage -----
+// ----- Helper: Restore ONLY the signed-in user's identity from storage -----
+// Role/event data is intentionally NOT restored here. Routing decisions are made
+// exclusively from the authoritative profile returned by the live `get_my_profile`
+// RPC; localStorage must never be a source of role-based routing (a stale or
+// tampered cache could otherwise grant/deny access).
 const getInitialSessionFromStorage = (): { user: User | null; profile: UserProfile | null } => {
   try {
     const stored = localStorage.getItem("currentUser");
@@ -148,29 +152,8 @@ const getInitialSessionFromStorage = (): { user: User | null; profile: UserProfi
       user_metadata: {}
     } as User;
 
-    const profile: UserProfile = {
-      ...({} as UserProfile),
-      id: parsed.id,
-      email: parsed.email,
-      full_name: parsed.full_name || "",
-      phone: parsed.phone || "",
-      personal_id: parsed.personal_id || "",
-      score: parsed.score || 0,
-      preferred_language: parsed.preferred_language || "en",
-      nationality: parsed.nationality ?? null,
-      role: parsed.role,
-      roles: parsed.roles || [],
-      isVolunteer: parsed.isVolunteer || false,
-      attendee: parsed.attendee || null,
-      volunteer: parsed.volunteer || null,
-      employer: parsed.employer || null,
-      company: parsed.company || null,
-      profile_complete: parsed.profile_complete,
-      created_at: parsed.created_at || "",
-      event_id: parsed.event_id,
-      target_faculties: parsed.target_faculties || null,
-    };
-    return { user, profile };
+    // No profile: it must be fetched fresh from the RPC before any routing.
+    return { user, profile: null };
   } catch {
     return { user: null, profile: null };
   }
@@ -221,11 +204,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     profileRef.current = profile;
   }, [profile]);
 
-  // ----- Fetch profile from RPC -----
   const fetchUserProfile = useCallback(
     async (userId: string, userEmail: string, eventId?: string, forceRefresh = false): Promise<UserProfile | null> => {
       try {
         const currentProfile = profileRef.current;
+
+        // ── No event selected yet ────────────────────────────────────────
+        // get_my_profile is event-scoped and raises 'Event is required' when
+        // called with a null event_id. During the "logged in but hasn't
+        // picked an event" phase we must not call it at all. Routing is
+        // driven by EventSelection, which passes a real event id when the
+        // user clicks one. Keep any already-event-scoped profile if it
+        // matches this user.
+        if (!eventId) {
+          if (currentProfile?.id === userId && currentProfile.event_id) {
+            logger.log('📦 No event selected — keeping existing event-scoped profile');
+            return currentProfile;
+          }
+          logger.log('⏭️ No event selected yet — skipping get_my_profile');
+          return null;
+        }
 
         // Return cache if same event and same user (unless forced)
         if (!forceRefresh && currentProfile && currentProfile.event_id === eventId && currentProfile.id === userId) {
@@ -233,21 +231,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return currentProfile;
         }
 
-        // Skip no-eventId fetch only if we already have an event-scoped profile
-        if (
-          !eventId &&
-          !forceRefresh &&
-          currentProfile?.id === userId &&
-          currentProfile.event_id   // ← only skip if we already know the event
-        ) {
-          const cachedPriority = getRolePriority(currentProfile.role);
-          if (cachedPriority > getRolePriority("attendee")) {
-            logger.log('📦 Skipping no-eventId fetch — keeping existing role:', currentProfile.role);
-            return currentProfile;
-          }
-        }
-
-// Event selection is the single source of truth for event_id.
+        // Event selection is the single source of truth for event_id.
         // No system_config auto-resolve: every non-sadmin user must pick an
         // event after login (see EventSelection).
         const effectiveEventId = eventId;
@@ -374,6 +358,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // ----- Refresh profile -----
   const refreshProfile = useCallback(
     async (eventId?: string, userId?: string, userEmail?: string, forceRefresh: boolean = false): Promise<UserProfile | null> => {
+      // No event → nothing to fetch; get_my_profile would raise.
+      if (!eventId) {
+        const cached = profileRef.current;
+        if (cached && (!userId || cached.id === userId) && cached.event_id) {
+          return cached;
+        }
+        logger.log('⏭️ refreshProfile skipped — no eventId');
+        return null;
+      }
+
       let targetUserId = userId || user?.id;
       let targetUserEmail = userEmail || user?.email || "";
 
@@ -450,7 +444,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             id: session.user.id,
             email: session.user.email || "",
           }));
-} else if (!isSuperAdminRole(current?.role)) {
+        } else if (!isSuperAdminRole(current?.role)) {
           // Same non-super-admin re-logging in: strip event_id so they must
           // re-select an event. Applies to attendee, staff and employer alike.
           const clearedProfile = { ...current, event_id: undefined };
@@ -468,7 +462,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Fetch fresh profile. Without an event_id this comes back with
         // roles: [] until the user picks an event.
-        fetchUserProfile(session.user.id, session.user.email|"", undefined)
+        fetchUserProfile(session.user.id, session.user.email || "", undefined)
           .catch(console.error);
       } else if (event === "SIGNED_OUT") {
         setUser(null);
@@ -481,6 +475,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => subscription.unsubscribe();
   }, [fetchUserProfile, clearAllCachedData, clearSessionScopedData]);
+
+  // ----- Realtime: react to this user's role changes -----
+  useEffect(() => {
+    const userId = user?.id;
+    const eventId = profile?.event_id;
+    if (!userId || !eventId) return;
+
+    const channel = supabase
+      .channel(`role-change-${userId}-${eventId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'user_roles',
+          filter: `user_id=eq.${userId},event_id=eq.${eventId}`,
+        },
+        () => {
+          logger.log('📡 Role assigned — refreshing profile');
+          refreshProfile(eventId, userId, user?.email || undefined, true).catch(console.error);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',                              // ← NEW BLOCK
+          schema: 'public',
+          table: 'user_roles',
+          filter: `user_id=eq.${userId},event_id=eq.${eventId}`,
+        },
+        () => {
+          logger.log('📡 Role changed — refreshing profile');
+          refreshProfile(eventId, userId, user?.email || undefined, true).catch(console.error);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, user?.email, profile?.event_id, refreshProfile]);
 
   // ----- Role helpers -----
   const hasRole = useCallback(

@@ -34,7 +34,7 @@ export const QRScanner: React.FC<QRScannerProps> = ({
           await scannerRef.current.stop();
         }
         scannerRef.current.clear();
-      } catch (e) {
+      } catch {
         // ignore stop errors
       }
       scannerRef.current = null;

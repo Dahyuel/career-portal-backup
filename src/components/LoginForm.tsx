@@ -23,25 +23,6 @@ export const LoginForm: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
 
-// ── Shared redirect decision ─────────────────────────────────────────────
-  // Every role except sadmin/super_admin ALWAYS goes through event selection
-  // after login, even if they have a previously-bound event_id. This makes the
-  // selector authoritative (employer is unified into it too).
-  // Super admins keep their admin scope.
-  const redirectBasedOnRole = (p: { role: string; event_id?: string }|null) => {
-    if (!p?.role) return;
-
-    if (p.role !== 'sadmin' && p.role !== 'super_admin') {
-      logger.log(`👤 ${p.role} → /select-event (forced post-login)`);
-      navigate('/select-event', { replace: true });
-      return;
-    }
-
-    const path = getRoleBasedRedirect(p.role);
-    logger.log(`➡️ ${p.role} → ${path}`);
-    navigate(path, { replace: true });
-  };
-
   // ── Redirect once profile is loaded ──────────────────────────────────────
   // Fires whenever AuthContext publishes a profile with a role. This is a
   // safety net; handleSubmit usually wins the race and sets isRedirecting.
@@ -124,40 +105,15 @@ export const LoginForm: React.FC = () => {
         return;
       }
 
-logger.log('✅ Auth successful — waiting for AuthContext to load profile...');
+      logger.log('✅ Auth successful — waiting for AuthContext to publish the live profile...');
 
-      // Poll localStorage for the cached profile. AuthContext's SIGNED_IN
-      // handler runs asynchronously and may still be in-flight. We wait
-      // briefly, then route based on whatever role we find.
-      let cached: any = null;
-      for (let i = 0; i < 15; i++) {
-        try {
-          const stored = localStorage.getItem('currentUser');
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            // Only accept a cached profile that has a role set
-            if (parsed?.role) {
-              cached = parsed;
-              break;
-            }
-            // Even without a role, remember the last thing we saw
-            cached = parsed;
-          }
-        } catch { /* ignore */ }
-        await new Promise(resolve => setTimeout(resolve, 150));
-      }
-
-      // Block the safety-net useEffect from double-navigating.
+      // Routing is driven ONLY by the authoritative profile from the live RPC
+      // (the safety-net useEffect above fires once `profile` is set).
+      // localStorage is deliberately NOT polled: it is not a trusted source for
+      // role-based routing. /select-event is the safe landing for every
+      // non-super-admin; ProtectedRoute redirects admins once resolved.
       setIsRedirecting(true);
-
-      if (cached?.role) {
-        redirectBasedOnRole(cached);
-      } else {
-        // Fallback: no role yet — /select-event is the safe landing for every
-        // non-super-admin; ProtectedRoute redirects admins once resolved.
-        logger.warn('⚠️ Profile did not load in time — falling back to /select-event');
-        navigate('/select-event', { replace: true });
-      }
+      navigate('/select-event', { replace: true });
 
     } catch (error: any) {
       logger.error('💥 Login error:', error);

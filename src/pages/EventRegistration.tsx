@@ -5,7 +5,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, AlertCircle, CheckCircle, GraduationCap,
-  UserPlus, Building2, BookOpen, Hash, Calendar, ArrowRight,
+  UserPlus, Building2, BookOpen, Calendar, ArrowRight,
   FileText, Upload, X
 } from '../components/icons';
 import { useAuth } from '../contexts/AuthContext';

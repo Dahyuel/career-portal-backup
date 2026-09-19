@@ -41,8 +41,6 @@ interface AttendeeWithProfile {
     department: string | null;
     cv_url: string | null;
     enrollment_proof_url: string | null;
-    registration_status: string | null;
-    payment_status: string | null;
     registered_at: string | null;
     // from user_profiles join
     user_profiles: {
@@ -71,25 +69,25 @@ export const VerificationDashboard: React.FC = () => {
     const [currentAttendees, setCurrentAttendees] = useState<AttendeeWithProfile[]>([]);
 
     // Total counts per status per tab (for sub-tab badges)
-    const [asuTotals, setAsuTotals] = useState({ pending: 0, approved: 0, rejected: 0 });
-    const [otherTotals, setOtherTotals] = useState({ pending: 0, approved: 0, rejected: 0 });
+    const [asuTotals, setAsuTotals] = useState({ pending: 0, rejected: 0 });
+    const [otherTotals, setOtherTotals] = useState({ pending: 0, rejected: 0 });
 
     // Current page per status per tab
-    const [asuPages, setAsuPages] = useState({ pending: 0, approved: 0, rejected: 0 });
-    const [otherPages, setOtherPages] = useState({ pending: 0, approved: 0, rejected: 0 });
+    const [asuPages, setAsuPages] = useState({ pending: 0, rejected: 0 });
+    const [otherPages, setOtherPages] = useState({ pending: 0, rejected: 0 });
 
     const [isLoading, setIsLoading] = useState(false);
     const [homeDataLoaded, setHomeDataLoaded] = useState(false);
     const [searchTermDraft, setSearchTermDraft] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusSubTab, setStatusSubTab] = useState<'pending' | 'approved' | 'rejected'>('pending');
+    const [statusSubTab, setStatusSubTab] = useState<'pending' | 'rejected'>('pending');
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [notifications, setNotifications] = useState<any[]>([]);
     const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
     // Signed URLs for the currently-selected attendee's files (bucket is private)
     const [proofSignedUrl, setProofSignedUrl] = useState<string | null>(null);
-    const [cvSignedUrl, setCvSignedUrl] = useState<string | null>(null);
+    const [_cvSignedUrl, setCvSignedUrl] = useState<string | null>(null);
     const [signedUrlLoading, setSignedUrlLoading] = useState(false);
 
     const fetchNotifications = useCallback(async () => {
@@ -306,10 +304,10 @@ export const VerificationDashboard: React.FC = () => {
             }));
             setCurrentAttendees(attendeesData);
 
-            // Fetch total counts for ALL 3 statuses in parallel (for sub-tab badges)
-            // These are lightweight calls with limit=0 — they just return the total
-            const otherStatuses = (['pending', 'approved', 'rejected'] as const).filter(s => s !== statusSubTab);
-            const [countRes1, countRes2] = await Promise.all(
+            // Fetch total counts for the other status in parallel (for sub-tab badges)
+            // These are lightweight calls with limit=1 — they just return the total
+            const otherStatuses = (['pending', 'rejected'] as const).filter(s => s !== statusSubTab);
+            const [countRes1] = await Promise.all(
                 otherStatuses.map(status =>
                     supabase.rpc('verif_team_get_attendees', {
                         p_is_asu: isAsuTab,
@@ -324,7 +322,6 @@ export const VerificationDashboard: React.FC = () => {
 
             const newTotals = {
                 pending: 0,
-                approved: 0,
                 rejected: 0,
                 [statusSubTab]: parsed?.total || 0
             };
@@ -332,15 +329,11 @@ export const VerificationDashboard: React.FC = () => {
                 const c1 = countRes1.data as { total: number };
                 newTotals[otherStatuses[0]] = c1?.total || 0;
             }
-            if (!countRes2.error) {
-                const c2 = countRes2.data as { total: number };
-                newTotals[otherStatuses[1]] = c2?.total || 0;
-            }
 
             if (isAsuTab) {
-                setAsuTotals(newTotals as { pending: number; approved: number; rejected: number });
+                setAsuTotals(newTotals as { pending: number; rejected: number });
             } else {
-                setOtherTotals(newTotals as { pending: number; approved: number; rejected: number });
+                setOtherTotals(newTotals as { pending: number; rejected: number });
             }
 
         } catch (err) {
@@ -370,22 +363,16 @@ export const VerificationDashboard: React.FC = () => {
 
     // Reset pages when search term changes
     useEffect(() => {
-        setAsuPages({ pending: 0, approved: 0, rejected: 0 });
-        setOtherPages({ pending: 0, approved: 0, rejected: 0 });
+        setAsuPages({ pending: 0, rejected: 0 });
+        setOtherPages({ pending: 0, rejected: 0 });
     }, [searchTerm]);
 
     // Helper: Check if URL is PDF
     const isPdf = (url: string | null) => url?.toLowerCase().includes('.pdf');
 
-    // Status badge
+    // Status badge (only pending / rejected — approved attendees are not shown here)
     const getStatusBadge = (status: string | null) => {
         switch (status) {
-            case 'approved':
-                return (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                        <ShieldCheck className="w-3 h-3" /> Verified
-                    </span>
-                );
             case 'rejected':
                 return (
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
@@ -519,7 +506,7 @@ export const VerificationDashboard: React.FC = () => {
                 </p>
             </div>
             <div className="hidden sm:block">
-                {getStatusBadge(attendee.registration_status)}
+                {getStatusBadge(statusSubTab)}
             </div>
             <span className="material-symbols-outlined text-slate-400 text-lg">chevron_right</span>
         </motion.button>
@@ -706,8 +693,8 @@ export const VerificationDashboard: React.FC = () => {
         const title = isAsuTab ? 'ASU Students' : 'Other Universities';
         const tabKey = isAsuTab ? 'verification-asu' : 'verification-others';
 
-        // Sub-tab config
-        const subTabs: { key: 'pending' | 'approved' | 'rejected'; label: string; icon: React.ReactNode; count: number; activeClasses: string; badgeClasses: string }[] = [
+        // Sub-tab config (approved attendees are intentionally not shown)
+        const subTabs: { key: 'pending' | 'rejected'; label: string; icon: React.ReactNode; count: number; activeClasses: string; badgeClasses: string }[] = [
             {
                 key: 'pending',
                 label: 'Pending',
@@ -715,14 +702,6 @@ export const VerificationDashboard: React.FC = () => {
                 count: totals.pending,
                 activeClasses: 'bg-amber-500 text-white shadow-lg shadow-amber-500/25',
                 badgeClasses: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400',
-            },
-            {
-                key: 'approved',
-                label: 'Approved',
-                icon: <ShieldCheck className="w-4 h-4" />,
-                count: totals.approved,
-                activeClasses: 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25',
-                badgeClasses: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400',
             },
             {
                 key: 'rejected',
@@ -736,7 +715,6 @@ export const VerificationDashboard: React.FC = () => {
 
         const emptyIconMap = {
             pending: <Clock className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-slate-700" />,
-            approved: <ShieldCheck className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-slate-700" />,
             rejected: <ShieldX className="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-slate-700" />,
         };
 
@@ -969,7 +947,7 @@ export const VerificationDashboard: React.FC = () => {
                                         transition={{ delay: 0.3 }}
                                         className="flex items-center gap-2 mt-2"
                                     >
-                                        {getStatusBadge(selectedAttendee.registration_status)}
+                                        {getStatusBadge(statusSubTab)}
                                         <span className="text-red-200 text-sm">
                                             {selectedAttendee.is_asu_student ? 'ASU Student' : 'External Student'}
                                         </span>
@@ -1127,24 +1105,6 @@ export const VerificationDashboard: React.FC = () => {
                                             </div>
                                         </motion.div>
                                     )}
-                                    {/* Payment Status (non-ASU) */}
-                                    {!selectedAttendee.is_asu_student && (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            transition={{ delay: 0.55 }}
-                                            className="flex items-center gap-3 bg-slate-50 dark:bg-slate-800 rounded-xl p-3"
-                                        >
-                                            <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-900/20 flex items-center justify-center shrink-0">
-                                                <span className="material-symbols-outlined text-emerald-600 text-lg">payments</span>
-                                            </div>
-                                            <div className="min-w-0">
-                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider">Payment Status</p>
-                                                <p className="font-semibold text-slate-800 dark:text-white text-sm capitalize">{selectedAttendee.payment_status || 'N/A'}</p>
-                                            </div>
-                                        </motion.div>
-                                    )}
-
                                     {/* Action Buttons */}
                                     <motion.div
                                         initial={{ opacity: 0, y: 10 }}
@@ -1156,7 +1116,7 @@ export const VerificationDashboard: React.FC = () => {
                                             whileHover={{ scale: 1.02 }}
                                             whileTap={{ scale: 0.98 }}
                                             onClick={() => updateStatus(selectedAttendee.user_id, 'approved')}
-                                            disabled={selectedAttendee.registration_status === 'approved' || processingAction !== null}
+                                            disabled={processingAction !== null}
                                             className="flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 disabled:cursor-not-allowed text-white py-3.5 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-emerald-500/20"
                                         >
                                             {processingAction === 'approved' ? (
@@ -1175,7 +1135,7 @@ export const VerificationDashboard: React.FC = () => {
                                             whileHover={{ scale: 1.02 }}
                                             whileTap={{ scale: 0.98 }}
                                             onClick={() => updateStatus(selectedAttendee.user_id, 'rejected')}
-                                            disabled={selectedAttendee.registration_status === 'rejected' || processingAction !== null}
+                                            disabled={processingAction !== null}
                                             className="flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 disabled:bg-red-300 disabled:cursor-not-allowed text-white py-3.5 px-6 rounded-2xl font-bold transition-colors shadow-lg shadow-red-500/20"
                                         >
                                             {processingAction === 'rejected' ? (

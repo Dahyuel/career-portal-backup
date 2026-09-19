@@ -327,17 +327,12 @@ export const TechSupportDashboard: React.FC = () => {
 
         setRoleChangePending(true);
         try {
-            let data: any;
-            let error: any;
-
-            const result = await supabase.rpc('tech_support_change_role', {
+            const { data, error } = await supabase.rpc('tech_support_change_role', {
                 _event_id: eventId,
                 _user_id: selectedUser.id,
                 _new_role: selectedOption.role,
                 _team_id: selectedOption.teamId || null,
             });
-            data = result.data;
-            error = result.error;
 
             if (error) throw error;
             if (!data?.success) throw new Error(data?.error || 'Role change failed');

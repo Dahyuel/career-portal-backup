@@ -362,10 +362,10 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                         merged.push({
                             id: ev.event_id,
                             name: ev.event_name,
-                            event_type: ev.event_type,
-                            start_date: ev.start_date|undefined,
-                            end_date: ev.end_date|undefined,
-                            status: ev.status|undefined,
+                            event_type: ev.event_type ?? undefined,
+                            start_date: ev.start_date ?? undefined,
+                            end_date: ev.end_date ?? undefined,
+                            status: ev.status ?? undefined,
                             venue_name: ev.venue_name,
                             is_current: ev.is_current,
                             is_ended: ev.is_ended,
@@ -378,8 +378,8 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
 
             merged.sort(
                 (a, b) =>
-                    new Date(b.start_date|0).getTime() -
-                    new Date(a.start_date|0).getTime()
+                    new Date(b.start_date ?? 0).getTime() -
+                    new Date(a.start_date ?? 0).getTime()
             );
 
             // Hide the currently-selected event from the list — no point
@@ -434,7 +434,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                 // hook and RPC picks up the new EVENT_ID.
                 setShowEventSwitcher(false);
                 onClose();
-                const role = updated.role|'attendee';
+                const role = updated.role || 'attendee';
                 navigate(getRoleBasedRedirect(role), { replace: true });
                 return;
             }

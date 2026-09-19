@@ -27,8 +27,6 @@ const EmployerStart = React.lazy(() => import('./pages/Employer/EmployerStart').
 const EmployerDashboard = React.lazy(() => import('./pages/Employer/EmployerDashboard').then(module => ({ default: module.EmployerDashboard })));
 const EventSelection = React.lazy(() => import('./pages/EventSelection').then(module => ({ default: module.EventSelection })));
 const EventRegistration = React.lazy(() => import('./pages/EventRegistration').then(module => ({ default: module.EventRegistration })));
-const VolunteerRegistration = React.lazy(() => import('./pages/VolunteerRegistration').then(module => ({ default: module.VolunteerRegistration })));
-const TeamLeaderRegistration = React.lazy(() => import('./pages/TeamLeaderRegistration').then(module => ({ default: module.TeamLeaderRegistration })));
 const PendingApproval = React.lazy(() => import('./pages/PendingApproval').then(module => ({ default: module.PendingApproval })));
 const RegistrationConfirmed = React.lazy(() => import('./pages/RegistrationConfirmed').then(module => ({ default: module.RegistrationConfirmed })));
 const RejectedAttendee = React.lazy(() => import('./pages/RejectedAttendee').then(module => ({ default: module.RejectedAttendee })));
@@ -118,20 +116,6 @@ const AppRouter: React.FC = () => {
       <Route path="/attendee-register" element={
         <Suspense fallback={<DashboardLoading message="Loading registration form..." />}>
           <UnifiedAttendeeRegistration />
-        </Suspense>
-      } />
-
-      {/* Hidden volunteer registration endpoint — not linked publicly */}
-      <Route path="/x-8uR2-mP5x-K9wQ-Reg7" element={
-        <Suspense fallback={<DashboardLoading message="Loading volunteer registration..." />}>
-          <VolunteerRegistration />
-        </Suspense>
-      } />
-
-      {/* Hidden team leader registration endpoint — not linked publicly */}
-      <Route path="/tl-register-9k2x" element={
-        <Suspense fallback={<DashboardLoading message="Loading team leader registration..." />}>
-          <TeamLeaderRegistration />
         </Suspense>
       } />
 
