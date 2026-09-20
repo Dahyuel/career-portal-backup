@@ -927,7 +927,7 @@ export function AdminPanel() {
       if (error) { logger.error('Error fetching dashboard stats:', error); return; }
       setDashboardStats(data as DashboardStats);
     } catch (err) { logger.error('Error fetching dashboard stats:', err); }
-  }, []);
+  }, [EVENT_ID]);
 
   // ===== SESSIONS FETCHING =====
   const fetchSessions = useCallback(async () => {
@@ -938,7 +938,7 @@ export function AdminPanel() {
       setSessions((data as Session[]) || []);
     } catch (err) { logger.error('Error fetching sessions:', err); }
     finally { setIsLoadingSessions(false); }
-  }, []);
+  }, [EVENT_ID]);
 
   const fetchSessionBookings = useCallback(async (session: { id: string; title: string; current_bookings: number; max_attendees: number | null }) => {
     setSelectedSessionForBookings(session);
@@ -1022,7 +1022,7 @@ export function AdminPanel() {
       setSelectedCompany((prev) => (prev ? list.find((c) => c.id === prev.id) ?? null : prev));
     } catch (err) { logger.error('Error fetching companies:', err); }
     finally { setIsLoadingCompanies(false); }
-  }, []);
+  }, [EVENT_ID]);
 
   // ===== JOBS DATA FETCHING =====
   const fetchJobs = useCallback(async () => {
@@ -1033,7 +1033,7 @@ export function AdminPanel() {
       setJobs((data as AdminJob[]) || []);
     } catch (err) { logger.error('Error fetching jobs:', err); }
     finally { setIsLoadingJobs(false); }
-  }, []);
+  }, [EVENT_ID]);
 
   // ===== EVENTS DATA FETCHING =====
   const fetchEvents = useCallback(async () => {
@@ -1044,7 +1044,7 @@ export function AdminPanel() {
       setEvents((data as AdminEvent[]) || []);
     } catch (err) { logger.error('Error fetching events:', err); }
     finally { setIsLoadingEvents(false); }
-  }, []);
+  }, [EVENT_ID]);
 
   // ===== STATISTICS FETCHING =====
   const fetchStatistics = useCallback(async () => {
@@ -1105,7 +1105,7 @@ export function AdminPanel() {
       });
     } catch (err) { logger.error('Error fetching statistics:', err); }
     finally { setIsLoadingStatistics(false); }
-  }, []);
+  }, [EVENT_ID]);
 
   useEffect(() => {
     fetchDashboardStats();
@@ -1133,7 +1133,7 @@ export function AdminPanel() {
         }
       });
     }
-  }, [activeTab]);
+  }, [activeTab, EVENT_ID]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (activeTab === 'sessions') { fetchSessions(); fetchSpeakers(); }

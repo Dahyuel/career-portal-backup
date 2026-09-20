@@ -223,6 +223,8 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'warning' | 'success' } | null>(null);
+  const [captcha, setCaptcha] = useState<{ question: string; token: string } | null>(null);
+  const [captchaAnswer, setCaptchaAnswer] = useState('');
 
   const showToast = useCallback((message: string, type: 'error' | 'warning' | 'success' = 'error') => {
     setToast({ message, type });
@@ -298,10 +300,21 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
         phone: sanitizePhone(formData.phone),
         personalId: sanitizeNumeric(formData.personalId).substring(0, 14),
         nationality: finalNationality ? finalNationality.trim().substring(0, 100) : null,
-        gender: formData.gender?.trim() || null
+        gender: formData.gender?.trim() || null,
+        captchaToken: captcha?.token,
+        captchaAnswer: captchaAnswer.trim()
       });
 
       if (!result.success) {
+        if (result.error?.field === 'captcha' && result.captchaRequired && result.captchaQuestion && result.captchaToken) {
+          setCaptcha({ question: result.captchaQuestion, token: result.captchaToken });
+          setCaptchaAnswer('');
+          setErrors([{ field: 'captcha', message: 'Please complete the verification challenge.' }]);
+          showToast('Please complete the verification challenge.', 'warning');
+          setLoading(false);
+          return;
+        }
+
         const field = result.error?.field || 'general';
         const message = result.error?.message || 'Signup failed. Please try again.';
         setErrors([{ field, message }]);
@@ -316,6 +329,9 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
         sanitizeEmail(formData.email) || formData.email.trim(),
         formData.password
       );
+
+      setCaptcha(null);
+      setCaptchaAnswer('');
 
       if (loginResult.success) {
         showToast('Account created! Redirecting...', 'success');
@@ -570,6 +586,29 @@ export const UnifiedAttendeeRegistration: React.FC = () => {
             </div>
 
 
+
+            {captcha && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.6 }}
+                className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4"
+              >
+                <label className="block text-sm font-medium text-amber-900 dark:text-amber-200 mb-2">
+                  Verification: {captcha.question}
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={captchaAnswer}
+                  onChange={(e) => { setCaptchaAnswer(e.target.value); setErrors(prev => prev.filter(error => error.field !== 'captcha')); }}
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-asu-red focus:border-asu-red transition-all duration-300 bg-white dark:bg-gray-700 dark:text-white ${getFieldError('captcha') ? 'border-red-300' : 'border-gray-300 dark:border-gray-600'}`}
+                  placeholder="Your answer"
+                  disabled={loading}
+                />
+                {getFieldError('captcha') && <p className="mt-1 text-sm text-asu-red">{getFieldError('captcha')}</p>}
+              </motion.div>
+            )}
 
             <motion.div
               initial={{ opacity: 0, y: 20 }}

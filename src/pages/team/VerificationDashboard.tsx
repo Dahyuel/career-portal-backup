@@ -388,32 +388,6 @@ export const VerificationDashboard: React.FC = () => {
         }
     };
 
-    // JWT generator using HMAC-SHA256 (Web Crypto API — works in browser)
-    const generateJWT = async (payload: object, secret: string): Promise<string> => {
-        const toBase64Url = (str: string) =>
-            btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-
-        const encoder = new TextEncoder();
-        const key = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(secret),
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['sign']
-        );
-
-        const header = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-        const body = toBase64Url(JSON.stringify(payload));
-        const data = encoder.encode(`${header}.${body}`);
-        const sig = await crypto.subtle.sign('HMAC', key, data);
-
-        const sigBase64Url = toBase64Url(
-            String.fromCharCode(...new Uint8Array(sig))
-        );
-
-        return `${header}.${body}.${sigBase64Url}`;
-    };
-
     const updateStatus = async (userId: string, status: 'approved' | 'rejected') => {
         if (!profile?.event_id) {
             showToast('No active event — please reload.', 'error');
@@ -438,31 +412,16 @@ export const VerificationDashboard: React.FC = () => {
                 return;
             }
 
-            // ✅ Call n8n webhook directly from the browser
+            // Webhook signing happens server-side in the verify-attendee-webhook
+            // edge function; the n8n secret is never exposed to the browser.
             try {
-                const JWT_SECRET = import.meta.env.VITE_N8N_JWT_SECRET;
-                const WEBHOOK_URL = import.meta.env.VITE_N8N_VERIFICATION_WEBHOOK_URL;
-
-                const webhookPayload = {
-                    attendee_id: userId,
-                    name: selectedAttendee?.user_profiles.full_name || 'Unknown User',
-                    email: selectedAttendee?.user_profiles.email || '',
-                    status: status,
-                    is_asu_student: selectedAttendee?.is_asu_student ?? false,
-                    event_id: profile.event_id,
-                    iat: Math.floor(Date.now() / 1000)
-                };
-
-                const jwtToken = await generateJWT(webhookPayload, JWT_SECRET);
-
-                await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${jwtToken}`
-                    },
-                    body: JSON.stringify(webhookPayload)
-                });
+                const { error: webhookError } = await supabase.functions.invoke(
+                    'verify-attendee-webhook',
+                    { body: { attendeeId: userId, eventId: profile.event_id, status } }
+                );
+                if (webhookError) {
+                    logger.error('Webhook call failed (non-critical):', webhookError);
+                }
             } catch (webhookErr) {
                 // Non-blocking — verification already succeeded
                 logger.error('Webhook call failed (non-critical):', webhookErr);

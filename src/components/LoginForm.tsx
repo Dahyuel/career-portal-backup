@@ -89,7 +89,7 @@ export const LoginForm: React.FC = () => {
         } else {
           setErrors([{
             field: 'general',
-            message: result.error?.message || 'Invalid email or password. Please try again.'
+            message: 'Invalid email or password. Please try again.'
           }]);
         }
         setLoading(false);
@@ -99,7 +99,7 @@ export const LoginForm: React.FC = () => {
       if (!result.data?.user) {
         setErrors([{
           field: 'general',
-          message: 'Login failed. No user data returned.'
+          message: 'Invalid email or password. Please try again.'
         }]);
         setLoading(false);
         return;

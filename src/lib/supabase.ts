@@ -39,6 +39,10 @@ export interface AuthResult {
     field?: string;
     validationErrors?: ValidationError[];
   } | null;
+  captchaRequired?: boolean;
+  captchaQuestion?: string;
+  captchaToken?: string;
+  captchaAnswer?: string;
 }
 
 export interface SignupData {
@@ -58,6 +62,8 @@ export interface SignupData {
   studentStatus?: string;
   volunteerId?: string;
   teamId?: string;
+  captchaToken?: string;
+  captchaAnswer?: string;
 }
 
 export interface EventRegistrationPayload {
@@ -1293,4 +1299,25 @@ export const adminGetFeedbackStatsRPC = async (eventId: string) => {
   } catch (error: any) {
     return feedbackFailure('ADMIN FEEDBACK STATS RPC', error);
   }
+};
+
+// PROFILE self-service
+export interface MyProfileInput {
+  full_name: string;
+  email?: string | null;
+  phone?: string | null;
+  personal_id?: string | null;
+  nationality?: string | null;
+  gender?: string | null;
+  preferred_language?: string | null;
+}
+
+export const upsertMyProfile = async (input: MyProfileInput): Promise<{ success: boolean; error: string | null }> => {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: "Not authenticated" };
+    const { error } = await supabase.from("user_profiles").upsert({ id: user.id, full_name: input.full_name, email: input.email ?? user.email ?? null, phone: input.phone ?? null, personal_id: input.personal_id ?? null, nationality: input.nationality ?? "Egyptian", gender: input.gender ?? null, preferred_language: input.preferred_language ?? "en" }, { onConflict: "id" });
+    if (error) { logger.error("Error upserting own profile:", error); return { success: false, error: error.message }; }
+    return { success: true, error: null };
+  } catch (error) { const e = error as { message?: string }; return { success: false, error: String(e?.message || error) }; }
 };

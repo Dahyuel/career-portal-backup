@@ -7,20 +7,21 @@ import { logger } from '../../utils/logger';
 
 interface ViewAllActivitiesModalProps {
     onClose: () => void;
+    eventId?: string;
 }
 
-const ViewAllActivitiesModal: React.FC<ViewAllActivitiesModalProps> = ({ onClose }) => {
+const ViewAllActivitiesModal: React.FC<ViewAllActivitiesModalProps> = ({ onClose, eventId }) => {
     const { user } = useAuth();
     const [activities, setActivities] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchAllActivities = async () => {
-            if (!user?.id) return;
+            if (!user?.id || !eventId) return;
 
             try {
                 const { data, error } = await supabase
-                    .rpc('get_all_user_activities', { p_limit: 100 });
+                    .rpc('get_all_user_activities', { p_event_id: eventId, p_limit: 100 });
 
                 if (error) throw error;
                 setActivities(data || []);
@@ -32,7 +33,7 @@ const ViewAllActivitiesModal: React.FC<ViewAllActivitiesModalProps> = ({ onClose
         };
 
         fetchAllActivities();
-    }, [user?.id]);
+    }, [user?.id, eventId]);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -61,8 +62,8 @@ const ViewAllActivitiesModal: React.FC<ViewAllActivitiesModalProps> = ({ onClose
                             <div className="w-8 h-8 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
                         </div>
                     ) : activities.length > 0 ? (
-                        activities.map((activity) => (
-                            <div key={activity.id} className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-slate-800 last:border-0 last:pb-0">
+                        activities.map((activity, idx) => (
+                            <div key={idx} className="flex items-start gap-4 pb-4 border-b border-gray-100 dark:border-slate-800 last:border-0 last:pb-0">
                                 <div className="bg-red-100 dark:bg-red-900/30 p-2 rounded-lg flex-shrink-0">
                                     <span className="material-symbols-outlined text-red-600 dark:text-red-400">
                                         {activity.activity_type === 'session_attendance' ? 'event' :

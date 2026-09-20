@@ -254,7 +254,7 @@ export const BuildTeamDashboard: React.FC = () => {
     };
 
     fetchVolunteerStats();
-  }, [profile?.id, profile?.event_id, refreshTrigger]);
+  }, [profile?.id, profile?.event_id, profile?.role, refreshTrigger]);
 
   const fetchSessions = useCallback(async () => {
     if (!profile?.event_id) return;

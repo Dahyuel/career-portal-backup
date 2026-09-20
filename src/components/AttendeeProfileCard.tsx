@@ -286,9 +286,10 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
 
         try {
             if (profile.cv_url) {
-                const parts = profile.cv_url.split('/');
-                const personalId = parts[0];
-                const folder = `${personalId}/cv`;
+                const folder = `${authProfile?.personal_id}/cv`;
+                if (!authProfile?.personal_id) {
+                    throw new Error('Missing personal ID for CV upload');
+                }
 
                 const { data: existing } = await supabase.storage
                     .from('ems-assets')

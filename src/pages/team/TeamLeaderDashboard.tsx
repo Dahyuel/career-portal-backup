@@ -1,6 +1,6 @@
 // pages/team/TeamLeaderDashboard.tsx
 import FeedbackTab from '../../components/shared/FeedbackTab';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 import { supabase } from '../../lib/supabase';
@@ -142,7 +142,7 @@ export const TeamLeaderDashboard: React.FC = () => {
 
   // fetchInitialTeamStats is now handled by get_team_leader_data RPC
 
-  const fetchTeamMembers = async (teamId: string) => {
+  const fetchTeamMembers = useCallback(async (teamId: string) => {
     if (isTeamListLoaded) return;
 
     setLoadingTeamList(true);
@@ -163,7 +163,7 @@ export const TeamLeaderDashboard: React.FC = () => {
     } finally {
       setLoadingTeamList(false);
     }
-  };
+  }, [isTeamListLoaded]);
 
   const fetchEventEntriesCount = async (eventId: string) => {
     try {
@@ -198,7 +198,7 @@ export const TeamLeaderDashboard: React.FC = () => {
     if (activeTab === 'team' && !isTeamListLoaded && teamInfo) {
       fetchTeamMembers(teamInfo.team_id);
     }
-  }, [activeTab, isTeamListLoaded, teamInfo]);
+  }, [activeTab, isTeamListLoaded, teamInfo, fetchTeamMembers]);
 
   const fetchFullVolunteer = async (volunteerId: string): Promise<TeamMember | null> => {
     setLoadingVolunteerDetails(true);

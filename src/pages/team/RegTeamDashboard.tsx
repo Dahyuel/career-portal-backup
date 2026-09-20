@@ -249,7 +249,7 @@ export const RegTeamDashboard: React.FC = () => {
     };
 
     fetchVolunteerStats();
-  }, [user?.id, volunteerProfile?.total_points, refreshTrigger]);
+  }, [user?.id, volunteerProfile?.total_points, refreshTrigger, userStats.loading, userStats.rank, userStats.score]);
   // ============================================================================
   // OPTIMIZED: Parallel Data Fetch on Mount
   // ============================================================================
@@ -269,7 +269,7 @@ export const RegTeamDashboard: React.FC = () => {
       }
     };
     fetchActivities();
-  }, [user?.id, refreshTrigger]);
+  }, [user?.id, profile?.role, refreshTrigger]);
 
   // Lazy load check-in stats (My Scans Count)
   useEffect(() => {

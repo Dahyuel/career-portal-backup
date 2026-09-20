@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { KeyRound, ArrowLeft, CheckCircle, AlertCircle, Mail } from './icons';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { supabase } from '../lib/supabase';
+import { resetPassword } from '../lib/supabase';
 import { sanitizeEmail } from '../utils/sanitize';
 import { logger } from '../utils/logger';
 
@@ -26,13 +26,11 @@ export const ForgotPasswordForm: React.FC = () => {
     try {
       const sanitized = sanitizeEmail(email) || trimmed;
 
-      const { error } = await supabase.auth.resetPasswordForEmail(sanitized, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
+      const { success, error } = await resetPassword(sanitized);
 
-      if (error) {
+      if (!success) {
         logger.error('Password reset error:', error);
-        setError(error.message);
+        setError(error || 'Failed to send reset link. Please try again.');
         return;
       }
 

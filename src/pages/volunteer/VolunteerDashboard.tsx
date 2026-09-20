@@ -51,7 +51,7 @@ export const VolunteerDashboard: React.FC = () => {
     } catch (error) {
       logger.error('Error fetching notifications:', error);
     }
-  }, [profile?.id]);
+  }, [profile?.id, EVENT_ID]);
 
   useEffect(() => {
     fetchNotifications();
@@ -122,7 +122,7 @@ export const VolunteerDashboard: React.FC = () => {
     };
 
     fetchVolunteerData();
-  }, [profile?.id]);
+  }, [profile?.id, EVENT_ID]);
 
   // Loading State
   if (userStats.loading) {

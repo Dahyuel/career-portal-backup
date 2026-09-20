@@ -188,8 +188,7 @@ const AttendeeDashboard = () => {
       // AFTER
       const [notificationsResult, activitiesResult, scheduleResult] = await Promise.all([
         supabase.rpc('get_attendee_notifications', {
-          p_event_id: EVENT_ID,
-          p_roles: profile?.roles || []
+          p_event_id: EVENT_ID
         }),
         supabase.rpc('get_attendee_activities', { p_limit: 10 }),
         supabase.rpc('get_attendee_schedule', { p_event_id: EVENT_ID })
@@ -215,7 +214,7 @@ const AttendeeDashboard = () => {
       setLoadingSchedule(false);
       setHomeDataLoaded(true);
     }
-  }, [user?.id, EVENT_ID, profile?.roles?.length]);
+  }, [user?.id, EVENT_ID]);
 
 
   useEffect(() => {
@@ -278,7 +277,7 @@ const AttendeeDashboard = () => {
     } finally {
       setLoadingSessions(false);
     }
-  }, [attendeeId]);
+  }, [attendeeId, EVENT_ID]);
 
   // Fetch booked sessions once when tab first opens
   useEffect(() => {
@@ -339,7 +338,7 @@ const AttendeeDashboard = () => {
     };
 
     fetchCompanies();
-  }, [activeTab, loadedTabs]);
+  }, [activeTab, loadedTabs, EVENT_ID]);
 
   // ── Server-side jobs fetch with filters passed directly to RPC ───────────────
   const fetchJobsPage = useCallback(async (
@@ -398,7 +397,7 @@ const AttendeeDashboard = () => {
     } finally {
       setLoadingJobs(false);
     }
-  }, [attendeeId]);
+  }, [attendeeId, EVENT_ID]);
 
   // Trigger fetch when tab opens or page changes
   useEffect(() => {
@@ -2234,7 +2233,7 @@ const AttendeeDashboard = () => {
       {/* View All Activities Modal */}
       <AnimatePresence>
         {showAllActivitiesModal && (
-          <ViewAllActivitiesModal onClose={() => setShowAllActivitiesModal(false)} />
+          <ViewAllActivitiesModal eventId={EVENT_ID} onClose={() => setShowAllActivitiesModal(false)} />
         )}
       </AnimatePresence>
 
