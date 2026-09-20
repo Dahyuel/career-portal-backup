@@ -11,6 +11,7 @@ import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileMo
 import Toast from '../../components/shared/Toast';
 import DashboardLoading from '../../components/DashboardLoading';
 import { logger } from '../../utils/logger';
+import { getActiveEventId } from '../../lib/currentEvent';
 
 // Animation variants
 const containerVariants = {
@@ -59,6 +60,7 @@ export const TeamLeaderDashboard: React.FC = () => {
   // The team leader's own event. Without it the database falls back to whichever
   // event is current, which is the wrong team when two events are live.
   const { profile } = useAuth();
+  const EVENT_ID = profile?.event_id || getActiveEventId();
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [loading, setLoading] = useState(true);
   const [teamInfo, setTeamInfo] = useState<TeamInfo | null>(null);
@@ -573,7 +575,7 @@ export const TeamLeaderDashboard: React.FC = () => {
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'team' && renderTeamTab()}
           {activeTab === 'announcements' && renderAnnouncementsTab()}
-          {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
+          {activeTab === 'feedback' && <FeedbackTab eventId={EVENT_ID} subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
         </AnimatePresence>
       </SharedNavigation>
 

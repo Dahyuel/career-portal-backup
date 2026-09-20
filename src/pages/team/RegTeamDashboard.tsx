@@ -29,6 +29,7 @@ import { RegTeamAttendeeCard } from "../../components/team/RegTeamAttendeeCard";
 import NotificationModal from "../../components/NotificationModal";
 import { logger } from '../../utils/logger';
 import { sanitizeSearchQuery } from '../../utils/sanitize';
+import { getActiveEventId } from '../../lib/currentEvent';
 
 // ============================================================================
 // ANIMATION VARIANTS
@@ -93,6 +94,7 @@ const castToAttendee = (data: any): Attendee => {
 // ============================================================================
 export const RegTeamDashboard: React.FC = () => {
   const { user, profile, refreshProfile } = useAuth();
+  const EVENT_ID = profile?.event_id || getActiveEventId();
   useTheme();
   const [activeTab, setActiveTab] = useState('home');
   const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger for background refreshes
@@ -150,7 +152,7 @@ export const RegTeamDashboard: React.FC = () => {
   const fetchNotifications = useCallback(async () => {
     if (!user?.id || !profile?.event_id) return;
     try {
-      const { data, error } = await getBuildingNotificationsRPC(profile.event_id);
+      const { data, error } = await getBuildingNotificationsRPC(profile.event_id, user.id);
       if (error) throw new Error(error.message);
       if (data) setNotifications(data);
     } catch (error) {
@@ -969,7 +971,7 @@ export const RegTeamDashboard: React.FC = () => {
         <motion.div key={activeTab} className="h-full">
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'check-in' && renderCheckInTab()}
-          {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
+          {activeTab === 'feedback' && <FeedbackTab eventId={EVENT_ID} subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
         </motion.div>
       </AnimatePresence>
 

@@ -9,6 +9,7 @@ import VolunteerProfileModal from '../../components/volunteer/VolunteerProfileMo
 import { supabase } from '../../lib/supabase';
 import { teamOptions, namedRoleOptions, volunteerTeamOptions } from '../../lib/eventTeams';
 import { logger } from '../../utils/logger';
+import { getActiveEventId } from '../../lib/currentEvent';
 
 // ─── Animation Variants ────────────────────────────────────────────────────────
 const containerVariants: Variants = {
@@ -191,6 +192,7 @@ const UserResultCard: React.FC<UserResultCardProps> = ({ user, onChangeRole, onD
 // ─── Main Dashboard Component ──────────────────────────────────────────────────
 export const TechSupportDashboard: React.FC = () => {
   const { profile } = useAuth();
+  const EVENT_ID = profile?.event_id || getActiveEventId();
   const [activeTab, setActiveTab] = useState('home');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
   const [showProfile, setShowProfile] = useState(false);
@@ -737,7 +739,7 @@ export const TechSupportDashboard: React.FC = () => {
     switch (activeTab) {
       case 'home': return renderHomeTab();
       case 'search': return renderSearchTab();
-      case 'feedback': return <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />;
+      case 'feedback': return <FeedbackTab eventId={EVENT_ID} subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />;
       default: return renderHomeTab();
     }
   };

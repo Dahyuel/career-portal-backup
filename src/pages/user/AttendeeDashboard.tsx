@@ -2031,7 +2031,7 @@ const AttendeeDashboard = () => {
       case 'sessions': return renderSessionsTab();
       case 'jobs': return renderJobsTab();
       case 'companies': return renderCompaniesTab();
-      case 'feedback': return <FeedbackTab subtitle="Tell us how the event went for you. Your answers help us improve." />;
+      case 'feedback': return <FeedbackTab eventId={EVENT_ID} subtitle="Tell us how the event went for you. Your answers help us improve." />;
       default: return renderHomeTab();
     }
   };

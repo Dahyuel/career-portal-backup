@@ -714,7 +714,7 @@ export function AdminPanel() {
 
   // Whatever the super admin has made the current event. Read here (not at module
   // level) so it is resolved after the active event has loaded at start-up.
-  const EVENT_ID = getActiveEventId();
+  const EVENT_ID = profile?.event_id || getActiveEventId();
 
 
   const navItems: NavItem[] = [
@@ -6706,7 +6706,7 @@ export function AdminPanel() {
       <AnimatePresence mode="wait">
         <motion.div key={activeTab} className="max-w-7xl mx-auto">
           {activeTab === 'dashboard' && renderDashboard()}
-          {activeTab === 'statistics' && <StatisticsTab eventId={getActiveEventId()} />}
+          {activeTab === 'statistics' && <StatisticsTab eventId={EVENT_ID} />}
           {activeTab === 'sessions' && renderSessions()}
           {activeTab === 'events' && renderEvents()}
           {activeTab === 'companies' && renderCompanies()}

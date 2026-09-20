@@ -37,6 +37,7 @@ import DashboardLoading from "../../components/DashboardLoading";
 import ViewAllActivitiesModal from "../../components/attendee/ViewAllActivitiesModal";
 import NotificationModal from "../../components/NotificationModal";
 import { logger } from '../../utils/logger';
+import { getActiveEventId } from '../../lib/currentEvent';
 
 // --- Animation Variants (matching EmployerDashboard / tabsanimation.md) ---
 const containerVariants: Variants = {
@@ -98,6 +99,7 @@ interface SessionBooking {
 export const BuildTeamDashboard: React.FC = () => {
   useTheme();
   const { profile, refreshProfile } = useAuth();
+  const EVENT_ID = profile?.event_id || getActiveEventId();
   const [activeTab, setActiveTab] = useState('home');
   const [showProfile, setShowProfile] = useState(false);
 
@@ -219,7 +221,7 @@ export const BuildTeamDashboard: React.FC = () => {
         const [statsResult, buildingStatsResult, activitiesResult] = await Promise.all([
           buildTeamGetVolunteerStatsRPC(profile.event_id),
           getBuildingStatsRPC(profile.event_id),
-          profile?.role !== 'attendee' ? getBuildingActivitiesRPC(3) : Promise.resolve({ data: [], error: null })
+          profile?.role !== 'attendee' ? getBuildingActivitiesRPC(3, profile.event_id) : Promise.resolve({ data: [], error: null })
         ]);
 
         // Process Stats
@@ -819,7 +821,7 @@ export const BuildTeamDashboard: React.FC = () => {
         <motion.div key={activeTab} className="h-full">
           {activeTab === 'home' && renderHomeTab()}
           {activeTab === 'sessions' && renderSessionsTab()}
-          {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
+          {activeTab === 'feedback' && <FeedbackTab eventId={EVENT_ID} subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
         </motion.div>
       </AnimatePresence >
 

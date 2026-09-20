@@ -41,7 +41,7 @@ export const VolunteerDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const EVENT_ID = getActiveEventId();
+  const EVENT_ID = profile?.event_id || getActiveEventId();
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id) return;
     try {

@@ -797,12 +797,13 @@ export const searchSessionBookings = async (sessionId: string, query: string, ev
 // BUILDING TEAM DASHBOARD RPC FUNCTIONS
 // ============================================================================
 
-export const getBuildingNotificationsRPC = async (eventId: string) => {
+export const getBuildingNotificationsRPC = async (eventId: string, userId: string) => {
   try {
     // Shared by RegTeam + Building dashboards. Route by caller role.
     const { data: roleRow } = await supabase
       .from('user_roles')
       .select('role')
+      .eq('user_id', userId)
       .eq('event_id', eventId)
       .in('role', ['registration', 'building'])
       .order('role', { ascending: true }) // 'building' < 'registration'
@@ -826,9 +827,9 @@ export const getBuildingNotificationsRPC = async (eventId: string) => {
   }
 };
 
-export const getBuildingActivitiesRPC = async (limit: number = 3) => {
+export const getBuildingActivitiesRPC = async (limit: number = 3, eventId?: string) => {
   try {
-    const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit });
+    const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit, p_event_id: eventId ?? null });
     if (error) {
       logger.error('❌ [BUILDING ACTIVITIES RPC] Error:', error);
       return { data: null, error: { message: error.message } };

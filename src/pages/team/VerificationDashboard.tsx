@@ -19,6 +19,7 @@ import ViewAllActivitiesModal from '../../components/attendee/ViewAllActivitiesM
 import Toast from "../../components/shared/Toast";
 import NotificationModal from '../../components/NotificationModal';
 import { logger } from '../../utils/logger';
+import { getActiveEventId } from '../../lib/currentEvent';
 
 // --- Animation Variants ---
 const containerVariants: Variants = {
@@ -54,6 +55,7 @@ interface AttendeeWithProfile {
 
 export const VerificationDashboard: React.FC = () => {
     const { profile, loading: authLoading, refreshProfile } = useAuth();
+    const EVENT_ID = profile?.event_id || getActiveEventId();
     useTheme();
     const [activeTab, setActiveTab] = useState('home');
     const [showProfile, setShowProfile] = useState(false);
@@ -174,7 +176,7 @@ export const VerificationDashboard: React.FC = () => {
         try {
             const [statsResult, activitiesResult] = await Promise.all([
                 getVolunteerStatsRPC(userId),
-                supabase.rpc('get_my_activities', { p_limit: 3 })
+                supabase.rpc('get_my_activities', { p_limit: 3, p_event_id: profile.event_id })
             ]);
 
             // Process Stats
@@ -838,7 +840,7 @@ export const VerificationDashboard: React.FC = () => {
                 <motion.div key={activeTab} className="h-full">
                     {activeTab === 'home' && renderHomeTab()}
                     {(activeTab === 'verification-asu' || activeTab === 'verification-others') && renderVerificationTab()}
-                    {activeTab === 'feedback' && <FeedbackTab subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
+                    {activeTab === 'feedback' && <FeedbackTab eventId={EVENT_ID} subtitle="Tell us how the event went for you as a volunteer. Your answers help us improve." />}
                 </motion.div>
             </AnimatePresence>
 
