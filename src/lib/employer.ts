@@ -30,6 +30,8 @@ export interface EmployerStatus {
     gender: string | null;
   } | null;
   events: EmployerEvent[];
+  /** Still using the temporary password an admin was shown: must set their own first. */
+  must_change_password?: boolean;
 }
 
 export const getEmployerStatus = async (): Promise<EmployerStatus | null> => {
@@ -63,6 +65,33 @@ export const completeEmployerProfile = async (
   });
   if (error) return { success: false, error: error.message };
   if (!data?.success) return { success: false, error: data?.error || 'Could not save your details', field: data?.field };
+  return { success: true };
+};
+
+/** Password rules for employers replacing their temporary password. */
+export const validateNewEmployerPassword = (password: string, confirm: string, email?: string | null): string | null => {
+  if (password.length < 10) return 'Use at least 10 characters.';
+  if (password.length > 72) return 'Use at most 72 characters.';
+  // Must also satisfy the sign-in rules (validatePassword), or they could set a
+  // password the login form refuses.
+  if (!/[a-z]/.test(password)) return 'Use at least one lowercase letter.';
+  if (!/[A-Z]/.test(password)) return 'Use at least one capital letter.';
+  if (!/\d/.test(password)) return 'Use at least one number.';
+  if (!/[@$!%*?&]/.test(password)) return 'Use at least one special character (@ $ ! % * ? &).';
+  if (email && password.toLowerCase().includes(email.split('@')[0].toLowerCase())) return "Don't use your email name in the password.";
+  if (password !== confirm) return 'The two passwords do not match.';
+  return null;
+};
+
+/** Replaces the temporary password. The database then unlocks the employer account. */
+export const setEmployerPassword = async (password: string): Promise<{ success: boolean; error?: string }> => {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    logger.error('[EMPLOYER] could not set password', error);
+    return { success: false, error: /same|different/i.test(error.message)
+      ? 'Choose a password different from the temporary one.'
+      : error.message || 'Could not save the password. Please try again.' };
+  }
   return { success: true };
 };
 

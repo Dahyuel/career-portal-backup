@@ -5,14 +5,14 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { LoginData, ValidationError } from '../types';
 import { validateEmail, validatePassword } from '../utils/validation';
-import { signInUser } from '../lib/supabase';
+import { signInUser, supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { logger } from '../utils/logger';
 import { sanitizeEmail } from '../utils/sanitize';
 
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated, sessionLoaded, profile, getRoleBasedRedirect } = useAuth();
+  const { isAuthenticated, sessionLoaded, profile, getRoleBasedRedirect, refreshProfile } = useAuth();
 
   const [formData, setFormData] = useState<LoginData>({
     email: '',
@@ -107,12 +107,34 @@ export const LoginForm: React.FC = () => {
 
       logger.log('✅ Auth successful — waiting for AuthContext to publish the live profile...');
 
-      // Routing is driven ONLY by the authoritative profile from the live RPC
-      // (the safety-net useEffect above fires once `profile` is set).
-      // localStorage is deliberately NOT polled: it is not a trusted source for
-      // role-based routing. /select-event is the safe landing for every
-      // non-super-admin; ProtectedRoute redirects admins once resolved.
+      // Super admins skip event selection. Their global role is read from the
+      // database (own user_roles row), not from any cached profile.
+      const { data: sadminRow, error: sadminError } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', result.data.user.id)
+        .eq('role', 'sadmin')
+        .is('event_id', null)
+        .maybeSingle();
+
+      if (sadminError) logger.warn('Could not check the super admin role:', sadminError);
+
       setIsRedirecting(true);
+      if (sadminRow) {
+        // Replace any profile cached from an earlier session, so ProtectedRoute
+        // does not route on a stale role, then open the dashboard.
+        const live = await refreshProfile(undefined, result.data.user.id, result.data.user.email ?? '', true);
+        if (!live?.role) {
+          // A parallel fetch (AuthContext SIGNED_IN) usually resolves it a moment later
+          logger.warn('Super admin profile not ready yet; opening the dashboard anyway');
+        }
+        logger.log('➡️ super admin → dashboard');
+        navigate(getRoleBasedRedirect('sadmin'), { replace: true });
+        return;
+      }
+
+      // Routing for everyone else is driven by the live profile on
+      // /select-event; localStorage is not trusted for role-based routing.
       navigate('/select-event', { replace: true });
 
     } catch (error: any) {

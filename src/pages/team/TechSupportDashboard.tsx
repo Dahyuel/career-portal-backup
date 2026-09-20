@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import FeedbackTab from '../../components/shared/FeedbackTab';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
@@ -190,6 +191,7 @@ const UserResultCard: React.FC<UserResultCardProps> = ({ user, onChangeRole, onD
 
 // ─── Main Dashboard Component ──────────────────────────────────────────────────
 export const TechSupportDashboard: React.FC = () => {
+  const { title: eventTitle } = useEventBranding();
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' | 'warning' } | null>(null);
@@ -751,7 +753,7 @@ export const TechSupportDashboard: React.FC = () => {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="ASU Career Expo"
+      title={eventTitle}
       hideDock={false}
       onProfileClick={() => setShowProfile(true)}
     >

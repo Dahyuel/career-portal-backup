@@ -33,6 +33,14 @@ export const EventSelection: React.FC = () => {
   // row yet. Selecting one runs employer_open_event.
   const [employerOpenable, setEmployerOpenable] = useState<Set<string>>(new Set());
 
+  // Login sends everyone here; super admins don't pick an event, they go
+  // straight to their dashboard (even if they also hold an event role).
+  useEffect(() => {
+    if (profile?.role === 'sadmin' || profile?.role === 'super_admin') {
+      navigate(getRoleBasedRedirect(profile.role), { replace: true });
+    }
+  }, [profile?.role, navigate, getRoleBasedRedirect]);
+
   useEffect(() => {
     const loadEvents = async () => {
       try {
@@ -55,6 +63,12 @@ export const EventSelection: React.FC = () => {
           const fallbackId = getActiveEventId();
           logger.warn('EventSelection: using system_config fallback', fallbackId);
           setError(fetchError.message);
+          return;
+        }
+
+        // Admin-created employer accounts must replace their temporary password first
+        if (employerStatus?.must_change_password) {
+          navigate('/employer-start', { replace: true });
           return;
         }
 
@@ -108,7 +122,7 @@ export const EventSelection: React.FC = () => {
     };
 
     loadEvents();
-  }, [profile?.employer]);
+  }, [profile?.employer, navigate]);
 
   const handleSelectEvent = async (event: PickableEvent) => {
     if (!user) return;
@@ -138,7 +152,10 @@ export const EventSelection: React.FC = () => {
           return;
         }
 
-        const role = registration.role || updated.role || 'attendee';
+        // A super admin keeps their dashboard even if they also hold a role in
+        // this event (e.g. tech support); otherwise the event's role decides.
+        const isSuperAdmin = updated.role === 'sadmin' || updated.role === 'super_admin';
+        const role = isSuperAdmin ? updated.role : (registration.role || updated.role || 'attendee');
         const redirectPath = getRoleBasedRedirect(role);
         logger.log(`✅ Event ${event.id} bound. Redirecting ${role} → ${redirectPath}`);
         navigate(redirectPath, { replace: true });

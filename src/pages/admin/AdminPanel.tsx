@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
@@ -77,6 +78,8 @@ interface Company {
   company_key: string | null;
   created_at: string | null;
   faculties: string[] | null;
+  /** false when an employer added their company to this event; hidden until approved */
+  is_active?: boolean | null;
   employers?: CompanyEmployer[];
 }
 
@@ -710,6 +713,7 @@ const CompanyLogoSelector: React.FC<{
   );
 };
 export function AdminPanel() {
+  const { title: eventTitle } = useEventBranding();
   useTheme();
 
   // Whatever the super admin has made the current event. Read here (not at module
@@ -897,6 +901,7 @@ export function AdminPanel() {
   const [librarySearch, setLibrarySearch] = useState('');
   const [librarySelection, setLibrarySelection] = useState<string[]>([]);
   const [isLinkingCompanies, setIsLinkingCompanies] = useState(false);
+  const [approvingCompanyId, setApprovingCompanyId] = useState<string | null>(null);
 
   // Add Company form state
   const [companyForm, setCompanyForm] = useState({
@@ -1629,6 +1634,26 @@ export function AdminPanel() {
       setToast({ show: true, message: err.message || 'Failed to remove employer', type: 'error' });
     } finally {
       setRemovingEmployerId(null);
+    }
+  };
+
+  // ===== APPROVE A SELF-JOINED COMPANY =====
+  // admin_link_companies sets is_active = true on an existing participation.
+  const handleApproveCompany = async (companyId: string, companyName: string) => {
+    setApprovingCompanyId(companyId);
+    try {
+      const { data, error } = await supabase.rpc('admin_link_companies', {
+        _event_id: EVENT_ID,
+        _company_ids: [companyId]
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not approve the company');
+      setToast({ show: true, message: `${companyName} is now visible in this event`, type: 'success' });
+      await fetchCompanies();
+    } catch (err: any) {
+      setToast({ show: true, message: err.message || 'Could not approve the company', type: 'error' });
+    } finally {
+      setApprovingCompanyId(null);
     }
   };
 
@@ -3396,6 +3421,23 @@ export function AdminPanel() {
                 </div>
               )}
 
+              {/* Joined by one of its employers: hidden from attendees until approved */}
+              {company.is_active === false && (
+                <div className="mb-4 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()}>
+                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                    Joined by an employer. Hidden until you approve it.
+                  </span>
+                  <button
+                    onClick={() => handleApproveCompany(company.id, company.company_name)}
+                    disabled={approvingCompanyId === company.id}
+                    className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 disabled:opacity-50 transition-colors"
+                  >
+                    {approvingCompanyId === company.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Approve
+                  </button>
+                </div>
+              )}
+
               {/* Employers */}
               <div className="flex items-center justify-between mb-4 px-3 py-2 bg-slate-50 dark:bg-slate-900/50 rounded-xl">
                 <span className="text-sm text-slate-600 dark:text-slate-400 flex items-center gap-2">
@@ -4902,7 +4944,7 @@ export function AdminPanel() {
                           </p>
                         )}
                         <p className="mt-1 text-xs text-green-700 dark:text-green-300">
-                          This password won't be shown again. The employer logs in at /login and fills in their own details.
+                          This temporary password is shown only once and expires in 7 days. At first login the employer must replace it with their own, then fills in their details.
                         </p>
                       </>
                     ) : (
@@ -6699,7 +6741,7 @@ export function AdminPanel() {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="ASU Career Expo"
+      title={eventTitle}
       hideNotifications={true}
       eventId={EVENT_ID}
     >

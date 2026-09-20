@@ -12,10 +12,12 @@ interface Props {
   onResetAuthenticator: () => Promise<void>;
   /** Whether a super admin must enter an authenticator code for this dashboard. */
   twoFaRequired: boolean;
+  /** When the code requirement switches itself back on (while it is off). */
+  twoFaOffUntil?: string | null;
   onRequirementChanged: () => Promise<void> | void;
 }
 
-const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthenticator, twoFaRequired, onRequirementChanged }) => {
+const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthenticator, twoFaRequired, twoFaOffUntil, onRequirementChanged }) => {
   const [dialog, setDialog] = useState<'reset' | 'signout' | 'secret' | 'disable2fa' | null>(null);
   const [busy, setBusy] = useState(false);
   const [newKey, setNewKey] = useState('');
@@ -140,7 +142,7 @@ const SecurityCenter: React.FC<Props> = ({ notify, totpFactor, onResetAuthentica
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
                 {twoFaRequired
                   ? 'Every super admin enters a code from their authenticator app to open this dashboard.'
-                  : 'No code is asked for. Anyone who signs in to a super admin account has full control. Turn this back on before going live.'}
+                  : `No code is asked for. Anyone who signs in to a super admin account has full control.${twoFaOffUntil ? ` It switches itself back on ${formatDateTime(twoFaOffUntil)}.` : ''}`}
               </p>
               <div className="mt-3">
                 <Toggle

@@ -6,6 +6,7 @@ import {
 } from './sadminApi';
 import { Badge, ConfirmDialog, EmptyState, ErrorBlock, LoadingBlock, MIcon, PageHeader, RefreshButton } from './ui';
 import { EVENT_TYPE_LABELS } from '../../lib/landingContent';
+import { COLOUR_PRESETS, DEFAULT_ACCENT, isHexColour } from '../../lib/theme';
 import EventEditor from './EventEditor';
 
 interface NewEventForm {
@@ -15,9 +16,11 @@ interface NewEventForm {
   end_date: string;
   venue_name: string;
   copy_from: string;
+  /** Main colour of the event: dashboards and the landing page follow it. */
+  accent: string;
 }
 
-const EMPTY_FORM: NewEventForm = { name: '', event_type: 'career_fair', start_date: '', end_date: '', venue_name: '', copy_from: '' };
+const EMPTY_FORM: NewEventForm = { name: '', event_type: 'career_fair', start_date: '', end_date: '', venue_name: '', copy_from: '', accent: DEFAULT_ACCENT };
 
 const statusLabel = (status: string | null) => (status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Draft');
 
@@ -68,6 +71,16 @@ const EventsManager: React.FC<{ notify: Notify }> = ({ notify }) => {
         _details: { name: form.name.trim(), event_type: form.event_type, start_date: start, end_date: end, venue_name: form.venue_name.trim() },
         _copy_from: form.copy_from || null
       }, 'Could not create the event.');
+      // The colour lives with the landing page content, so the public site and
+      // every dashboard of this event use the same one.
+      if (isHexColour(form.accent) && form.accent.toLowerCase() !== DEFAULT_ACCENT) {
+        try {
+          await callSadmin('sadmin_set_event_theme', { _event_id: r.id, _theme: { accent: form.accent.toLowerCase() } }, 'Could not save the colour.');
+        } catch (themeErr) {
+          notify(errorText(themeErr, 'The event was created, but its colour was not saved.'), 'warning');
+        }
+      }
+
       notify(`Event created${r.teams ? ` with ${r.teams} teams` : ''}. It stays hidden until you make it current.`, 'success');
       setCreating(false);
       setOpenId(r.id);
@@ -171,6 +184,34 @@ const EventsManager: React.FC<{ notify: Notify }> = ({ notify }) => {
         <div>
           <label className={labelClass}>Venue</label>
           <input value={form.venue_name} maxLength={200} onChange={(e) => setForm({ ...form, venue_name: e.target.value })} className={inputClass} />
+        </div>
+        <div>
+          <label className={labelClass}>Main colour</label>
+          <div className="flex flex-wrap items-center gap-2">
+            {COLOUR_PRESETS.map((preset) => (
+              <button
+                key={preset.hex}
+                type="button"
+                onClick={() => setForm({ ...form, accent: preset.hex })}
+                className={`w-9 h-9 rounded-xl border-2 transition-transform ${form.accent.toLowerCase() === preset.hex.toLowerCase() ? 'border-slate-900 dark:border-white scale-110' : 'border-transparent'}`}
+                style={{ backgroundColor: preset.hex }}
+                title={preset.label}
+                aria-label={preset.label}
+              />
+            ))}
+            <input
+              type="color"
+              value={isHexColour(form.accent) ? form.accent : DEFAULT_ACCENT}
+              onChange={(e) => setForm({ ...form, accent: e.target.value })}
+              className="w-9 h-9 rounded-xl bg-transparent cursor-pointer"
+              title="Pick any colour"
+              aria-label="Pick any colour"
+            />
+            <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{form.accent}</span>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Used by this event's landing page and by every dashboard (admin, teams, employers, attendees). You can change it later in the event's landing page editor.
+          </p>
         </div>
         <div>
           <label className={labelClass}>Start from</label>

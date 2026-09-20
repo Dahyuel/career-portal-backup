@@ -44,21 +44,27 @@ interface DetailsForm {
   status: string;
   allow_non_asu_attendees: boolean;
   non_asu_ticket_price: string;
+  accent: string;
 }
 
-const toForm = (e: EventDetail['event']): DetailsForm => ({
-  name: e.name ?? '',
-  event_type: e.event_type ?? 'career_fair',
-  venue_name: e.venue_name ?? '',
-  start_date: toLocalInput(e.start_date),
-  end_date: toLocalInput(e.end_date),
-  status: e.status ?? 'draft',
-  allow_non_asu_attendees: !!e.allow_non_asu_attendees,
-  non_asu_ticket_price: e.non_asu_ticket_price === null || e.non_asu_ticket_price === undefined ? '' : String(e.non_asu_ticket_price)
-});
+const toForm = (detail: EventDetail): DetailsForm => {
+  const e = detail.event;
+  const theme = detail.landing?.theme as Record<string, string> | undefined;
+  return {
+    name: e.name ?? '',
+    event_type: e.event_type ?? 'career_fair',
+    venue_name: e.venue_name ?? '',
+    start_date: toLocalInput(e.start_date),
+    end_date: toLocalInput(e.end_date),
+    status: e.status ?? 'draft',
+    allow_non_asu_attendees: !!e.allow_non_asu_attendees,
+    non_asu_ticket_price: e.non_asu_ticket_price === null || e.non_asu_ticket_price === undefined ? '' : String(e.non_asu_ticket_price),
+    accent: theme?.accent ?? '#8C1D40'
+  };
+};
 
 const DetailsEditor: React.FC<{ detail: EventDetail; notify: Notify; onSaved: () => void }> = ({ detail, notify, onSaved }) => {
-  const original = toForm(detail.event);
+  const original = toForm(detail);
   const [form, setForm] = useState<DetailsForm>(original);
   const [busy, setBusy] = useState(false);
 
@@ -74,11 +80,18 @@ const DetailsEditor: React.FC<{ detail: EventDetail; notify: Notify; onSaved: ()
     changes.non_asu_ticket_price = form.non_asu_ticket_price === '' ? 0 : Number(form.non_asu_ticket_price);
   }
   const changed = Object.keys(changes).length > 0;
+  const accentChanged = form.accent !== original.accent;
+  const isDirty = changed || accentChanged;
 
   const save = async () => {
     setBusy(true);
     try {
-      await callSadmin('sadmin_update_event_settings', { _event_id: detail.event.id, _settings: changes }, 'Could not save the event details.');
+      if (changed) {
+        await callSadmin('sadmin_update_event_settings', { _event_id: detail.event.id, _settings: changes }, 'Could not save the event details.');
+      }
+      if (accentChanged) {
+        await callSadmin('sadmin_set_event_theme', { _event_id: detail.event.id, _theme: { accent: form.accent } }, 'Could not save the theme colour.');
+      }
       notify('Event details saved.', 'success');
       onSaved();
     } catch (err) {
@@ -125,6 +138,28 @@ const DetailsEditor: React.FC<{ detail: EventDetail; notify: Notify; onSaved: ()
           </select>
         </div>
         <div>
+          <label className={labelClass}>Dashboard & Theme Colour</label>
+          <div className="flex gap-3 items-center mt-1">
+            <input
+              type="color"
+              value={form.accent}
+              onChange={(e) => setForm({ ...form, accent: e.target.value })}
+              className="w-10 h-10 rounded-lg cursor-pointer shrink-0 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-0.5"
+            />
+            <input
+              type="text"
+              value={form.accent.toUpperCase()}
+              onChange={(e) => setForm({ ...form, accent: e.target.value })}
+              className={inputClass}
+              placeholder="#8C1D40"
+              maxLength={7}
+            />
+          </div>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Changes the accent colour across all dashboards (Admin, Employer, Attendee, etc.) for this event.
+          </p>
+        </div>
+        <div>
           <label className={labelClass}>Ticket price for non-ASU attendees</label>
           <input
             type="number"
@@ -144,8 +179,8 @@ const DetailsEditor: React.FC<{ detail: EventDetail; notify: Notify; onSaved: ()
         </div>
       </div>
       <div className="flex justify-end gap-2 mt-5">
-        <button className={buttonClass.ghost} disabled={!changed || busy} onClick={() => setForm(original)}>Discard</button>
-        <button className={buttonClass.primary} disabled={!changed || busy} onClick={save}>Save details</button>
+        <button className={buttonClass.ghost} disabled={!isDirty || busy} onClick={() => setForm(original)}>Discard</button>
+        <button className={buttonClass.primary} disabled={!isDirty || busy} onClick={save}>Save details</button>
       </div>
     </Panel>
   );

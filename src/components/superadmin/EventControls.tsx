@@ -21,6 +21,7 @@ import {
   type Notify
 } from './sadminApi';
 import { Badge, ConfirmDialog, ErrorBlock, LoadingBlock, MIcon, PageHeader, Panel, RefreshButton, Toggle } from './ui';
+import { COLOUR_PRESETS, DEFAULT_ACCENT, isHexColour, normaliseHex, buildThemeVars } from '../../lib/theme';
 
 const DEFAULT_MESSAGE = 'System is under maintenance. Please try again later.';
 const STATUS_OPTIONS = ['draft', 'published', 'ongoing', 'completed', 'cancelled'];
@@ -95,6 +96,11 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
   const [form, setForm] = useState<EventForm | null>(null);
   const [saveDialog, setSaveDialog] = useState(false);
 
+  // Dashboard theme state
+  const [accentColor, setAccentColor] = useState(DEFAULT_ACCENT);
+  const [savedAccent, setSavedAccent] = useState(DEFAULT_ACCENT);
+  const [savingTheme, setSavingTheme] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     callSadmin<{ events: EventSummary[] }>('sadmin_list_events', undefined, 'Could not load the events.')
@@ -123,6 +129,17 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
         return [s.key, { opens_at: toLocalInput(c.opens_at), closes_at: toLocalInput(c.closes_at) }];
       })));
       setError(null);
+
+      // Load the current accent colour from the event's landing content.
+      try {
+        const eventDetail = await callSadmin<{ event: Record<string, unknown>; landing: Record<string, unknown> | null }>('sadmin_get_event', { _event_id: targetEventId }, '');
+        const theme = eventDetail?.landing?.theme as Record<string, unknown> | null | undefined;
+        const accent = normaliseHex(theme?.accent as string | undefined);
+        setAccentColor(accent);
+        setSavedAccent(accent);
+      } catch {
+        // Not critical — the colour picker stays at the default.
+      }
     } catch (err) {
       setError(errorText(err, 'Could not load the event settings.'));
     } finally {
@@ -424,6 +441,146 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
         <div className="flex justify-end gap-2 mt-5">
           <button className={buttonClass.ghost} disabled={changedKeys.length === 0 || busy} onClick={() => setForm(original)}>Discard</button>
           <button className={buttonClass.primary} disabled={changedKeys.length === 0 || busy} onClick={() => setSaveDialog(true)}>Save changes</button>
+        </div>
+      </Panel>
+
+      {/* Dashboard Theme — accent colour for all dashboards */}
+      <Panel
+        title={`Dashboard theme · ${selectedEventName}`}
+        subtitle="Choose the accent colour for all dashboards (attendee, admin, employer, volunteer). The landing page follows the same colour."
+        actions={accentColor !== savedAccent ? <Badge tone="amber">Unsaved</Badge> : <Badge tone="green">Saved</Badge>}
+      >
+        <div className="space-y-5">
+          {/* Preset colour swatches */}
+          <div>
+            <label className={labelClass}>Preset colours</label>
+            <div className="flex flex-wrap gap-3 mt-2">
+              {COLOUR_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  onClick={() => setAccentColor(preset.hex)}
+                  className={`group relative flex flex-col items-center gap-1.5 transition-transform ${
+                    accentColor === preset.hex ? 'scale-110' : 'hover:scale-105'
+                  }`}
+                  title={preset.label}
+                >
+                  <div
+                    className={`w-10 h-10 rounded-full border-2 transition-all shadow-md ${
+                      accentColor === preset.hex
+                        ? 'border-white ring-2 ring-offset-2 ring-offset-slate-900 ring-white/60 scale-110'
+                        : 'border-slate-600 hover:border-slate-400'
+                    }`}
+                    style={{ backgroundColor: preset.hex }}
+                  />
+                  <span className={`text-[10px] font-medium ${
+                    accentColor === preset.hex ? 'text-white' : 'text-slate-400'
+                  }`}>{preset.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom hex input */}
+          <div className="flex items-end gap-3">
+            <div className="flex-1 max-w-xs">
+              <label className={labelClass}>Custom colour (hex)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={accentColor}
+                  onChange={(e) => setAccentColor(e.target.value)}
+                  className="w-10 h-10 rounded-lg border border-slate-600 cursor-pointer bg-transparent p-0.5"
+                />
+                <input
+                  value={accentColor}
+                  maxLength={7}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v.length <= 7) setAccentColor(v);
+                  }}
+                  className={inputClass + ' font-mono'}
+                  placeholder="#dc2626"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Live preview strip */}
+          <div>
+            <label className={labelClass}>Preview</label>
+            <div className="flex gap-1 mt-2 rounded-xl overflow-hidden">
+              {[50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950].map((shade) => {
+                const vars = buildThemeVars({ accent: accentColor });
+                const rgb = vars[`--a-${shade}-rgb`];
+                return (
+                  <div
+                    key={shade}
+                    className="flex-1 h-8 first:rounded-l-lg last:rounded-r-lg relative group"
+                    style={{ backgroundColor: rgb ? `rgb(${rgb})` : undefined }}
+                    title={`${shade}`}
+                  >
+                    <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold opacity-0 group-hover:opacity-100 transition-opacity text-white drop-shadow">
+                      {shade}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex gap-3 mt-3">
+              {(() => {
+                const vars = buildThemeVars({ accent: accentColor });
+                const bg600 = vars['--a-600-rgb'] ? `rgb(${vars['--a-600-rgb']})` : accentColor;
+                const bg700 = vars['--a-700-rgb'] ? `rgb(${vars['--a-700-rgb']})` : accentColor;
+                return (
+                  <>
+                    <div className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: bg600 }}>
+                      Sample Button
+                    </div>
+                    <div className="rounded-lg px-4 py-2 text-sm font-semibold text-white" style={{ backgroundColor: bg700 }}>
+                      Sample Dark
+                    </div>
+                    <div className="rounded-lg px-4 py-2 text-sm font-semibold border-2" style={{ borderColor: bg600, color: bg600 }}>
+                      Outline
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Save / discard buttons */}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              className={buttonClass.ghost}
+              disabled={accentColor === savedAccent || savingTheme}
+              onClick={() => setAccentColor(savedAccent)}
+            >
+              Discard
+            </button>
+            <button
+              className={buttonClass.primary}
+              disabled={accentColor === savedAccent || !isHexColour(accentColor) || savingTheme}
+              onClick={async () => {
+                setSavingTheme(true);
+                try {
+                  await callSadmin('sadmin_set_event_theme', {
+                    _event_id: targetEventId,
+                    _theme: { accent: accentColor.toLowerCase() }
+                  }, 'Could not save the dashboard theme.');
+                  setSavedAccent(accentColor);
+                  notify(`Dashboard colour updated to ${accentColor}. All dashboards will reflect this colour.`, 'success');
+                } catch (err) {
+                  notify(errorText(err, 'Could not save the dashboard theme.'), 'error');
+                } finally {
+                  setSavingTheme(false);
+                }
+              }}
+            >
+              <MIcon name="palette" className="text-lg" />
+              {savingTheme ? 'Saving...' : 'Save colour'}
+            </button>
+          </div>
         </div>
       </Panel>
 

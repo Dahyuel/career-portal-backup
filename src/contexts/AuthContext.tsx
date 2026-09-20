@@ -102,6 +102,8 @@ type AuthContextType = {
   getRoleBasedRedirect: (role?: string) => string;
   cleanupSession: () => Promise<void>;
   handleAuthError: (error: any) => Promise<void>;
+  /** Why the last profile load failed, for the "profile could not be loaded" screen. */
+  profileError: string | null;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -165,6 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [user, setUser] = useState<User | null>(initialSession.user);
   const [profile, setProfile] = useState<UserProfile | null>(initialSession.profile);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -210,19 +213,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const currentProfile = profileRef.current;
 
         // ── No event selected yet ────────────────────────────────────────
-        // get_my_profile is event-scoped and raises 'Event is required' when
-        // called with a null event_id. During the "logged in but hasn't
-        // picked an event" phase we must not call it at all. Routing is
-        // driven by EventSelection, which passes a real event id when the
-        // user clicks one. Keep any already-event-scoped profile if it
-        // matches this user.
-        if (!eventId) {
-          if (currentProfile?.id === userId && currentProfile.event_id) {
-            logger.log('📦 No event selected — keeping existing event-scoped profile');
-            return currentProfile;
-          }
-          logger.log('⏭️ No event selected yet — skipping get_my_profile');
-          return null;
+        // get_my_profile is event-scoped. Super admins never pick an event, so
+        // it answers them from the active event when called with a null
+        // event_id; for everyone else it raises 'Event is required' (22004),
+        // which is handled below as "hasn't picked an event yet". Keep any
+        // already-event-scoped profile if it matches this user.
+        if (!eventId && currentProfile?.id === userId && currentProfile.event_id) {
+          logger.log('📦 No event selected — keeping existing event-scoped profile');
+          return currentProfile;
         }
 
         // Return cache if same event and same user (unless forced)
@@ -247,15 +245,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .single();
 
         if (error) {
+          // 22004 = "Event is required": this user must pick an event first
+          // (super admins are answered from the active event instead).
+          if (error.code === '22004' || /event is required/i.test(error.message || '')) {
+            logger.log('⏭️ No event selected yet — profile comes after selection');
+            return null;
+          }
           logger.error("❌ RPC Error fetching user profile:", {
             code: error.code, message: error.message,
             details: error.details, hint: error.hint,
           });
+          setProfileError(`${error.code ? error.code + ': ' : ''}${error.message || 'profile request failed'}`);
           return null;
         }
 
         if (!data) {
           logger.warn("⚠️ RPC returned no data");
+          setProfileError('The profile request returned no data.');
           return null;
         }
 
@@ -271,6 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (!rpcData.profile) {
           logger.warn("⚠️ No profile data in RPC response");
+          setProfileError('The server returned no profile for this account.');
           return null;
         }
 
@@ -349,6 +356,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return userProfile;
       } catch (err) {
         logger.error("💥 Exception fetching user profile:", err);
+        setProfileError(err instanceof Error ? err.message : 'profile request failed');
         return null;
       }
     },
@@ -608,10 +616,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isAuthenticated: !!user,
       isLoggingOut, signOut, cleanupSession,
       hasRole, hasAnyRole, getRoleBasedRedirect,
-      refreshProfile, handleAuthError
+      refreshProfile, handleAuthError, profileError
     }),
     [user, profile, loading, sessionLoaded, isLoggingOut, signOut, cleanupSession,
-      hasRole, hasAnyRole, getRoleBasedRedirect, refreshProfile, handleAuthError]
+      hasRole, hasAnyRole, getRoleBasedRedirect, refreshProfile, handleAuthError, profileError]
   );
 
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;

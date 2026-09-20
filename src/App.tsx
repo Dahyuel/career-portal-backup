@@ -3,6 +3,7 @@ import React, { Suspense, useLayoutEffect, useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { EventBrandingProvider } from './contexts/EventBrandingContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import { supabase } from './lib/supabase';
 import { ResetPasswordForm } from './components/ResetPasswordForm';
@@ -391,9 +392,11 @@ function App() {
     <ThemeProvider>
       <Router>
         <AuthProvider>
-          <AppRouter />
-          <LogoutPopup />
-          <MaintenanceGuard />
+          <EventBrandingProvider>
+            <AppRouter />
+            <LogoutPopup />
+            <MaintenanceGuard />
+          </EventBrandingProvider>
         </AuthProvider>
       </Router>
     </ThemeProvider>

@@ -14,11 +14,12 @@ import { SearchableSelect } from '../../components/shared/SearchableSelect';
 import { GENDER_OPTIONS, NATIONALITY_OPTIONS } from '../../components/UnifiedAttendeeRegistration';
 import { validatePhone, validatePersonalId } from '../../utils/validation';
 import {
-  EmployerEvent, EmployerStatus, completeEmployerProfile, getEmployerStatus, openEmployerEvent
+  EmployerEvent, EmployerStatus, completeEmployerProfile, getEmployerStatus, openEmployerEvent,
+  setEmployerPassword, validateNewEmployerPassword
 } from '../../lib/employer';
 import { logger } from '../../utils/logger';
 
-type FormField = 'fullName' | 'phone' | 'personalId' | 'nationality' | 'gender' | 'jobTitle' | 'general';
+type FormField = 'fullName' | 'phone' | 'personalId' | 'nationality' | 'gender' | 'jobTitle' | 'password' | 'general';
 
 const formatDate = (value: string | null) =>
   value ? new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
@@ -44,6 +45,10 @@ export const EmployerStart: React.FC = () => {
   });
   const [errors, setErrors] = useState<Partial<Record<FormField, string>>>({});
   const [saving, setSaving] = useState(false);
+
+  // Admin-created accounts replace their temporary password in the same form
+  const [newPassword, setNewPassword] = useState('');
+  const [newPasswordRepeat, setNewPasswordRepeat] = useState('');
 
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -81,41 +86,69 @@ export const EmployerStart: React.FC = () => {
     setErrors((prev) => ({ ...prev, [field]: undefined, general: undefined }));
   };
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  // One form for first login: details (if missing) + new password (if still on
+  // the temporary one). The password is saved first: the server refuses the
+  // profile update until the temporary password has been replaced.
+  const handleSaveSetup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving) return;
+    if (saving || !status) return;
+
+    const needsPassword = !!status.must_change_password;
+    const needsProfile = !status.profile_complete;
 
     const errs: Partial<Record<FormField, string>> = {};
-    if (form.fullName.trim().length < 2) errs.fullName = 'Full name is required';
-    const phoneErr = validatePhone(form.phone);
-    if (phoneErr) errs.phone = phoneErr;
-    if (!form.nationality) errs.nationality = 'Nationality is required';
-    if (form.nationality === 'egyptian') {
-      const idErr = validatePersonalId(form.personalId);
-      if (idErr) errs.personalId = idErr;
-    } else if (!form.personalId.trim()) {
-      errs.personalId = 'Personal ID / Passport number is required';
+    if (needsProfile) {
+      if (form.fullName.trim().length < 2) errs.fullName = 'Full name is required';
+      const phoneErr = validatePhone(form.phone);
+      if (phoneErr) errs.phone = phoneErr;
+      if (!form.nationality) errs.nationality = 'Nationality is required';
+      if (form.nationality === 'egyptian') {
+        const idErr = validatePersonalId(form.personalId);
+        if (idErr) errs.personalId = idErr;
+      } else if (!form.personalId.trim()) {
+        errs.personalId = 'Personal ID / Passport number is required';
+      }
+      if (!form.gender) errs.gender = 'Gender is required';
+      if (!form.jobTitle.trim()) errs.jobTitle = 'Job title is required';
     }
-    if (!form.gender) errs.gender = 'Gender is required';
-    if (!form.jobTitle.trim()) errs.jobTitle = 'Job title is required';
+    if (needsPassword) {
+      const problem = validateNewEmployerPassword(newPassword, newPasswordRepeat, user?.email);
+      if (problem) errs.password = problem;
+    }
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
     setSaving(true);
-    const result = await completeEmployerProfile({
-      fullName: form.fullName.trim(),
-      phone: form.phone.replace(/\D/g, ''),
-      personalId: form.personalId.trim(),
-      nationality: form.nationality,
-      gender: form.gender,
-      jobTitle: form.jobTitle.trim()
-    });
-    setSaving(false);
+    try {
+      if (needsPassword) {
+        const pw = await setEmployerPassword(newPassword);
+        if (!pw.success) {
+          setErrors({ password: pw.error || 'Could not save the password.' });
+          return;
+        }
+        setNewPassword('');
+        setNewPasswordRepeat('');
+      }
 
-    if (!result.success) {
-      const field = (result.field as FormField) || 'general';
-      setErrors({ [field in form ? field : 'general']: result.error });
-      return;
+      if (needsProfile) {
+        const result = await completeEmployerProfile({
+          fullName: form.fullName.trim(),
+          phone: form.phone.replace(/\D/g, ''),
+          personalId: form.personalId.trim(),
+          nationality: form.nationality,
+          gender: form.gender,
+          jobTitle: form.jobTitle.trim()
+        });
+        if (!result.success) {
+          const field = (result.field as FormField) || 'general';
+          setErrors({ [field in form ? field : 'general']: result.error });
+          // The password may already be saved; reload so only the details remain
+          await load();
+          return;
+        }
+      }
+    } finally {
+      setSaving(false);
     }
     await load();
   };
@@ -147,7 +180,7 @@ export const EmployerStart: React.FC = () => {
   }, [user, openingId, refreshProfile, navigate]);
 
   useEffect(() => {
-    if (!status?.profile_complete || !targetEventId || autoOpenedRef.current) return;
+    if (!status?.profile_complete || status.must_change_password || !targetEventId || autoOpenedRef.current) return;
     const ev = status.events.find((e) => e.event_id === targetEventId);
     if (ev) {
       autoOpenedRef.current = true;
@@ -164,7 +197,10 @@ export const EmployerStart: React.FC = () => {
     return <DashboardLoading message="Loading your account..." />;
   }
 
-  const showProfileForm = !!status && !status.profile_complete;
+  const needsPassword = !!status?.must_change_password;
+  const needsProfile = !!status && !status.profile_complete;
+  const showProfileForm = needsPassword || needsProfile;
+  const showEvents = !!status && !showProfileForm;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950 flex items-center justify-center p-4">
@@ -190,13 +226,15 @@ export const EmployerStart: React.FC = () => {
           </h1>
           <p className="text-red-100 text-sm">
             {showProfileForm
-              ? 'Welcome! Fill in your details once to continue.'
+              ? needsPassword
+                ? 'Welcome! Fill in your details and choose your own password.'
+                : 'Fill in your details once to continue.'
               : 'Choose the event you want to open.'}
           </p>
           {status && (
             <div className="mt-4 flex justify-center gap-2 text-xs font-semibold" aria-hidden="true">
               <span className={`px-3 py-1 rounded-full ${showProfileForm ? 'bg-white text-asu-red' : 'bg-white/20 text-white'}`}>1. Your details</span>
-              <span className={`px-3 py-1 rounded-full ${!showProfileForm ? 'bg-white text-asu-red' : 'bg-white/20 text-white'}`}>2. Event</span>
+              <span className={`px-3 py-1 rounded-full ${showEvents ? 'bg-white text-asu-red' : 'bg-white/20 text-white'}`}>2. Event</span>
             </div>
           )}
         </div>
@@ -213,13 +251,14 @@ export const EmployerStart: React.FC = () => {
           )}
 
           {showProfileForm && (
-            <form onSubmit={handleSaveProfile} className="space-y-4" noValidate>
+            <form onSubmit={handleSaveSetup} className="space-y-4" noValidate>
               {errors.general && (
                 <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-200">
                   {errors.general}
                 </div>
               )}
 
+              {needsProfile && (<>
               <div>
                 <label htmlFor="emp-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Full name *</label>
                 <div className="relative">
@@ -293,6 +332,37 @@ export const EmployerStart: React.FC = () => {
                 </div>
                 {errors.jobTitle && <p className="mt-1 text-sm text-asu-red">{errors.jobTitle}</p>}
               </div>
+              </>)}
+
+              {needsPassword && (
+                <fieldset className="space-y-4 pt-2 border-t border-gray-100 dark:border-gray-700">
+                  <legend className="sr-only">New password</legend>
+                  <p className="pt-3 text-sm text-amber-800 dark:text-amber-200">
+                    Your account was created with a temporary password. Choose your own; the temporary one stops working.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="emp-new-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">New password *</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input id="emp-new-password" type="password" autoComplete="new-password" value={newPassword}
+                          onChange={(e) => { setNewPassword(e.target.value); setErrors((prev) => ({ ...prev, password: undefined })); }}
+                          className={inputClass(!!errors.password)} placeholder="10+ chars, a capital, a number and @$!%*?&" />
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="emp-new-password-2" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Repeat new password *</label>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input id="emp-new-password-2" type="password" autoComplete="new-password" value={newPasswordRepeat}
+                          onChange={(e) => { setNewPasswordRepeat(e.target.value); setErrors((prev) => ({ ...prev, password: undefined })); }}
+                          className={inputClass(!!errors.password)} />
+                      </div>
+                    </div>
+                  </div>
+                  {errors.password && <p role="alert" className="text-sm text-asu-red">{errors.password}</p>}
+                </fieldset>
+              )}
 
               <button
                 type="submit"
@@ -304,7 +374,7 @@ export const EmployerStart: React.FC = () => {
             </form>
           )}
 
-          {status && !showProfileForm && (
+          {showEvents && (
             <>
               {openError && (
                 <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2 text-sm text-red-800 dark:text-red-200">

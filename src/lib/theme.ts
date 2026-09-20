@@ -32,7 +32,15 @@ export interface ColourPreset {
 
 export const COLOUR_PRESETS: ColourPreset[] = [
   { label: 'Red', hex: '#dc2626' },
-  { label: 'Orange', hex: '#ea580c' }
+  { label: 'Orange', hex: '#ea580c' },
+  { label: 'Amber', hex: '#d97706' },
+  { label: 'Emerald', hex: '#059669' },
+  { label: 'Teal', hex: '#0d9488' },
+  { label: 'Blue', hex: '#2563eb' },
+  { label: 'Indigo', hex: '#4f46e5' },
+  { label: 'Purple', hex: '#7c3aed' },
+  { label: 'Pink', hex: '#db2777' },
+  { label: 'Rose', hex: '#e11d48' },
 ];
 
 export const DEFAULT_ACCENT = COLOUR_PRESETS[0].hex;
@@ -125,6 +133,9 @@ export const buildThemeVars = (theme: Partial<LandingTheme> | string | null | un
   for (const [shade, { lightness, saturation }] of Object.entries(SHADES)) {
     const [sr, sg, sb] = hslToRgb(h, Math.min(100, s * saturation), lightness);
     vars[`--a-${shade}`] = `rgb(${sr} ${sg} ${sb})`;
+    // Bare channels so Tailwind utilities (bg-red-600, text-red-500/20, ...)
+    // can follow the event's accent, opacity modifiers included.
+    vars[`--a-${shade}-rgb`] = `${sr} ${sg} ${sb}`;
     for (const alpha of ALPHAS) {
       vars[`--a-${shade}-${alpha}`] = `rgb(${sr} ${sg} ${sb} / ${alpha / 100})`;
     }
@@ -155,6 +166,9 @@ export const applyTheme = (theme: Partial<LandingTheme> | string | null | undefi
   const vars = buildThemeVars(theme);
   for (const [name, value] of Object.entries(vars)) target.style.setProperty(name, value);
 };
+
+/** Reset the page to the built-in default palette (original ASU red). */
+export const resetThemeToDefault = (): void => applyTheme(DEFAULT_THEME);
 
 /** The same variables as a React `style` object, for the preview container. */
 export const themeStyle = (theme: Partial<LandingTheme> | string | null | undefined): React.CSSProperties =>

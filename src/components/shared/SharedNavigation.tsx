@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, forwardRef, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import SettingsModal from './SettingsModal';
 import LeaderboardModal from './LeaderboardModal';
@@ -182,7 +183,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     navItems,
     activeItem,
     onItemChange,
-    title = "ASU Career Expo",
+    title,
     notifications = [],
     onNotificationClick,
     onProfileClick,
@@ -190,6 +191,9 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
     hideNotifications = false,
     eventId,
 }) => {
+    // Defaults to the current event's name (super admin sets it per event)
+    const { title: eventTitle } = useEventBranding();
+    const headerTitle = title ?? eventTitle;
     const navigate = useNavigate();
     const { signOut, hasAnyRole, profile } = useAuth();
     const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -473,7 +477,7 @@ const SharedNavigation: React.FC<SharedNavigationProps> = ({
                     <div className="flex items-center gap-3">
                         <img src="/images/logo2.png" alt="Logo" className="w-10 h-10 object-contain shrink-0" />
                         <h1 className="text-xl font-bold tracking-tight text-slate-800 dark:text-white leading-tight">
-                            {title}
+                            {headerTitle}
                         </h1>
                     </div>
 

@@ -32,12 +32,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 }) => {
   const {
     user, profile, loading, sessionLoaded,
-    isAuthenticated, hasRole, getRoleBasedRedirect, signOut,
+    isAuthenticated, hasRole, getRoleBasedRedirect, signOut, profileError,
   } = useAuth();
   const location = useLocation();
 
   // Is the current location a public event path?
   const onPublicPath = allowWithoutProfile || PUBLIC_EVENT_PATHS.includes(location.pathname);
+
+  // Set when the profile never arrives: show why instead of signing out.
+  const [stuck, setStuck] = React.useState(false);
 
   const isSuperAdmin = (role?: string) =>
     role === 'sadmin' || role === 'super_admin';
@@ -51,13 +54,18 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 
     let timeout: NodeJS.Timeout;
     if ((loading || (isAuthenticated && !profile))) {
-      timeout = setTimeout(async () => {
-        await signOut();
-        window.location.href = '/login';
-      }, 5000);
+      // Do NOT sign out automatically: a slow or failing profile load would
+      // bounce the user back to the login form with no explanation. Show them
+      // what happened instead (see `stuck` below).
+      timeout = setTimeout(() => {
+        logger.error('Profile did not load in time', { loading, isAuthenticated, hasProfile: !!profile });
+        setStuck(true);
+      }, 8000);
+    } else if (stuck) {
+      setStuck(false);
     }
     return () => { if (timeout) clearTimeout(timeout); };
-  }, [loading, isAuthenticated, profile, signOut, onPublicPath]);
+  }, [loading, isAuthenticated, profile, onPublicPath, stuck]);
 
   // ── 1. Initial bootstrap spinner ─────────────────────────────────────────
   if (loading && !sessionLoaded) {
@@ -85,6 +93,37 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   if (isAuthenticated && !profile) {
     if (onPublicPath) {
       return <>{children}</>;
+    }
+    if (stuck) {
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 dark:bg-slate-950">
+          <div className="max-w-md w-full bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 text-center space-y-4">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Your profile could not be loaded</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              You are signed in, but the server did not return your profile. Check your connection and try again.
+            </p>
+            {profileError && (
+              <p className="text-xs font-mono text-left bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg p-3 break-words">
+                {profileError}
+              </p>
+            )}
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors"
+              >
+                Try again
+              </button>
+              <button
+                onClick={async () => { await signOut(); window.location.href = '/login'; }}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      );
     }
     return (
       <DashboardLoading

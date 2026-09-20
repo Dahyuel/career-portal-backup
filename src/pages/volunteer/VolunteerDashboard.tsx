@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import { getActiveEventId } from '../../lib/currentEvent';
 import { motion, Variants, AnimatePresence } from 'framer-motion';
 import { User } from '../../components/icons';
@@ -34,6 +35,7 @@ const itemVariants: Variants = {
 };
 
 export const VolunteerDashboard: React.FC = () => {
+  const { title: eventTitle } = useEventBranding();
   useTheme();
   const { profile } = useAuth();
   const [showProfile, setShowProfile] = useState(false);
@@ -134,7 +136,7 @@ export const VolunteerDashboard: React.FC = () => {
       navItems={[]} // No extra nav items for basic volunteer view
       activeItem=""
       onItemChange={() => { }}
-      title="ASU Career Expo"
+      title={eventTitle}
       onProfileClick={() => setShowProfile(true)}
       notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}

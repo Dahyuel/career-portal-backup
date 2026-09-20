@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import { getActiveEventId } from '../../lib/currentEvent';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
@@ -68,6 +69,7 @@ interface Stats {
 }
 
 export const EmployerDashboard: React.FC = () => {
+  const { title: eventTitle } = useEventBranding();
     const { user, profile } = useAuth();
     const navigate = useNavigate();
 
@@ -109,10 +111,16 @@ export const EmployerDashboard: React.FC = () => {
         let cancelled = false;
         getEmployerStatus().then((status) => {
             if (cancelled || !status) return;
+            // Temporary password not replaced yet: the server refuses employer
+            // actions until it is, so send them to set it.
+            if (status.must_change_password) {
+                navigate('/employer-start', { replace: true });
+                return;
+            }
             setEventInfo(status.events.find((e) => e.event_id === EVENT_ID) ?? null);
         });
         return () => { cancelled = true; };
-    }, [EVENT_ID]);
+    }, [EVENT_ID, navigate]);
 
     const navItems: NavItem[] = [
         { key: 'home', label: 'Home', icon: 'dashboard' },
@@ -625,7 +633,7 @@ export const EmployerDashboard: React.FC = () => {
             navItems={navItems}
             activeItem={activeTab}
             onItemChange={setActiveTab}
-            title="ASU Career Expo"
+            title={eventTitle}
             notifications={notifications}
             onNotificationClick={(notification) => setSelectedNotification(notification)}
             onProfileClick={() => setShowProfile(true)}

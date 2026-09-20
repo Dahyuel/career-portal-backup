@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import FeedbackTab from '../../components/shared/FeedbackTab';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
@@ -53,6 +54,7 @@ interface AttendeeWithProfile {
 }
 
 export const VerificationDashboard: React.FC = () => {
+  const { title: eventTitle } = useEventBranding();
     const { profile, loading: authLoading, refreshProfile } = useAuth();
     useTheme();
     const [activeTab, setActiveTab] = useState('home');
@@ -858,7 +860,7 @@ export const VerificationDashboard: React.FC = () => {
             navItems={navItems}
             activeItem={activeTab}
             onItemChange={setActiveTab}
-            title="ASU Career Expo"
+            title={eventTitle}
             onProfileClick={() => setShowProfile(true)}
             notifications={notifications}
             onNotificationClick={(notification) => setSelectedNotification(notification)}

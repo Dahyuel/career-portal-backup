@@ -15,6 +15,8 @@ import ActivityLog from '../../components/superadmin/ActivityLog';
 import EventControls from '../../components/superadmin/EventControls';
 import DataHealth from '../../components/superadmin/DataHealth';
 import EventsManager from '../../components/superadmin/EventsManager';
+import { resetThemeToDefault, applyTheme, DEFAULT_THEME } from '../../lib/theme';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'command', label: 'Command Center', icon: 'monitor_heart' },
@@ -53,7 +55,19 @@ export const SuperAdminPanel: React.FC = () => {
   const [secretKeyInput, setSecretKeyInput] = useState('');
   // While the requirement is switched off (testing) no code is asked for.
   const [twoFaRequired, setTwoFaRequired] = useState(true);
+  const [twoFaOffUntil, setTwoFaOffUntil] = useState<string | null>(null);
   const isVerified = mfaStage === 'unlocked';
+
+  // The super admin dashboard is always red (the ASU default).
+  // If the user was in an event dashboard (e.g. orange), coming here resets the page.
+  // When they leave, the event's colours are restored.
+  const branding = useEventBranding();
+  useEffect(() => {
+    resetThemeToDefault();
+    return () => {
+      applyTheme({ ...DEFAULT_THEME, ...branding.theme });
+    };
+  }, [branding.theme]);
 
   const notify = useCallback((message: string, type: ToastType) => {
     setToast({ show: true, message, type });
@@ -80,6 +94,7 @@ export const SuperAdminPanel: React.FC = () => {
 
       const required = stateResult.error ? true : stateResult.data?.required !== false;
       setTwoFaRequired(required);
+      setTwoFaOffUntil(required ? null : (stateResult.data?.off_until ?? null));
 
       if (!required) setMfaStage('unlocked');
       else if (aalResult.data?.currentLevel === 'aal2') setMfaStage('unlocked');
@@ -382,6 +397,7 @@ export const SuperAdminPanel: React.FC = () => {
                     totpFactor={totpFactor}
                     onResetAuthenticator={handleResetAuthenticator}
                     twoFaRequired={twoFaRequired}
+                    twoFaOffUntil={twoFaOffUntil}
                     onRequirementChanged={refreshMfaState}
                   />
                 )}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import FeedbackTab from '../../components/shared/FeedbackTab';
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import {
@@ -96,6 +97,7 @@ interface SessionBooking {
 
 
 export const BuildTeamDashboard: React.FC = () => {
+  const { title: eventTitle } = useEventBranding();
   useTheme();
   const { profile, refreshProfile } = useAuth();
   const [activeTab, setActiveTab] = useState('home');
@@ -809,7 +811,7 @@ export const BuildTeamDashboard: React.FC = () => {
       navItems={navItems}
       activeItem={activeTab}
       onItemChange={setActiveTab}
-      title="ASU Career Expo"
+      title={eventTitle}
       onProfileClick={() => setShowProfile(true)}
       notifications={notifications}
       onNotificationClick={(notification) => setSelectedNotification(notification)}

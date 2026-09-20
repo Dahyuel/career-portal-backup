@@ -1,5 +1,6 @@
 // pages/team/TeamLeaderDashboard.tsx
 import FeedbackTab from '../../components/shared/FeedbackTab';
+import { useEventBranding } from '../../contexts/EventBrandingContext';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
@@ -56,6 +57,7 @@ interface TeamMember {
 }
 
 export const TeamLeaderDashboard: React.FC = () => {
+  const { title: eventTitle } = useEventBranding();
   // The team leader's own event. Without it the database falls back to whichever
   // event is current, which is the wrong team when two events are live.
   const { profile } = useAuth();
@@ -566,7 +568,7 @@ export const TeamLeaderDashboard: React.FC = () => {
         navItems={navItems}
         activeItem={activeTab}
         onItemChange={(key) => setActiveTab(key as TabKey)}
-        title="ASU Career Expo"
+        title={eventTitle}
         onProfileClick={() => setShowProfile(true)}
       >
         <AnimatePresence mode="wait">
