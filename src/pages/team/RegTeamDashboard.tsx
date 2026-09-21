@@ -219,7 +219,7 @@ export const RegTeamDashboard: React.FC = () => {
       }
 
       try {
-        const { data, error } = await getVolunteerStatsRPC(user.id);
+        const { data, error } = await getVolunteerStatsRPC(user.id, profile?.event_id ?? undefined);
 
         if (error || !data) {
           logger.error('❌ [DASHBOARD] Failed to fetch stats:', error);
@@ -259,7 +259,7 @@ export const RegTeamDashboard: React.FC = () => {
     const fetchActivities = async () => {
       if (!user?.id || profile?.role === 'attendee') return;
       try {
-        const { data, error } = await getBuildingActivitiesRPC(3);
+        const { data, error } = await getBuildingActivitiesRPC(3, profile?.event_id ?? '');
 
         if (error) {
           logger.error('Error fetching activities:', error);
@@ -400,7 +400,7 @@ export const RegTeamDashboard: React.FC = () => {
       setSearchLoading(true);
 
       // Fetch full data (includes registration_status from RPC)
-      const { data, error } = await getUserProfileByUUID(attendee.id);
+      const { data, error } = await getUserProfileByUUID(attendee.id, profile?.event_id ?? '');
 
       if (error || !data) {
         showToast('Failed to load attendee details', 'error');
@@ -469,7 +469,7 @@ export const RegTeamDashboard: React.FC = () => {
 
     try {
       // Use inline function
-      const { data, error } = await getUserProfileByUUID(uuid);
+      const { data, error } = await getUserProfileByUUID(uuid, profile?.event_id ?? '');
 
       if (error || !data) {
         showToast('This user doesn\'t have an account', 'error');

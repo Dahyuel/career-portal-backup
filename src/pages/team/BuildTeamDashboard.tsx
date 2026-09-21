@@ -344,7 +344,7 @@ export const BuildTeamDashboard: React.FC = () => {
 
     try {
       // 1. Resolve the attendee
-      const { data: attendeeData, error: attendeeError } = await buildTeamGetAttendeeByUUID(uuid);
+      const { data: attendeeData, error: attendeeError } = await buildTeamGetAttendeeByUUID(uuid, profile.event_id);
 
       if (attendeeError||!attendeeData) {
         showToast(attendeeError?.message||'Attendee not found', 'error');
@@ -494,8 +494,8 @@ export const BuildTeamDashboard: React.FC = () => {
     try {
       // Booked attendees for the session, plus general Personal ID lookup
       const [bookedResult, generalResult] = await Promise.all([
-        buildTeamSearchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim(), profile?.event_id),
-        searchAttendeesByPersonalIdBuildingRPC(sessionSearchTerm.trim(), profile?.event_id)
+        buildTeamSearchSessionBookings(selectedSessionForScan.id, sessionSearchTerm.trim(), profile?.event_id ?? undefined),
+        searchAttendeesByPersonalIdBuildingRPC(sessionSearchTerm.trim(), profile?.event_id ?? undefined)
       ]);
 
       const error = bookedResult.error || generalResult.error;

@@ -23,6 +23,7 @@ interface VolunteerInfoModalProps {
     volunteer: VolunteerInfo | null;
     onSuccess: () => void;
     loading?: boolean; // New loading prop
+    eventId: string; // Required: passed down to UserActivityModal
 }
 
 const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
@@ -30,7 +31,8 @@ const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
     onClose,
     volunteer,
     onSuccess,
-    loading = false
+    loading = false,
+    eventId
 }) => {
     const [showAttendanceModal, setShowAttendanceModal] = useState(false);
     const [showBonusModal, setShowBonusModal] = useState(false);
@@ -298,6 +300,7 @@ const VolunteerInfoModal: React.FC<VolunteerInfoModalProps> = ({
                                 onClose={() => setShowActivityModal(false)}
                                 targetUserId={volunteer.user_id}
                                 volunteerName={volunteer.full_name}
+                                eventId={eventId}
                             />
                         </>
                     )}

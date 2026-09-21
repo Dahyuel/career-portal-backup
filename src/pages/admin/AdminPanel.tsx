@@ -6741,6 +6741,7 @@ export function AdminPanel() {
             setShowJobApplicantsModal(false);
             setSelectedJob(null);
           }}
+          eventId={selectedJob.event_id}
         />
       )}
 

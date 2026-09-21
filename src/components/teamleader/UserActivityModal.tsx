@@ -17,6 +17,7 @@ interface Props {
     onClose: () => void;
     targetUserId: string;
     volunteerName: string;
+    eventId: string; // Required: the event context for this activity lookup
 }
 
 // Map activity_type → icon + colour
@@ -46,7 +47,7 @@ function formatType(type: string) {
     return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-const UserActivityModal: React.FC<Props> = ({ isOpen, onClose, targetUserId, volunteerName }) => {
+const UserActivityModal: React.FC<Props> = ({ isOpen, onClose, targetUserId, volunteerName, eventId }) => {
     const [activities, setActivities] = useState<Activity[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,8 @@ const UserActivityModal: React.FC<Props> = ({ isOpen, onClose, targetUserId, vol
         setError(null);
         try {
             const { data, error: rpcError } = await supabase.rpc('team_leader_get_user_activities', {
-                p_target_user_id: targetUserId
+                p_target_user_id: targetUserId,
+                p_event_id: eventId
             });
             if (rpcError) throw rpcError;
             setActivities((data as Activity[]) || []);

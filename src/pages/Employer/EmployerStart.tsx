@@ -340,11 +340,7 @@ export const EmployerStart: React.FC = () => {
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-200 rounded-full">
                                 <Lock className="w-3 h-3" /> Ended · view only
                               </span>
-                            ) : event.is_current && (
-                              <span className="px-2 py-0.5 text-[11px] font-semibold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full">
-                                Current
-                              </span>
-                            )}
+                            ) : null}
                           </div>
                           <p className="text-sm text-gray-600 dark:text-gray-300 truncate">{event.company_name}</p>
                           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-xs text-gray-500 dark:text-gray-400">

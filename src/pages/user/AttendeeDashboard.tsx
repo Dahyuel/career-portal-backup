@@ -172,7 +172,7 @@ const AttendeeDashboard = () => {
     if (!user?.id) return;
     try {
       const { data, error } = await supabase
-        .rpc('get_attendee_activities', { p_limit: 5 });
+        .rpc('get_attendee_activities', { p_event_id: EVENT_ID, p_limit: 5 });
 
       if (error) throw error;
       if (data) setUserActivities(data);
@@ -190,7 +190,7 @@ const AttendeeDashboard = () => {
         supabase.rpc('get_attendee_notifications', {
           p_event_id: EVENT_ID
         }),
-        supabase.rpc('get_attendee_activities', { p_limit: 10 }),
+        supabase.rpc('get_attendee_activities', { p_event_id: EVENT_ID, p_limit: 10 }),
         supabase.rpc('get_attendee_schedule', { p_event_id: EVENT_ID })
       ]);
 
@@ -284,7 +284,7 @@ const AttendeeDashboard = () => {
     const fetchBookedSessions = async () => {
       if (!attendeeId || activeTab !== 'sessions' || loadedTabs.has('sessions')) return;
       try {
-        const { data, error } = await supabase.rpc('get_attendee_booked_sessions');
+        const { data, error } = await supabase.rpc('get_attendee_booked_sessions', { p_event_id: EVENT_ID });
         if (error) throw error;
         if (data) setBookedSessions(data);
       } catch (error) {
@@ -517,7 +517,7 @@ const AttendeeDashboard = () => {
     try {
       // Single atomic RPC call handles capacity check, duplicate detection, and booking
       const { data, error } = await supabase
-        .rpc('attendee_book_session', { p_session_id: session.id });
+        .rpc('attendee_book_session', { p_session_id: session.id, p_event_id: EVENT_ID });
 
       if (error) throw error;
 
@@ -610,7 +610,7 @@ const AttendeeDashboard = () => {
 
         // Perform actual cancel via RPC
         const { error } = await supabase
-          .rpc('attendee_cancel_booking', { p_booking_id: bookingId });
+          .rpc('attendee_cancel_booking', { p_booking_id: bookingId, p_event_id: EVENT_ID });
 
         if (error) throw error;
 
@@ -657,7 +657,7 @@ const AttendeeDashboard = () => {
       setIsApplying(true);
 
       const { error } = await supabase
-        .rpc('attendee_apply_job', { p_job_position_id: jobToApply.id });
+        .rpc('attendee_apply_job', { p_job_position_id: jobToApply.id, p_event_id: EVENT_ID });
 
       if (error) throw error;
 
@@ -687,7 +687,7 @@ const AttendeeDashboard = () => {
       setIsApplying(true);
 
       const { error } = await supabase
-        .rpc('attendee_withdraw_job', { p_job_position_id: jobToWithdraw.id });
+        .rpc('attendee_withdraw_job', { p_job_position_id: jobToWithdraw.id, p_event_id: EVENT_ID });
 
       if (error) throw error;
 

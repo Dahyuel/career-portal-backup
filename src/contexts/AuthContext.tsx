@@ -31,6 +31,7 @@ interface GetMyProfileResponse {
     enrollment_proof_url: string;
     registered_at: string;
     year?: number | null;
+    allow_non_asu_attendees?: boolean;
   } | null;
   volunteer: {
     user_id: string;
@@ -130,6 +131,28 @@ const getEffectiveRole = (roles: string[]): string => {
   return roles[0] || "attendee";
 };
 
+
+// ----- Helper: Read the last event_id the user picked -----
+// Persisted in a dedicated key so it survives even if `currentUser` is
+// cleared or the RPC fails. Used only as the input to get_my_profile —
+// never for role-based routing.
+const getStoredEventId = (): string | undefined => {
+  try {
+    // Preferred source: dedicated key written when the user picks an event.
+    const dedicated = localStorage.getItem("selected_event_id");
+    if (dedicated && dedicated.length > 0) return dedicated;
+
+    // Fallback: the event_id nested inside currentUser.
+    const stored = localStorage.getItem("currentUser");
+    if (!stored) return undefined;
+    const parsed = JSON.parse(stored);
+    const id = parsed?.event_id;
+    return typeof id === "string" && id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // ----- Helper: Restore ONLY the signed-in user's identity from storage -----
 // Role/event data is intentionally NOT restored here. Routing decisions are made
 // exclusively from the authoritative profile returned by the live `get_my_profile`
@@ -169,22 +192,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // ----- Clear all user-related cached data (full wipe, used on sign-out) -----
   const clearAllCachedData = useCallback(() => {
-    // Preserve theme
     const theme = localStorage.getItem("theme");
+    const selectedEventId = localStorage.getItem("selected_event_id");
 
-    // Clear everything
     localStorage.clear();
     sessionStorage.clear();
     clearAllFormCaches();
 
-    // Restore theme
-    if (theme) {
-      localStorage.setItem("theme", theme);
-    }
+    if (theme) localStorage.setItem("theme", theme);
+    if (selectedEventId) localStorage.setItem("selected_event_id", selectedEventId);
 
-    logger.log('🧹 All cached user data cleared');
+    logger.log('🧹 All cached user data cleared (selected event preserved)');
   }, []);
 
   // ----- Lighter wipe used on fresh sign-in: keeps `currentUser` in
@@ -318,8 +337,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setProfile(userProfile);
 
-        const shouldCache = incomingRoles.length > 0 || forceRefresh || !currentProfile;
-        if (shouldCache) {
+        // Persist the selected event separately so it survives even if
+        // `currentUser` is cleared or the RPC fails on next refresh.
+        if (userProfile.event_id) {
+          try {
+            localStorage.setItem("selected_event_id", userProfile.event_id);
+          } catch { /* storage quota — ignore */ }
+        }
+
+        const shouldCache = incomingRoles.length > 0 || forceRefresh || !currentProfile; if (shouldCache) {
           localStorage.setItem("currentUser", JSON.stringify({
             id: userProfile.id,
             email: userProfile.email,
@@ -403,14 +429,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const session = await getCurrentSession();
         if (session?.user) {
           setUser(session.user);
-          // Only fetch if no cached profile for this user
-          if (!profileRef.current || profileRef.current.id !== session.user.id) {
-            await fetchUserProfile(session.user.id, session.user.email || "", undefined);
+
+          // Look up the event_id the user last had bound. If we have one,
+          // fetch the profile for that event. Otherwise, skip the RPC —
+          // ProtectedRoute will route to /select-event.
+          const cachedEventId = getStoredEventId();
+
+          if (cachedEventId) {
+            logger.log('🔁 Refresh detected — restoring event:', cachedEventId);
+            await fetchUserProfile(
+              session.user.id,
+              session.user.email || "",
+              cachedEventId,
+              true
+            );
+          } else {
+            logger.log('⏭️ No stored event — user must pick one');
           }
         } else {
-          setUser(null);
-          setProfile(null);
-          clearAllCachedData();
+          // Before wiping, verify the Supabase auth token is genuinely gone.
+          // getCurrentSession() can return null during the initial mount
+          // before Supabase has rehydrated the token from localStorage.
+          const hasAuthToken = Object.keys(localStorage).some(k =>
+            k.startsWith('sb-') && k.endsWith('-auth-token')
+          );
+
+          if (!hasAuthToken) {
+            logger.log('🚪 No auth token — clearing cache');
+            setUser(null);
+            setProfile(null);
+            clearAllCachedData();
+          } else {
+            logger.log('⏳ Auth token present — waiting for session recovery');
+            // Don't clear; the onAuthStateChange listener will fire SIGNED_IN
+            // once the session is restored.
+          }
         }
       } catch (err) {
         logger.error("Error initializing auth:", err);
@@ -445,19 +498,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             email: session.user.email || "",
           }));
         } else if (!isSuperAdminRole(current?.role)) {
-          // Same non-super-admin re-logging in: strip event_id so they must
-          // re-select an event. Applies to attendee, staff and employer alike.
-          const clearedProfile = { ...current, event_id: undefined };
-          setProfile(clearedProfile);
+          // Only strip event_id if there's no remembered event for this user.
+          // Otherwise, token refresh / session recovery on page reload would
+          // wipe the selected event and force the user back to the picker
+          // (or worse, trigger the ProtectedRoute logout timeout).
+          const rememberedEventId = getStoredEventId();
 
-          try {
-            const stored = localStorage.getItem('currentUser');
-            if (stored) {
-              const parsed = JSON.parse(stored);
-              delete parsed.event_id;
-              localStorage.setItem('currentUser', JSON.stringify(parsed));
-            }
-          } catch { /* ignore */ }
+          if (!rememberedEventId) {
+            logger.log('🔄 Fresh sign-in with no remembered event — stripping event_id');
+            const clearedProfile = { ...current, event_id: undefined };
+            setProfile(clearedProfile);
+
+            try {
+              const stored = localStorage.getItem('currentUser');
+              if (stored) {
+                const parsed = JSON.parse(stored);
+                delete parsed.event_id;
+                localStorage.setItem('currentUser', JSON.stringify(parsed));
+              }
+            } catch { /* ignore */ }
+          } else {
+            logger.log('🔄 Refresh — keeping remembered event:', rememberedEventId);
+          }
         }
 
         // Fetch fresh profile. Without an event_id this comes back with
@@ -475,48 +537,134 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => subscription.unsubscribe();
   }, [fetchUserProfile, clearAllCachedData, clearSessionScopedData]);
+  // ─────────────────────────────────────────────────────────────────────────
+  // Shared revalidation: refetch profile for the current event and react if
+  // the server says we no longer have access.
+  // ─────────────────────────────────────────────────────────────────────────
+  const revalidateAccess = useCallback(async (reason: string) => {
+    const current = profileRef.current;
+    if (!current?.id) return;
 
-  // ----- Realtime: react to this user's role changes -----
+    // No event yet → nothing to validate; ProtectedRoute handles the picker flow.
+    if (!current.event_id) return;
+
+    logger.log(`🔁 Revalidating access (${reason})`);
+
+    try {
+      const fresh = await fetchUserProfile(
+        current.id,
+        current.email,
+        current.event_id,
+        true,  // forceRefresh — bypass cache
+      );
+
+      if (!fresh) {
+        // Either the event was deleted, the user was removed from it, or the
+        // RPC threw. In all cases the user no longer has a valid scope.
+        logger.warn(`🚪 Access lost (${reason}) — routing to event selection`);
+
+        // Keep auth session but clear event scope so ProtectedRoute sends the
+        // user to /select-event. If the account itself is gone, the next RPC
+        // will 401 and signOut() will fire from handleAuthError.
+        try {
+          localStorage.removeItem('selected_event_id');
+          const stored = localStorage.getItem('currentUser');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            delete parsed.event_id;
+            localStorage.setItem('currentUser', JSON.stringify(parsed));
+          }
+        } catch { /* ignore */ }
+
+        setProfile(prev => prev
+          ? { ...prev, event_id: undefined, roles: [], role: 'attendee' }
+          : prev
+        );
+        window.location.href = '/select-event';
+      }
+    } catch (err) {
+      logger.warn(`Revalidation error (${reason}):`, err);
+    }
+  }, [fetchUserProfile]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Realtime — watch events, event_registrations, and user_roles (INSERT /
+  // UPDATE / DELETE) for the current user + event.
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const userId = user?.id;
     const eventId = profile?.event_id;
-    if (!userId || !eventId) return;
+    if (!userId) return;
 
     const channel = supabase
-      .channel(`role-change-${userId}-${eventId}`)
+      .channel(`access-watch-${userId}-${eventId ?? 'none'}`)
+
+      // ── 1) Our event changed ──────────────────────────────────────────────
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'user_roles',
-          filter: `user_id=eq.${userId},event_id=eq.${eventId}`,
+          event: 'UPDATE', schema: 'public', table: 'events',
+          filter: eventId ? `id=eq.${eventId}` : undefined
         },
-        () => {
-          logger.log('📡 Role assigned — refreshing profile');
-          refreshProfile(eventId, userId, user?.email || undefined, true).catch(console.error);
-        }
+        () => revalidateAccess('event-updated'),
       )
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',                              // ← NEW BLOCK
-          schema: 'public',
-          table: 'user_roles',
-          filter: `user_id=eq.${userId},event_id=eq.${eventId}`,
+          event: 'DELETE', schema: 'public', table: 'events',
+          filter: eventId ? `id=eq.${eventId}` : undefined
         },
-        () => {
-          logger.log('📡 Role changed — refreshing profile');
-          refreshProfile(eventId, userId, user?.email || undefined, true).catch(console.error);
-        }
+        () => revalidateAccess('event-deleted'),
       )
+
+      // ── 2) Our roles for this event changed ───────────────────────────────
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT', schema: 'public', table: 'user_roles',
+          filter: eventId
+            ? `user_id=eq.${userId},event_id=eq.${eventId}`
+            : `user_id=eq.${userId}`
+        },
+        () => revalidateAccess('role-inserted'),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE', schema: 'public', table: 'user_roles',
+          filter: eventId
+            ? `user_id=eq.${userId},event_id=eq.${eventId}`
+            : `user_id=eq.${userId}`
+        },
+        () => revalidateAccess('role-updated'),
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE', schema: 'public', table: 'user_roles',
+          filter: eventId
+            ? `user_id=eq.${userId},event_id=eq.${eventId}`
+            : `user_id=eq.${userId}`
+        },
+        () => revalidateAccess('role-deleted'),
+      )
+
+      // ── 3) Our registration status changed ────────────────────────────────
+      .on(
+        'postgres_changes',
+        {
+          event: '*', schema: 'public', table: 'event_registrations',
+          filter: eventId
+            ? `user_id=eq.${userId},event_id=eq.${eventId}`
+            : `user_id=eq.${userId}`
+        },
+        () => revalidateAccess('registration-changed'),
+      )
+
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id, user?.email, profile?.event_id, refreshProfile]);
-
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, profile?.event_id, revalidateAccess]);
   // ----- Role helpers -----
   const hasRole = useCallback(
     (roles: string | string[]): boolean => {
@@ -556,7 +704,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     [profile?.role]
   );
 
-  // ----- Sign out -----
   const signOut = useCallback(async () => {
     setIsLoggingOut(true);
     setLoading(true);
@@ -564,7 +711,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signOutUser();
       setUser(null);
       setProfile(null);
-      clearAllCachedData(); // ← always clears localStorage on signout
+      // Full wipe — including the selected event, since this is an explicit logout
+      localStorage.removeItem("selected_event_id");
+      clearAllCachedData();
     } catch (err) {
       logger.error("Error signing out:", err);
     } finally {
@@ -572,13 +721,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoggingOut(false);
     }
   }, [clearAllCachedData]);
-
-  // ----- Cleanup session -----
   const cleanupSession = useCallback(async () => {
     try {
       await signOutUser();
       setUser(null);
       setProfile(null);
+      localStorage.removeItem("selected_event_id");
       clearAllCachedData();
     } catch (err) {
       logger.error("Error cleaning up session:", err);

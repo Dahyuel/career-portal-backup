@@ -30,6 +30,8 @@ const EventRegistration = React.lazy(() => import('./pages/EventRegistration').t
 const PendingApproval = React.lazy(() => import('./pages/PendingApproval').then(module => ({ default: module.PendingApproval })));
 const RegistrationConfirmed = React.lazy(() => import('./pages/RegistrationConfirmed').then(module => ({ default: module.RegistrationConfirmed })));
 const RejectedAttendee = React.lazy(() => import('./pages/RejectedAttendee').then(module => ({ default: module.RejectedAttendee })));
+const NotEligibleAttendee = React.lazy(() => import('./pages/NotEligibleAttendee').then(module => ({ default: module.NotEligibleAttendee })));
+const VerificationPending = React.lazy(() => import('./pages/VerificationPending'));
 const PaymentRequired = React.lazy(() => import('./pages/PaymentRequired').then(module => ({ default: module.PaymentRequired })));
 
 // Landing Page Components (public)
@@ -172,6 +174,22 @@ const AppRouter: React.FC = () => {
         <ProtectedRoute requiredRole="attendee">
           <Suspense fallback={<DashboardLoading message="Loading..." />}>
             <RejectedAttendee />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/non-asu-rejected" element={
+        <ProtectedRoute requiredRole="attendee">
+          <Suspense fallback={<DashboardLoading message="Loading..." />}>
+            <NotEligibleAttendee />
+          </Suspense>
+        </ProtectedRoute>
+      } />
+
+      <Route path="/verification-pending" element={
+        <ProtectedRoute requiredRole="attendee">
+          <Suspense fallback={<DashboardLoading message="Loading..." />}>
+            <VerificationPending />
           </Suspense>
         </ProtectedRoute>
       } />

@@ -31,13 +31,14 @@ interface JobApplicantsModalProps {
     jobTitle: string;
     onClose: () => void;
     isEmployer?: boolean; // When true, shows Approve/Reject buttons
+    eventId: string; // Required: the event this job belongs to
 }
 
 // Configuration
 const ITEMS_PER_PAGE = 20;
 const DEBOUNCE_DELAY = 300;
 
-const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle, onClose, isEmployer = false }) => {
+const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle, onClose, isEmployer = false, eventId }) => {
     // Data state
     const [applicants, setApplicants] = useState<Applicant[]>([]);
     const [loading, setLoading] = useState(true);
@@ -81,6 +82,7 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
 
             const { data, error } = await supabase.rpc('employer_get_job_applicants', {
                 _job_id: jobId,
+                p_event_id: eventId,
                 _limit: ITEMS_PER_PAGE,
                 _offset: offset
             });
@@ -170,6 +172,7 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
         try {
             const { error } = await supabase.rpc('employer_update_application_status', {
                 _application_id: applicationId,
+                p_event_id: eventId,
                 _status: newStatus
             });
             if (error) throw error;
@@ -203,7 +206,8 @@ const JobApplicantsModal: React.FC<JobApplicantsModalProps> = ({ jobId, jobTitle
     const exportToCSV = useCallback(async () => {
         try {
             const { data, error } = await supabase.rpc('employer_export_job_applicants', {
-                _job_id: jobId
+                _job_id: jobId,
+                p_event_id: eventId
             });
 
             if (error) throw error;

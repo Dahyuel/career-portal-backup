@@ -12,7 +12,6 @@ export interface EmployerEvent {
   end_date: string | null;
   venue_name: string | null;
   is_ended: boolean;
-  is_current: boolean;
   company_id: string;
   company_name: string;
   company_logo: string | null;

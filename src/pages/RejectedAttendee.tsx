@@ -39,7 +39,7 @@ export const RejectedAttendee: React.FC = () => {
             if (signedError || !signedData) throw new Error(signedError?.message || 'Failed to get signed URL');
 
             const { error: updateError } = await supabase
-                .rpc('update_attendee_enrollment_proof', { p_enrollment_proof_url: signedData.signedUrl });
+                .rpc('update_attendee_enrollment_proof', { p_enrollment_proof_url: signedData.signedUrl, p_event_id: profile?.event_id });
 
             if (updateError) throw updateError;
 

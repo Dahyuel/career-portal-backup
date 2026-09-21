@@ -9,7 +9,7 @@ import { motion } from 'framer-motion';
 import { Calendar, MapPin, ArrowRight, AlertCircle, LogOut, Loader2, Building2, Lock } from '../components/icons';
 import { useAuth } from '../contexts/AuthContext';
 import { getActiveEvents, checkEventRegistration, FairEvent } from '../lib/supabase';
-import { getEmployerStatus, openEmployerEvent } from '../lib/employer';
+import { openEmployerEvent } from '../lib/employer';
 import { getActiveEventId } from '../lib/currentEvent';
 import { logger } from '../utils/logger';
 import DashboardLoading from '../components/DashboardLoading';
@@ -23,7 +23,7 @@ interface PickableEvent extends FairEvent {
 
 export const EventSelection: React.FC = () => {
   const navigate = useNavigate();
-  const { signOut, user, profile, getRoleBasedRedirect, refreshProfile } = useAuth();
+  const { signOut, user, profile, getRoleBasedRedirect, refreshProfile, isLoggingOut } = useAuth();
 
   const [events, setEvents] = useState<PickableEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,21 +37,9 @@ export const EventSelection: React.FC = () => {
     const loadEvents = async () => {
       try {
         setLoading(true);
-        // Timebox the employer-status lookup so a hanging RPC can never keep
-        // the event picker stuck on its loading state.
-        const employerStatusPromise = Promise.race([
-          getEmployerStatus().catch(() => null),
-          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 4000)),
-        ]);
-
-        const [{ data: activeEvents, error: fetchError }, employerStatus] = await Promise.all([
-          getActiveEvents(),
-          employerStatusPromise,
-        ]);
+        const { data: activeEvents, error: fetchError } = await getActiveEvents();
 
         if (fetchError) {
-          // Fallback: if the picker list can't be loaded, at least surface the
-          // system_config active event so the user isn't fully locked out.
           const fallbackId = getActiveEventId();
           logger.warn('EventSelection: using system_config fallback', fallbackId);
           setError(fetchError.message);
@@ -59,45 +47,12 @@ export const EventSelection: React.FC = () => {
         }
 
         const merged: PickableEvent[] = [...(Array.isArray(activeEvents) ? activeEvents : [])];
-        const seen = new Set(merged.map((e) => e.id));
-        const openable = new Set<string>();
-
-        if (employerStatus?.is_employer) {
-          for (const ev of employerStatus.events) {
-            const existing = merged.find((m) => m.id === ev.event_id);
-            if (existing) {
-              existing.isEmployerEvent = true;
-              existing.companyName = ev.company_name;
-              // Company participates but the user has no employers row yet.
-              if (!profile?.employer || profile.employer.company_id !== ev.company_id) {
-                openable.add(ev.event_id);
-              }
-            } else if (!seen.has(ev.event_id)) {
-              seen.add(ev.event_id);
-              merged.push({
-                id: ev.event_id,
-                name: ev.event_name,
-                event_type: ev.event_type,
-                start_date: ev.start_date ?? undefined,
-                end_date: ev.end_date ?? undefined,
-                status: ev.status ?? undefined,
-                venue_name: ev.venue_name,
-                is_current: ev.is_current,
-                is_ended: ev.is_ended,
-                can_register: false,
-                isEmployerEvent: true,
-                companyName: ev.company_name,
-              });
-              openable.add(ev.event_id);
-            }
-          }
-        }
 
         merged.sort(
           (a, b) => new Date(b.start_date ?? 0).getTime() - new Date(a.start_date ?? 0).getTime()
         );
 
-        setEmployerOpenable(openable);
+        setEmployerOpenable(new Set());
         setEvents(merged);
       } catch (err: any) {
         logger.error('EventSelection load error:', err);
@@ -108,7 +63,7 @@ export const EventSelection: React.FC = () => {
     };
 
     loadEvents();
-  }, [profile?.employer]);
+  }, []);
 
   const handleSelectEvent = async (event: PickableEvent) => {
     if (!user) return;
@@ -208,7 +163,28 @@ export const EventSelection: React.FC = () => {
         transition={{ duration: 0.5, type: 'spring' }}
         className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden border border-gray-100 dark:border-gray-700"
       >
-        <div className="bg-gradient-to-r from-asu-red to-asu-red-light p-8 text-center">
+        <div className="relative bg-gradient-to-r from-asu-red to-asu-red-light p-8 text-center">
+          {/* Logout button — top right */}
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => signOut()}
+            disabled={isLoggingOut}
+            title="Sign out"
+            className="absolute top-4 right-4 inline-flex items-center gap-1.5 px-3 py-1.5
+               rounded-lg text-xs font-medium
+               bg-white/15 hover:bg-white/25
+               text-white border border-white/25 hover:border-white/50
+               transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            {isLoggingOut ? 'Signing out…' : 'Sign out'}
+          </motion.button>
+
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
@@ -235,16 +211,9 @@ export const EventSelection: React.FC = () => {
 
           {events.length === 0 ? (
             <div className="text-center py-10">
-              <p className="text-gray-600 dark:text-gray-400 mb-6">
+              <p className="text-gray-600 dark:text-gray-400">
                 There are no active events available for registration at the moment.
               </p>
-              <button
-                onClick={() => signOut()}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-              </button>
             </div>
           ) : (
             <div className="space-y-4">

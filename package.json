@@ -23,7 +23,8 @@
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
         "react-qr-scanner": "^1.0.0-alpha.11",
-        "react-router-dom": "^7.9.2",
+        "react-router": "^7.18.4",
+        "react-router-dom": "^7.18.2",
         "recharts": "^3.7.0",
         "tree-cli": "^0.6.7"
     },

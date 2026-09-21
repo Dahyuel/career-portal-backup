@@ -22,6 +22,8 @@ const PUBLIC_EVENT_PATHS = [
   '/pending-approval',
   '/payment-required',
   '/rejected-attendee',
+  '/non-asu-rejected',
+  '/verification-pending',
   '/no-active-event',
 ];
 
@@ -52,8 +54,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     let timeout: NodeJS.Timeout;
     if ((loading || (isAuthenticated && !profile))) {
       timeout = setTimeout(async () => {
-        await signOut();
-        window.location.href = '/login';
+        // Authenticated but no profile means the user hasn't picked an event
+        // yet. Route them to the picker instead of forcing a logout.
+        if (isAuthenticated) {
+          logger.log('⏱️ Profile timeout — redirecting to /select-event');
+          window.location.href = '/select-event';
+        } else {
+          await signOut();
+          window.location.href = '/login';
+        }
       }, 5000);
     }
     return () => { if (timeout) clearTimeout(timeout); };
@@ -125,9 +134,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       }
     }
 
-    // ── 4d. Attendee status redirects ─────────────────────────────────────
+    // —— 4d. Attendee status redirects ────────────────────────────────────
     if (isAttendee && profile.attendee && !isAdmin) {
-      const { registration_status, is_asu_student } = profile.attendee;
+      const { registration_status, is_asu_student, payment_status, allow_non_asu_attendees } = profile.attendee;
       const currentPath = location.pathname;
 
       // Don't fight the event selector while the user is mid-pick
@@ -137,20 +146,29 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
             return <Navigate to="/attendee" replace />;
           }
         } else if (registration_status === 'rejected') {
-          if (currentPath !== '/rejected-attendee') {
+          const nonAsuForbidden = !is_asu_student && allow_non_asu_attendees === false;
+          if (nonAsuForbidden) {
+            if (currentPath !== '/non-asu-rejected') {
+              return <Navigate to="/non-asu-rejected" replace />;
+            }
+          } else if (currentPath !== '/rejected-attendee') {
             return <Navigate to="/rejected-attendee" replace />;
           }
         } else if (registration_status === 'pending') {
-          if (is_asu_student && currentPath !== '/pending-approval') {
-            return <Navigate to="/pending-approval" replace />;
-          }
-          if (!is_asu_student && currentPath !== '/payment-required') {
-            return <Navigate to="/payment-required" replace />;
+          if (is_asu_student) {
+            if (currentPath !== '/pending-approval') {
+              return <Navigate to="/pending-approval" replace />;
+            }
+          } else if (payment_status === 'pending') {
+            if (currentPath !== '/payment-required') {
+              return <Navigate to="/payment-required" replace />;
+            }
+          } else if (currentPath !== '/verification-pending') {
+            return <Navigate to="/verification-pending" replace />;
           }
         } else {
-          if (currentPath !== '/attendee') {
-            return <Navigate to="/attendee" replace />;
-          }
+          logger.warn('⚠️ Unknown registration status — redirecting to login:', registration_status);
+          return <Navigate to="/login" replace state={{ error: 'Your account status is unrecognized. Please sign in again or contact support.' }} />;
         }
       }
     }

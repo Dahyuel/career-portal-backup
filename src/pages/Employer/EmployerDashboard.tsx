@@ -254,7 +254,7 @@ export const EmployerDashboard: React.FC = () => {
         if (!deleteJobId) return;
 
         try {
-            const { error } = await supabase.rpc('employer_delete_job', { _job_id: deleteJobId });
+            const { error } = await supabase.rpc('employer_delete_job', { _job_id: deleteJobId, p_event_id: EVENT_ID });
 
             if (error) throw error;
 
@@ -698,6 +698,7 @@ export const EmployerDashboard: React.FC = () => {
                         jobTitle={selectedJobForApplicants.title}
                         onClose={() => setShowApplicantsModal(false)}
                         isEmployer={!readOnly}
+                        eventId={EVENT_ID ?? ''}
                     />
                 )}
             </AnimatePresence>

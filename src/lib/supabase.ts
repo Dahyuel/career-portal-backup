@@ -651,23 +651,24 @@ export const getAttendeeByPersonalIdOptimized = async (personalId: string, event
     return { data: null, error: { message: error.message } };
   }
 };
-export const getUserProfileByUUID = async (uuid: string) => {
+export const getUserProfileByUUID = async (uuid: string, eventId: string) => {
   try {
+    if (!eventId) {
+      return { data: null, error: { message: 'No current event' } };
+    }
+
     const { data: roleRow } = await supabase
-      .from('user_roles')
-      .select('role, event_id')
-      .in('role', ['registration', 'building'])
-      .order('role', { ascending: true }) // 'building' < 'registration'
-      .limit(1)
+      .rpc('get_my_role_for_event', { p_event_id: eventId })
       .maybeSingle();
+      const role = roleRow as unknown as string | null;
 
     const rpcName =
-      roleRow?.role === 'building'
+      role === 'building'
         ? 'build_team_get_attendee_by_uuid'
         : 'reg_team_get_attendee_by_uuid';
 
     const { data, error } = await supabase
-      .rpc(rpcName, { p_uuid: uuid });
+      .rpc(rpcName, { p_uuid: uuid, p_event_id: eventId });
 
     if (error) {
       logger.error('reg_team_get_attendee_by_uuid Error:', error);
@@ -725,25 +726,22 @@ export const recordAttendeeAttendance = async ({
   }
 };
 
-export const getVolunteerStatsRPC = async (_userId: string) => {
+export const getVolunteerStatsRPC = async (_userId: string, eventId?: string) => {
   try {
     const { data: roleRow } = await supabase
-      .from('user_roles')
-      .select('role, event_id')
-      .in('role', ['registration', 'verification', 'building'])
-      .order('role', { ascending: true })
-      .limit(1)
+      .rpc('get_my_role_for_event', { p_event_id: eventId ?? null })
       .maybeSingle();
+      const role = roleRow as unknown as string | null;
 
     const rpcName =
-      roleRow?.role === 'building'
+      role === 'building'
         ? 'build_team_get_volunteer_stats'
-        : roleRow?.role === 'verification'
+        : role === 'verification'
           ? 'verif_team_get_volunteer_stats'
           : 'reg_team_get_volunteer_stats';
 
     const { data, error } = await supabase
-      .rpc(rpcName)
+      .rpc(rpcName, { p_event_id: eventId ?? null })
       .single();
 
     if (error) {
@@ -797,21 +795,16 @@ export const searchSessionBookings = async (sessionId: string, query: string, ev
 // BUILDING TEAM DASHBOARD RPC FUNCTIONS
 // ============================================================================
 
-export const getBuildingNotificationsRPC = async (eventId: string, userId: string) => {
+export const getBuildingNotificationsRPC = async (eventId: string, _userId: string) => {
   try {
     // Shared by RegTeam + Building dashboards. Route by caller role.
     const { data: roleRow } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .eq('event_id', eventId)
-      .in('role', ['registration', 'building'])
-      .order('role', { ascending: true }) // 'building' < 'registration'
-      .limit(1)
+      .rpc('get_my_role_for_event', { p_event_id: eventId })
       .maybeSingle();
+      const role = roleRow as unknown as string | null;
 
     const rpcName =
-      roleRow?.role === 'building'
+      role === 'building'
         ? 'build_team_get_notifications'
         : 'reg_team_get_notifications';
 
@@ -827,9 +820,12 @@ export const getBuildingNotificationsRPC = async (eventId: string, userId: strin
   }
 };
 
-export const getBuildingActivitiesRPC = async (limit: number = 3, eventId?: string) => {
+export const getBuildingActivitiesRPC = async (limit: number, eventId: string) => {
   try {
-    const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit, p_event_id: eventId ?? null });
+    if (!eventId) {
+      return { data: null, error: { message: 'No current event' } };
+    }
+    const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit, p_event_id: eventId });
     if (error) {
       logger.error('❌ [BUILDING ACTIVITIES RPC] Error:', error);
       return { data: null, error: { message: error.message } };
@@ -841,9 +837,12 @@ export const getBuildingActivitiesRPC = async (limit: number = 3, eventId?: stri
   }
 };
 
-export const getBuildingSessionsRPC = async (eventId?: string) => {
+export const getBuildingSessionsRPC = async (eventId: string) => {
   try {
-    const { data, error } = await supabase.rpc('build_team_get_sessions', { p_event_id: eventId ?? null });
+    if (!eventId) {
+      return { data: null, error: { message: 'No current event' } };
+    }
+    const { data, error } = await supabase.rpc('build_team_get_sessions', { p_event_id: eventId });
     if (error) {
       logger.error('❌ [BUILDING SESSIONS RPC] Error:', error);
       return { data: null, error: { message: error.message } };
@@ -855,12 +854,15 @@ export const getBuildingSessionsRPC = async (eventId?: string) => {
   }
 };
 
-export const getSessionBookingForCheckinRPC = async (sessionId: string, attendeeId: string, eventId?: string) => {
+export const getSessionBookingForCheckinRPC = async (sessionId: string, attendeeId: string, eventId: string) => {
   try {
+    if (!eventId) {
+      return { data: null, error: { message: 'No current event' } };
+    }
     const { data, error } = await supabase.rpc('build_team_get_session_booking_for_checkin', {
       p_session_id: sessionId,
       p_attendee_id: attendeeId,
-      p_event_id: eventId ?? null
+      p_event_id: eventId
     });
     if (error) {
       logger.error('❌ [SESSION BOOKING CHECKIN RPC] Error:', error);
@@ -890,7 +892,10 @@ export const buildingSessionCheckinRPC = async (bookingId: string) => {
 
 export const getMyScanCountRPC = async (eventId?: string) => {
   try {
-    const { data, error } = await supabase.rpc('reg_team_get_my_scan_count', { p_event_id: eventId ?? null });
+    if (!eventId) {
+      return { count: 0, error: { message: 'No current event' } };
+    }
+    const { data, error } = await supabase.rpc('reg_team_get_my_scan_count', { p_event_id: eventId });
     if (error) {
       logger.error('❌ [MY SCAN COUNT RPC] Error:', error);
       return { count: 0, error: { message: error.message } };
@@ -943,9 +948,12 @@ export const getBuildingStatsRPC = async (eventId: string) => {
 // Building team: search attendees by Personal ID.
 export const searchAttendeesByPersonalIdBuildingRPC = async (personalId: string, eventId?: string) => {
   try {
+    if (!eventId) {
+      return { data: null, error: { message: 'No current event' } };
+    }
     const { data, error } = await supabase.rpc('build_team_search_attendees_by_personal_id', {
       p_personal_id: personalId,
-      p_event_id: eventId ?? null
+      p_event_id: eventId
     });
     if (error) {
       logger.error('❌ [BUILDING ATTENDEE SEARCH RPC] Error:', error);
@@ -964,8 +972,8 @@ export const getVolunteerNotificationsRPC = async (eventId: string) => {
   return { data: (data as any[]) || [], error };
 };
 
-export const getVolunteerRecentActivitiesRPC = async (limit: number = 3) => {
-  const { data, error } = await supabase.rpc('get_volunteer_recent_activities', { p_limit: limit });
+export const getVolunteerRecentActivitiesRPC = async (limit: number = 3, eventId: string) => {
+  const { data, error } = await supabase.rpc('get_volunteer_recent_activities', { p_limit: limit, p_event_id: eventId });
   return { data: (data as any[]) || [], error };
 };
 
@@ -986,8 +994,11 @@ export const getSessionBookingsRPC = async (sessionId: string) => {
 // SHARED — any authenticated user with any role can read their own activities
 // ============================================================================
 
-export const getMyActivitiesRPC = async (limit: number = 3) => {
-  const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit });
+export const getMyActivitiesRPC = async (limit: number, eventId: string) => {
+  if (!eventId) {
+    return { data: [], error: { message: 'No current event' } };
+  }
+  const { data, error } = await supabase.rpc('get_my_activities', { p_limit: limit, p_event_id: eventId });
   return {
     data: (data as any[]) || [],
     error: error ? { message: error.message } : null,
@@ -997,15 +1008,19 @@ export const getMyActivitiesRPC = async (limit: number = 3) => {
 // BUILDING TEAM RPC WRAPPERS (strict: role = 'building')
 // ============================================================================
 
-export const buildTeamGetAttendeeByUUID = async (uuid: string) => {
-  const { data, error } = await supabase.rpc('build_team_get_attendee_by_uuid', { p_uuid: uuid });
+export const buildTeamGetAttendeeByUUID = async (uuid: string, eventId: string) => {
+  if (!eventId) return { data: null, error: { message: 'No current event' } };
+  const { data, error } = await supabase.rpc('build_team_get_attendee_by_uuid', { p_uuid: uuid, p_event_id: eventId });
   if (error) return { data: null, error: { message: error.message } };
   if (!data) return { data: null, error: { message: 'User not found' } };
   return { data: data as any, error: null };
 };
 
-export const buildTeamGetVolunteerStatsRPC = async (eventId?: string) => {
-  const { data, error } = await supabase.rpc('build_team_get_volunteer_stats', { p_event_id: eventId ?? null }).single();
+export const buildTeamGetVolunteerStatsRPC = async (eventId: string) => {
+  if (!eventId) {
+    return { data: null, error: { message: 'No current event' } };
+  }
+  const { data, error } = await supabase.rpc('build_team_get_volunteer_stats', { p_event_id: eventId }).single();
   if (error) {
     logger.error('❌ [BUILD TEAM STATS RPC] Error:', error);
     return { data: null, error: { message: error.message } };
@@ -1029,8 +1044,11 @@ export const buildTeamGetNotificationsRPC = async (eventId: string) => {
   };
 };
 
-export const buildTeamGetSessionsRPC = async (eventId?: string) => {
-  const { data, error } = await supabase.rpc('build_team_get_sessions', { p_event_id: eventId ?? null });
+export const buildTeamGetSessionsRPC = async (eventId: string) => {
+  if (!eventId) {
+    return { data: [], error: { message: 'No current event' } };
+  }
+  const { data, error } = await supabase.rpc('build_team_get_sessions', { p_event_id: eventId });
   return {
     data: (data as any[]) || [],
     error: error ? { message: error.message } : null,
@@ -1039,10 +1057,11 @@ export const buildTeamGetSessionsRPC = async (eventId?: string) => {
 
 export const buildTeamSearchSessionBookings = async (sessionId: string, query: string, eventId?: string) => {
   if (!query || query.length < 2) return { data: [], error: null };
+  if (!eventId) return { data: [], error: { message: 'No current event' } };
   const { data, error } = await supabase.rpc('build_team_search_session_bookings', {
     p_session_id: sessionId,
     p_query: sanitizeSearchQuery(query),
-    p_event_id: eventId ?? null,
+    p_event_id: eventId,
   });
   return {
     data: (data as any[]) || [],
@@ -1050,11 +1069,12 @@ export const buildTeamSearchSessionBookings = async (sessionId: string, query: s
   };
 };
 
-export const buildTeamGetSessionBookingForCheckin = async (sessionId: string, attendeeId: string, eventId?: string) => {
+export const buildTeamGetSessionBookingForCheckin = async (sessionId: string, attendeeId: string, eventId: string) => {
+  if (!eventId) return { data: null, error: { message: 'No current event' } };
   const { data, error } = await supabase.rpc('build_team_get_session_booking_for_checkin', {
     p_session_id: sessionId,
     p_attendee_id: attendeeId,
-    p_event_id: eventId ?? null,
+    p_event_id: eventId,
   });
   if (error) return { data: null, error: { message: error.message } };
   const booking = Array.isArray(data) && data.length > 0 ? data[0] : null;
@@ -1317,7 +1337,7 @@ export const upsertMyProfile = async (input: MyProfileInput): Promise<{ success:
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { success: false, error: "Not authenticated" };
-    const { error } = await supabase.from("user_profiles").upsert({ id: user.id, full_name: input.full_name, email: input.email ?? user.email ?? null, phone: input.phone ?? null, personal_id: input.personal_id ?? null, nationality: input.nationality ?? "Egyptian", gender: input.gender ?? null, preferred_language: input.preferred_language ?? "en" }, { onConflict: "id" });
+    const { error } = await supabase.rpc("upsert_my_profile", { p_full_name: input.full_name, p_email: input.email ?? user.email ?? null, p_phone: input.phone ?? null, p_personal_id: input.personal_id ?? null, p_nationality: input.nationality ?? "Egyptian", p_gender: input.gender ?? null, p_preferred_language: input.preferred_language ?? "en" });
     if (error) { logger.error("Error upserting own profile:", error); return { success: false, error: error.message }; }
     return { success: true, error: null };
   } catch (error) { const e = error as { message?: string }; return { success: false, error: String(e?.message || error) }; }

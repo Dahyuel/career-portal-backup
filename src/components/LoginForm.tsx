@@ -1,7 +1,7 @@
 // components/LoginForm.tsx
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, AlertCircle, ArrowLeft } from './icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { LoginData, ValidationError } from '../types';
 import { validateEmail, validatePassword } from '../utils/validation';
@@ -12,6 +12,7 @@ import { sanitizeEmail } from '../utils/sanitize';
 
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { isAuthenticated, sessionLoaded, profile, getRoleBasedRedirect } = useAuth();
 
   const [formData, setFormData] = useState<LoginData>({
@@ -22,6 +23,15 @@ export const LoginForm: React.FC = () => {
   const [errors, setErrors] = useState<ValidationError[]>([]);
   const [loading, setLoading] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // ── Surface a routing error passed via navigate state ─────────────────────
+  useEffect(() => {
+    const stateError = (location.state as { error?: string } | null)?.error;
+    if (stateError) {
+      setErrors([{ field: 'general', message: stateError }]);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, navigate]);
 
   // ── Redirect once profile is loaded ──────────────────────────────────────
   // Fires whenever AuthContext publishes a profile with a role. This is a

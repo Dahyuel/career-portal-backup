@@ -43,18 +43,15 @@ export const TechSupportLogsTab: React.FC<TechSupportLogsTabProps> = ({ eventId 
     setLogsError(null);
     try {
       const { data, error } = await supabase
-        .from('tech_support_audit_log')
-        .select(`
-          id, created_at, action, old_role, new_role,
-          target_user_name, target_user_email,
-          actor:user_profiles!actor_id ( email, full_name )
-        `)
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .rpc('admin_get_tech_support_logs', { p_event_id: eventId, p_limit: 100 });
 
       if (error) throw error;
-      setAuditLogs((data as any) || []);
+      setAuditLogs(((data as any[]) || []).map((l: any) => ({
+        id: l.id, created_at: l.created_at, action: l.action,
+        old_role: l.old_role, new_role: l.new_role,
+        target_user_name: l.target_user_name, target_user_email: l.target_user_email,
+        actor: l.actor_email || l.actor_full_name ? { email: l.actor_email, full_name: l.actor_full_name } : null,
+      })));
     } catch (err: any) {
       logger.error('Error fetching audit logs:', err);
       setLogsError(err.message || 'Could not load tech support logs');

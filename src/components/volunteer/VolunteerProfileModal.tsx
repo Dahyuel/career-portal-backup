@@ -60,13 +60,12 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
         (async () => {
             try {
                 const { data, error } = await supabase
-                    .from('events')
-                    .select('name')
-                    .eq('id', eventId)
+                    .rpc('get_event_by_id', { p_event_id: eventId })
                     .maybeSingle();
                 if (cancelled) return;
-                if (!error && data?.name) {
-                    setCurrentEventName(data.name);
+                const eventRow = data as unknown as { name?: string } | null;
+                if (!error && eventRow?.name) {
+                    setCurrentEventName(eventRow.name);
                     return;
                 }
                 if (error) {
@@ -133,7 +132,6 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                             end_date: ev.end_date ?? undefined,
                             status: ev.status ?? undefined,
                             venue_name: ev.venue_name,
-                            is_current: ev.is_current,
                             is_ended: ev.is_ended,
                             can_register: false,
                         });
@@ -675,11 +673,6 @@ const VolunteerProfileModal: React.FC<VolunteerProfileModalProps> = ({
                                                             <h4 className="font-semibold text-gray-900 dark:text-white truncate">
                                                                 {event.name}
                                                             </h4>
-                                                            {event.is_current && (
-                                                                <span className="px-2 py-0.5 text-[10px] font-bold bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full flex-shrink-0">
-                                                                    Current
-                                                                </span>
-                                                            )}
                                                             {event.is_ended && (
                                                                 <span className="px-2 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-200 rounded-full flex-shrink-0 inline-flex items-center gap-0.5">
                                                                     <span className="material-symbols-outlined text-[12px]">lock</span>

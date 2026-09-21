@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getActiveEventId } from '../../lib/currentEvent';
 import { motion, Variants, AnimatePresence } from 'framer-motion';
 import { User } from '../../components/icons';
 import { useAuth } from '../../contexts/AuthContext';
@@ -41,7 +40,7 @@ export const VolunteerDashboard: React.FC = () => {
   const [notifications, setNotifications] = useState<any[]>([]);
   const [selectedNotification, setSelectedNotification] = useState<any>(null);
 
-  const EVENT_ID = profile?.event_id || getActiveEventId();
+  const EVENT_ID = profile?.event_id ?? '';
   const fetchNotifications = useCallback(async () => {
     if (!profile?.id) return;
     try {
@@ -91,8 +90,8 @@ export const VolunteerDashboard: React.FC = () => {
 
       try {
         const [statsResult, activitiesResult] = await Promise.all([
-          getVolunteerStatsRPC(userId),
-          getVolunteerRecentActivitiesRPC(3)
+          getVolunteerStatsRPC(userId, EVENT_ID),
+          getVolunteerRecentActivitiesRPC(3, EVENT_ID)
         ]);
 
         // Process Stats

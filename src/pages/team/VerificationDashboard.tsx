@@ -175,7 +175,7 @@ export const VerificationDashboard: React.FC = () => {
 
         try {
             const [statsResult, activitiesResult] = await Promise.all([
-                getVolunteerStatsRPC(userId),
+                getVolunteerStatsRPC(userId, profile.event_id),
                 supabase.rpc('get_my_activities', { p_limit: 3, p_event_id: profile.event_id })
             ]);
 

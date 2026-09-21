@@ -240,28 +240,20 @@ export const TechSupportDashboard: React.FC = () => {
     setLogsLoading(true);
     try {
       const [logsRes, teamsRes] = await Promise.all([
-        supabase
-          .from('tech_support_audit_log')
-          .select(`
-            id, created_at, action, old_role, new_role,
-            target_user_name, target_user_email,
-            actor:user_profiles!actor_id ( email, full_name )
-          `)
-          .eq('event_id', EVENT_ID)
-          .order('created_at', { ascending: false })
-          .limit(20),
-        supabase
-          .from('volunteer_teams')
-          .select('id, team_name')
-          .eq('event_id', EVENT_ID)
-          .order('team_name')
+        supabase.rpc('admin_get_tech_support_logs', { p_event_id: EVENT_ID, p_limit: 20 }),
+        supabase.rpc('tech_support_get_event_teams', { p_event_id: EVENT_ID })
       ]);
 
       if (logsRes.error) throw logsRes.error;
       if (teamsRes.error) throw teamsRes.error;
 
-      setAuditLogs((logsRes.data as any) || []);
-      setEventTeams(teamsRes.data || []);
+      setAuditLogs(((logsRes.data as any[]) || []).map((l: any) => ({
+        id: l.id, created_at: l.created_at, action: l.action,
+        old_role: l.old_role, new_role: l.new_role,
+        target_user_name: l.target_user_name, target_user_email: l.target_user_email,
+        actor: l.actor_email || l.actor_full_name ? { email: l.actor_email, full_name: l.actor_full_name } : null,
+      })));
+      setEventTeams((teamsRes.data as any) || []);
     } catch (err) {
       logger.error('Error fetching audit logs or teams:', err);
     } finally {
@@ -302,7 +294,7 @@ export const TechSupportDashboard: React.FC = () => {
 
     try {
       const { data, error } = await supabase
-        .rpc('tech_support_search_user', { p_query: trimmed });
+        .rpc('tech_support_search_user', { p_query: trimmed, p_event_id: EVENT_ID });
       if (error) throw error;
 
       if (!data?.success) {
@@ -343,6 +335,7 @@ export const TechSupportDashboard: React.FC = () => {
     try {
       const { data, error } = await supabase.rpc('tech_support_search_volunteer', {
         p_national_id: user.personal_id || '',
+        p_event_id: EVENT_ID,
       });
       if (error) throw error;
       if (data?.success && data?.user) {
@@ -368,56 +361,56 @@ export const TechSupportDashboard: React.FC = () => {
     setShowRoleConfirm(true);
   };
 
-    const handleRoleChangeConfirm = async () => {
-        if (!selectedUser || !selectedOption) return;
+  const handleRoleChangeConfirm = async () => {
+    if (!selectedUser || !selectedOption) return;
 
-        // Roles are stored per event, so we need to know which event this is for.
-        const eventId = profile?.event_id;
-        if (!eventId) {
-            setToast({ message: 'No event is selected for your account, so the role cannot be changed.', type: 'error' });
-            return;
-        }
+    // Roles are stored per event, so we need to know which event this is for.
+    const eventId = profile?.event_id;
+    if (!eventId) {
+      setToast({ message: 'No event is selected for your account, so the role cannot be changed.', type: 'error' });
+      return;
+    }
 
-        if (selectedUser.id === profile?.id) {
-            setToast({ message: 'Cannot change your own role.', type: 'error' });
-            return;
-        }
+    if (selectedUser.id === profile?.id) {
+      setToast({ message: 'Cannot change your own role.', type: 'error' });
+      return;
+    }
 
-        setRoleChangePending(true);
-        try {
-            const { data, error } = await supabase.rpc('tech_support_change_role', {
-                _event_id: eventId,
-                _user_id: selectedUser.id,
-                _new_role: selectedOption.role,
-                _team_id: selectedOption.teamId || null,
-            });
+    setRoleChangePending(true);
+    try {
+      const { data, error } = await supabase.rpc('tech_support_change_role', {
+        _event_id: eventId,
+        _user_id: selectedUser.id,
+        _new_role: selectedOption.role,
+        _team_id: selectedOption.teamId || null,
+      });
 
-            if (error) throw error;
-            if (!data?.success) throw new Error(data?.error || 'Role change failed');
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Role change failed');
 
-            const newTeamName = eventTeams.find(t => t.id === selectedOption.teamId)?.team_name || '';
-            setVolunteerInfo(prev => prev ? {
-                ...prev,
-                role: selectedOption.role,
-                team_id: selectedOption.teamId,
-                team_name: newTeamName,
-            } : null);
+      const newTeamName = eventTeams.find(t => t.id === selectedOption.teamId)?.team_name || '';
+      setVolunteerInfo(prev => prev ? {
+        ...prev,
+        role: selectedOption.role,
+        team_id: selectedOption.teamId,
+        team_name: newTeamName,
+      } : null);
 
-            setToast({ message: `Role changed to "${selectedOption.label}" successfully!`, type: 'success' });
-            setShowRoleConfirm(false);
-            setShowRoleChange(false);
-            setSelectedOption(null);
+      setToast({ message: `Role changed to "${selectedOption.label}" successfully!`, type: 'success' });
+      setShowRoleConfirm(false);
+      setShowRoleChange(false);
+      setSelectedOption(null);
 
-            // Re-search to refresh roles & refresh audit logs
-            handleSearch();
-            fetchAuditLogsAndTeams();
-        } catch (err: any) {
-            logger.error('Error changing role:', err);
-            setToast({ message: err?.message || 'Failed to change role.', type: 'error' });
-        } finally {
-            setRoleChangePending(false);
-        }
-    };
+      // Re-search to refresh roles & refresh audit logs
+      handleSearch();
+      fetchAuditLogsAndTeams();
+    } catch (err: any) {
+      logger.error('Error changing role:', err);
+      setToast({ message: err?.message || 'Failed to change role.', type: 'error' });
+    } finally {
+      setRoleChangePending(false);
+    }
+  };
 
   // ── Delete User ───────────────────────────────────────────────────────────────
   const handleConfirmDelete = async () => {
@@ -425,7 +418,7 @@ export const TechSupportDashboard: React.FC = () => {
     setDeleteLoading(true);
     try {
       const { data, error } = await supabase
-        .rpc('tech_support_delete_user', { p_user_id: userToDelete.id });
+        .rpc('tech_support_delete_user', { p_user_id: userToDelete.id, p_event_id: EVENT_ID });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Delete failed');
 
@@ -552,14 +545,12 @@ export const TechSupportDashboard: React.FC = () => {
                   key={log.id}
                   className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60 border border-gray-100 dark:border-slate-700/50"
                 >
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                    isRoleChange
-                      ? 'bg-blue-100 dark:bg-blue-900/30'
-                      : 'bg-red-100 dark:bg-red-900/30'
-                  }`}>
-                    <span className={`material-symbols-outlined text-lg ${
-                      isRoleChange ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${isRoleChange
+                    ? 'bg-blue-100 dark:bg-blue-900/30'
+                    : 'bg-red-100 dark:bg-red-900/30'
                     }`}>
+                    <span className={`material-symbols-outlined text-lg ${isRoleChange ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'
+                      }`}>
                       {isRoleChange ? 'swap_horiz' : 'person_remove'}
                     </span>
                   </div>
@@ -567,9 +558,9 @@ export const TechSupportDashboard: React.FC = () => {
                     <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug">
                       {isRoleChange ? (
                         <>Role changed for <span className="text-blue-600 dark:text-blue-400">{log.target_user_name || log.target_user_email}</span>{' '}
-                        <span className="font-normal text-gray-500 dark:text-gray-400">
-                          {log.old_role} → {log.new_role}
-                        </span></>
+                          <span className="font-normal text-gray-500 dark:text-gray-400">
+                            {log.old_role} → {log.new_role}
+                          </span></>
                       ) : (
                         <>Deleted user <span className="text-red-600 dark:text-red-400">{log.target_user_name || log.target_user_email}</span></>
                       )}
@@ -759,11 +750,10 @@ export const TechSupportDashboard: React.FC = () => {
                               <button
                                 key={opt.role + opt.teamId}
                                 onClick={() => setSelectedOption({ role: opt.role, teamId: opt.teamId, label: opt.label })}
-                                className={`flex items-center gap-2 p-3 rounded-xl border-2 font-semibold text-sm transition-all ${
-                                  isSelected
-                                    ? 'border-asu-red bg-red-50 dark:bg-red-900/20 text-asu-red dark:text-red-400'
-                                    : 'border-gray-100 dark:border-slate-800 text-gray-600 dark:text-gray-300 hover:border-red-200 dark:hover:border-slate-600'
-                                }`}
+                                className={`flex items-center gap-2 p-3 rounded-xl border-2 font-semibold text-sm transition-all ${isSelected
+                                  ? 'border-asu-red bg-red-50 dark:bg-red-900/20 text-asu-red dark:text-red-400'
+                                  : 'border-gray-100 dark:border-slate-800 text-gray-600 dark:text-gray-300 hover:border-red-200 dark:hover:border-slate-600'
+                                  }`}
                               >
                                 <span className="material-symbols-outlined text-base">{opt.icon}</span>
                                 <span>{opt.label}</span>
@@ -788,11 +778,10 @@ export const TechSupportDashboard: React.FC = () => {
                               <button
                                 key={'leader-' + team.id}
                                 onClick={() => setSelectedOption({ role: 'team_leader', teamId: team.id, label: `Leader · ${team.name}` })}
-                                className={`flex items-center gap-2 p-3 rounded-xl border-2 font-semibold text-sm transition-all ${
-                                  isSelected
-                                    ? 'border-asu-red bg-red-50 dark:bg-red-900/20 text-asu-red dark:text-red-400'
-                                    : 'border-gray-100 dark:border-slate-800 text-gray-600 dark:text-gray-300 hover:border-red-200 dark:hover:border-slate-600'
-                                }`}
+                                className={`flex items-center gap-2 p-3 rounded-xl border-2 font-semibold text-sm transition-all ${isSelected
+                                  ? 'border-asu-red bg-red-50 dark:bg-red-900/20 text-asu-red dark:text-red-400'
+                                  : 'border-gray-100 dark:border-slate-800 text-gray-600 dark:text-gray-300 hover:border-red-200 dark:hover:border-slate-600'
+                                  }`}
                               >
                                 <span className="material-symbols-outlined text-base">manage_accounts</span>
                                 <span className="truncate">{team.name}</span>

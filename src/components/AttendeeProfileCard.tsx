@@ -9,7 +9,7 @@ import {
     checkEventRegistration,
     FairEvent,
 } from '../lib/supabase';
-import { getEmployerStatus, openEmployerEvent } from '../lib/employer';
+import { openEmployerEvent } from '../lib/employer';
 import { motion, AnimatePresence } from 'framer-motion';
 import { logger } from '../utils/logger';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,13 +40,13 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'qrcode'>('overview');
     const [showRestrictionModal, setShowRestrictionModal] = useState(false);
 
-// ── Event switcher state ─────────────────────────────────────────────
+    // ── Event switcher state ─────────────────────────────────────────────
     const [showEventSwitcher, setShowEventSwitcher] = useState(false);
     const [events, setEvents] = useState<FairEvent[]>([]);
     const [eventsLoading, setEventsLoading] = useState(false);
-    const [eventsError, setEventsError] = useState<string|null>(null);
-    const [switchingEventId, setSwitchingEventId] = useState<string|null>(null);
-    const [currentEventName, setCurrentEventName] = useState<string|null>(null);
+    const [eventsError, setEventsError] = useState<string | null>(null);
+    const [switchingEventId, setSwitchingEventId] = useState<string | null>(null);
+    const [currentEventName, setCurrentEventName] = useState<string | null>(null);
     const [eventNameLoading, setEventNameLoading] = useState<boolean>(!!eventId);
     // Employer events where the company takes part but the user has no employers
     // row yet. Selecting one runs employer_open_event (mirrors EventSelection).
@@ -173,16 +173,35 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
             console.warn('[SILENT REFRESH] Failed:', err);
         }
     };
-
     const handleSaveName = async () => {
         if (!editName.trim() || editName.trim().length < 2) {
             showSaveMsg('Name must be at least 2 characters', 'error');
             return;
         }
+        if (!eventId) {
+            showSaveMsg('No active event — please reload.', 'error');
+            return;
+        }
+
+        const newName = editName.trim();
         setSaving(true);
         try {
-            const { error } = await supabase.rpc('update_display_name', { p_full_name: editName.trim() });
+            // 1) DB-side: profiles + activity log (scoped to event)
+            const { error } = await supabase.rpc('update_display_name', {
+                p_full_name: newName,
+                p_event_id: eventId,
+            });
             if (error) throw error;
+
+            // 2) Auth-side: keep raw_user_meta_data in sync so a token refresh
+            //    doesn't overwrite the DB value with the old name.
+            const { error: authErr } = await supabase.auth.updateUser({
+                data: { full_name: newName, name: newName },
+            });
+            if (authErr) {
+                // DB succeeded — log but don't fail the whole operation.
+                logger.warn('Auth metadata update failed:', authErr);
+            }
 
             showSaveMsg('Name updated successfully!', 'success');
             setEditingName(false);
@@ -196,11 +215,14 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
             setSaving(false);
         }
     };
-
     const handleSaveYear = async (year: number) => {
+        if (!eventId) {
+            showSaveMsg('No active event — please reload.', 'error');
+            return;
+        }
         setSaving(true);
         try {
-            const { error } = await supabase.rpc('update_attendee_info', { p_year: year });
+            const { error } = await supabase.rpc('update_attendee_info', { p_year: year, p_event_id: eventId });
             if (error) throw error;
             showSaveMsg('Year updated successfully!', 'success');
             setEditingYear(false);
@@ -217,7 +239,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
     const handleSaveDepartment = async () => {
         setSaving(true);
         try {
-            const { error } = await supabase.rpc('update_attendee_info', { p_department: editDepartment.trim() || null });
+            const { error } = await supabase.rpc('update_attendee_info', { p_department: editDepartment.trim() || null, p_event_id: eventId });
             if (error) throw error;
             showSaveMsg('Department updated successfully!', 'success');
             setEditingDepartment(false);
@@ -311,7 +333,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
             if (uploadError || !uploadData) throw new Error(uploadError?.message || 'Upload failed');
 
             const { error: updateError } = await supabase
-                .rpc('update_attendee_cv', { p_cv_url: uploadData.path });
+                .rpc('update_attendee_cv', { p_cv_url: uploadData.path, p_event_id: eventId });
 
             if (updateError) throw updateError;
 
@@ -326,66 +348,34 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
         }
     };
 
-// ── Open the event switcher modal and load active events ────────────
-    // Mirrors EventSelection.tsx: merges employer-only events (company
-    // participates but the event isn't in get_active_events) and tracks which
-    // ones need employer_open_event, so the ended/role logic matches exactly.
     const handleOpenEventSwitcher = async () => {
         setShowEventSwitcher(true);
         setEventsError(null);
         setEventsLoading(true);
         try {
-            const [{ data, error }, employerStatus] = await Promise.all([
-                getActiveEvents(),
-                getEmployerStatus().catch(() => null),
-            ]);
+            // Load events the same way EventSelection does — via getActiveEvents().
+            // No employer-only RPC, no dependency on _employer_available_events.
+            const { data, error } = await getActiveEvents();
+
             if (error) {
                 setEventsError(error.message);
                 return;
             }
 
-            const merged: FairEvent[] = [
-                ...(Array.isArray(data) ? data : []),
-            ];
-            const seen = new Set(merged.map((e) => e.id));
-            const openable = new Set<string>();
+            const merged: FairEvent[] = Array.isArray(data) ? [...data] : [];
 
-            if (employerStatus?.is_employer) {
-                for (const ev of employerStatus.events) {
-                    const existing = merged.find((m) => m.id === ev.event_id);
-                    if (existing) {
-                        // Company participates but the user has no employers row yet.
-                        if (authProfile?.employer?.company_id !== ev.company_id) {
-                            openable.add(ev.event_id);
-                        }
-                    } else if (!seen.has(ev.event_id)) {
-                        seen.add(ev.event_id);
-                        merged.push({
-                            id: ev.event_id,
-                            name: ev.event_name,
-                            event_type: ev.event_type ?? undefined,
-                            start_date: ev.start_date ?? undefined,
-                            end_date: ev.end_date ?? undefined,
-                            status: ev.status ?? undefined,
-                            venue_name: ev.venue_name,
-                            is_current: ev.is_current,
-                            is_ended: ev.is_ended,
-                            can_register: false,
-                        });
-                        openable.add(ev.event_id);
-                    }
-                }
-            }
-
+            // Sort newest first (matches EventSelection)
             merged.sort(
                 (a, b) =>
                     new Date(b.start_date ?? 0).getTime() -
                     new Date(a.start_date ?? 0).getTime()
             );
 
-            // Hide the currently-selected event from the list — no point
-            // offering to switch to the one already bound.
-            setEmployerOpenable(openable);
+            // No employer-openable set anymore — the switcher only shows
+            // events the user already has access to, or events they can register for.
+            setEmployerOpenable(new Set());
+
+            // Hide the currently-selected event from the list.
             setEvents(merged.filter((e) => e.id !== eventId));
         } catch (err: any) {
             logger.error('Failed to load events for switcher:', err);
@@ -431,7 +421,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                     return;
                 }
 
-// Close modal + card, then reload the dashboard so every
+                // Close modal + card, then reload the dashboard so every
                 // hook and RPC picks up the new EVENT_ID.
                 setShowEventSwitcher(false);
                 onClose();

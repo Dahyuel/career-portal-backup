@@ -150,7 +150,8 @@ export const TeamLeaderDashboard: React.FC = () => {
     setLoadingTeamList(true);
     try {
       const { data, error } = await supabase.rpc('get_team_members_list', {
-        p_team_id: teamId
+        p_team_id: teamId,
+        p_event_id: EVENT_ID
       });
 
       if (error) throw error;
@@ -207,7 +208,7 @@ export const TeamLeaderDashboard: React.FC = () => {
     try {
       const { data, error } = await supabase.rpc('get_full_volunteer_details', {
         p_volunteer_identifier: volunteerId,
-        p_event_id: profile?.event_id ?? null
+        p_event_id: EVENT_ID
       });
 
       if (error) {
@@ -599,6 +600,7 @@ export const TeamLeaderDashboard: React.FC = () => {
         }}
         volunteer={selectedVolunteer}
         loading={loadingVolunteerDetails}
+        eventId={EVENT_ID}
         onSuccess={async () => {
           // Refresh team members data
           if (teamInfo) {
