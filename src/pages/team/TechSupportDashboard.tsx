@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import FeedbackTab from '../../components/shared/FeedbackTab';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { useAuth } from '../../contexts/AuthContext';
@@ -43,6 +43,17 @@ interface UserResult {
   personal_id?: string;
   phone?: string;
   created_at?: string;
+}
+
+interface AuditLogEntry {
+  id: string;
+  created_at: string;
+  action: 'change_role' | 'delete_user';
+  target_user_name: string | null;
+  target_user_email: string | null;
+  old_role: string | null;
+  new_role: string | null;
+  actor: { email: string; full_name: string } | null;
 }
 
 // Teams come from the database for the current event (see lib/eventTeams.ts).
@@ -217,6 +228,51 @@ export const TechSupportDashboard: React.FC = () => {
   // We need volunteer info for the role change RPC
   const [volunteerInfo, setVolunteerInfo] = useState<{ volunteer_id?: string; team_id?: string; team_name?: string; role?: string } | null>(null);
 
+  // ── Audit Log State ─────────────────────────────────────────────────────────
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+
+  // ── Teams State ──────────────────────────────────────────────────────────────
+  const [eventTeams, setEventTeams] = useState<{ id: string; team_name: string }[]>([]);
+
+  const fetchAuditLogsAndTeams = useCallback(async () => {
+    if (!EVENT_ID) return;
+    setLogsLoading(true);
+    try {
+      const [logsRes, teamsRes] = await Promise.all([
+        supabase
+          .from('tech_support_audit_log')
+          .select(`
+            id, created_at, action, old_role, new_role,
+            target_user_name, target_user_email,
+            actor:user_profiles!actor_id ( email, full_name )
+          `)
+          .eq('event_id', EVENT_ID)
+          .order('created_at', { ascending: false })
+          .limit(20),
+        supabase
+          .from('volunteer_teams')
+          .select('id, team_name')
+          .eq('event_id', EVENT_ID)
+          .order('team_name')
+      ]);
+
+      if (logsRes.error) throw logsRes.error;
+      if (teamsRes.error) throw teamsRes.error;
+
+      setAuditLogs((logsRes.data as any) || []);
+      setEventTeams(teamsRes.data || []);
+    } catch (err) {
+      logger.error('Error fetching audit logs or teams:', err);
+    } finally {
+      setLogsLoading(false);
+    }
+  }, [EVENT_ID]);
+
+  useEffect(() => {
+    fetchAuditLogsAndTeams();
+  }, [fetchAuditLogsAndTeams]);
+
   const firstName = profile?.full_name?.split(' ')[0] || 'Tech Support';
 
   // ── Search by Email, Phone, or Personal ID ────────────────────────────────────
@@ -339,7 +395,7 @@ export const TechSupportDashboard: React.FC = () => {
             if (error) throw error;
             if (!data?.success) throw new Error(data?.error || 'Role change failed');
 
-            const newTeamName = teamOptions().find(t => t.id === selectedOption.teamId)?.name || '';
+            const newTeamName = eventTeams.find(t => t.id === selectedOption.teamId)?.team_name || '';
             setVolunteerInfo(prev => prev ? {
                 ...prev,
                 role: selectedOption.role,
@@ -352,8 +408,9 @@ export const TechSupportDashboard: React.FC = () => {
             setShowRoleChange(false);
             setSelectedOption(null);
 
-            // Re-search to refresh roles
+            // Re-search to refresh roles & refresh audit logs
             handleSearch();
+            fetchAuditLogsAndTeams();
         } catch (err: any) {
             logger.error('Error changing role:', err);
             setToast({ message: err?.message || 'Failed to change role.', type: 'error' });
@@ -379,6 +436,7 @@ export const TechSupportDashboard: React.FC = () => {
       setHasSearched(false);
       setSearchInput('');
       setShowRoleChange(false);
+      fetchAuditLogsAndTeams();
     } catch (err: any) {
       logger.error('Error deleting user:', err);
       setToast({ message: err?.message || 'Failed to delete user.', type: 'error' });
@@ -455,7 +513,7 @@ export const TechSupportDashboard: React.FC = () => {
         </button>
       </motion.div>
 
-      {/* Recent Actions empty state */}
+      {/* Recent Actions */}
       <motion.div
         variants={itemVariants}
         className="bg-white dark:bg-slate-900 rounded-xl p-6 shadow-sm border border-gray-100 dark:border-slate-800"
@@ -464,11 +522,67 @@ export const TechSupportDashboard: React.FC = () => {
           <span className="material-symbols-outlined text-asu-red">history</span>
           Recent Actions
         </h3>
-        <div className="text-center py-10 text-gray-500 dark:text-gray-400">
-          <span className="material-symbols-outlined text-5xl text-gray-200 dark:text-slate-700 mb-2 block">history</span>
-          <p className="text-sm">No recent actions yet</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Actions performed here will appear in this feed</p>
-        </div>
+        {logsLoading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-8 h-8 border-4 border-slate-200 dark:border-slate-700 border-t-asu-red rounded-full animate-spin" />
+          </div>
+        ) : auditLogs.length === 0 ? (
+          <div className="text-center py-10 text-gray-500 dark:text-gray-400">
+            <span className="material-symbols-outlined text-5xl text-gray-200 dark:text-slate-700 mb-2 block">history</span>
+            <p className="text-sm">No recent actions yet</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Actions performed here will appear in this feed</p>
+          </div>
+        ) : (
+          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+            {auditLogs.map((log) => {
+              const isRoleChange = log.action === 'change_role';
+              const timeAgo = (() => {
+                const diff = Date.now() - new Date(log.created_at).getTime();
+                const mins = Math.floor(diff / 60000);
+                if (mins < 1) return 'just now';
+                if (mins < 60) return `${mins}m ago`;
+                const hrs = Math.floor(mins / 60);
+                if (hrs < 24) return `${hrs}h ago`;
+                const days = Math.floor(hrs / 24);
+                return `${days}d ago`;
+              })();
+
+              return (
+                <div
+                  key={log.id}
+                  className="flex items-start gap-3 p-3 rounded-xl bg-gray-50 dark:bg-slate-800/60 border border-gray-100 dark:border-slate-700/50"
+                >
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                    isRoleChange
+                      ? 'bg-blue-100 dark:bg-blue-900/30'
+                      : 'bg-red-100 dark:bg-red-900/30'
+                  }`}>
+                    <span className={`material-symbols-outlined text-lg ${
+                      isRoleChange ? 'text-blue-600 dark:text-blue-400' : 'text-red-600 dark:text-red-400'
+                    }`}>
+                      {isRoleChange ? 'swap_horiz' : 'person_remove'}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white leading-snug">
+                      {isRoleChange ? (
+                        <>Role changed for <span className="text-blue-600 dark:text-blue-400">{log.target_user_name || log.target_user_email}</span>{' '}
+                        <span className="font-normal text-gray-500 dark:text-gray-400">
+                          {log.old_role} → {log.new_role}
+                        </span></>
+                      ) : (
+                        <>Deleted user <span className="text-red-600 dark:text-red-400">{log.target_user_name || log.target_user_email}</span></>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      by {log.actor?.email || 'Unknown'} · {timeAgo}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </motion.div>
     </motion.div>
   );
@@ -630,12 +744,12 @@ export const TechSupportDashboard: React.FC = () => {
                     <div>
                       <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-3">Select New Role</p>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {[...namedRoleOptions(), ...volunteerTeamOptions()].length === 0 && (
+                        {[...namedRoleOptions(false, eventTeams), ...volunteerTeamOptions(eventTeams)].length === 0 && (
                           <p className="col-span-full text-sm text-gray-500 dark:text-gray-400">
                             This event has no volunteer teams yet. Add them in the super admin dashboard under Events → Volunteer teams.
                           </p>
                         )}
-                        {[...namedRoleOptions(), ...volunteerTeamOptions()]
+                        {[...namedRoleOptions(false, eventTeams), ...volunteerTeamOptions(eventTeams)]
                           .filter(opt =>
                             !(opt.role === volunteerInfo?.role && opt.teamId === volunteerInfo?.team_id)
                           )
@@ -664,7 +778,7 @@ export const TechSupportDashboard: React.FC = () => {
                     <div>
                       <p className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-slate-500 mb-3">Team Leader of</p>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {teamOptions()
+                        {teamOptions(eventTeams)
                           .filter(team =>
                             !(volunteerInfo?.role === 'team_leader' && team.id === volunteerInfo?.team_id)
                           )

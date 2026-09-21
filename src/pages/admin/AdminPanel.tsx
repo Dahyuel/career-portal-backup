@@ -4,6 +4,7 @@ import { motion, AnimatePresence, Variants } from 'framer-motion';
 import SharedNavigation, { NavItem } from '../../components/shared/SharedNavigation';
 
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../../contexts/AuthContext';
 import { FACULTIES } from '../../utils/constants';
 import { validateEmail } from '../../utils/validation';
 import { copyText, selectElementText } from '../../utils/clipboard';
@@ -41,6 +42,7 @@ import JobApplicantsModal from '../../components/employer/JobApplicantsModal';
 import { logger } from '../../utils/logger';
 import StatisticsTab from '../../components/admin/StatisticsTab';
 import FeedbackManagement from '../../components/admin/FeedbackManagement';
+import TechSupportLogsTab from '../../components/admin/TechSupportLogsTab';
 import { getActiveEventId } from '../../lib/currentEvent';
 
 // --- Animation Variants ---
@@ -711,6 +713,7 @@ const CompanyLogoSelector: React.FC<{
 };
 export function AdminPanel() {
   useTheme();
+  const { profile } = useAuth();
 
   // Whatever the super admin has made the current event. Read here (not at module
   // level) so it is resolved after the active event has loaded at start-up.
@@ -725,7 +728,8 @@ export function AdminPanel() {
     { key: 'companies', label: 'Companies', icon: 'business' },
     { key: 'jobs', label: 'Jobs', icon: 'work' },
     { key: 'points', label: 'Points', icon: 'stars' },
-    { key: 'feedback', label: 'Feedback', icon: 'rate_review' }
+    { key: 'feedback', label: 'Feedback', icon: 'rate_review' },
+    { key: 'tech_support_logs', label: 'Tech Support Logs', icon: 'manage_history' }
   ];
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -6712,7 +6716,8 @@ export function AdminPanel() {
           {activeTab === 'companies' && renderCompanies()}
           {activeTab === 'jobs' && renderJobs()}
           {activeTab === 'points' && renderPoints()}
-          {activeTab === 'feedback' && <FeedbackManagement eventId={getActiveEventId()} />}
+          {activeTab === 'feedback' && <FeedbackManagement eventId={EVENT_ID} />}
+          {activeTab === 'tech_support_logs' && <TechSupportLogsTab eventId={EVENT_ID} />}
         </motion.div>
       </AnimatePresence>
 

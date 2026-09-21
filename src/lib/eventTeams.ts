@@ -36,12 +36,12 @@ export interface RoleTeamOption {
   icon: string;
 }
 
-export const teamOptions = (): { id: string; name: string }[] =>
-  getCurrentEventTeams().map((t) => ({ id: t.id, name: t.team_name }));
+export const teamOptions = (teams?: { id: string; team_name: string }[]): { id: string; name: string }[] =>
+  (teams || getCurrentEventTeams()).map((t) => ({ id: t.id, name: t.team_name }));
 
-export const namedRoleOptions = (includeAdmin = false): RoleTeamOption[] => {
-  const teams = getCurrentEventTeams();
-  const find = (name: string) => teams.find((t) => norm(t.team_name) === name);
+export const namedRoleOptions = (includeAdmin = false, teams?: { id: string; team_name: string }[]): RoleTeamOption[] => {
+  const eventTeams = teams || getCurrentEventTeams();
+  const find = (name: string) => eventTeams.find((t) => norm(t.team_name) === name);
   const options: RoleTeamOption[] = [];
   for (const r of NAMED_ROLES) {
     const team = find(r.team);
@@ -54,9 +54,9 @@ export const namedRoleOptions = (includeAdmin = false): RoleTeamOption[] => {
   return options;
 };
 
-export const volunteerTeamOptions = (): RoleTeamOption[] => {
+export const volunteerTeamOptions = (teams?: { id: string; team_name: string }[]): RoleTeamOption[] => {
   const named = new Set(NAMED_ROLES.map((r) => r.team));
-  return getCurrentEventTeams()
+  return (teams || getCurrentEventTeams())
     .filter((t) => !named.has(norm(t.team_name)))
     .map((t) => ({ role: 'volunteer', teamId: t.id, label: t.team_name, icon: TEAM_ICONS[norm(t.team_name)] ?? 'groups' }));
 };
