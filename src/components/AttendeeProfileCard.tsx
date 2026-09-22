@@ -215,16 +215,24 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
             setSaving(false);
         }
     };
-    const handleSaveYear = async (year: number) => {
+    const handleSaveYear = async (value: string) => {
         if (!eventId) {
             showSaveMsg('No active event — please reload.', 'error');
             return;
         }
         setSaving(true);
         try {
-            const { error } = await supabase.rpc('update_attendee_info', { p_year: year, p_event_id: eventId });
+            const isGraduate = value === 'graduate';
+            const params: Record<string, any> = { p_event_id: eventId };
+            if (isGraduate) {
+                params.p_student_status = 'graduate';
+            } else {
+                params.p_year = parseInt(value);
+                params.p_student_status = 'undergraduate';
+            }
+            const { error } = await supabase.rpc('update_attendee_info', params);
             if (error) throw error;
-            showSaveMsg('Year updated successfully!', 'success');
+            showSaveMsg(isGraduate ? 'Status updated to Graduate!' : 'Year updated successfully!', 'success');
             setEditingYear(false);
             await silentRefreshProfile();
             onProfileUpdate?.();
@@ -772,10 +780,14 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 {editingYear ? (
                                                     <div className="flex items-center gap-2 mt-1">
                                                         <select
-                                                            value={editYear ?? ''}
+                                                            value={profile?.student_status === 'graduate' && !editYear ? 'graduate' : (editYear ?? '')}
                                                             onChange={(e) => {
-                                                                const val = parseInt(e.target.value);
-                                                                setEditYear(val);
+                                                                const val = e.target.value;
+                                                                if (val === 'graduate') {
+                                                                    setEditYear(null);
+                                                                } else {
+                                                                    setEditYear(parseInt(val));
+                                                                }
                                                                 handleSaveYear(val);
                                                             }}
                                                             disabled={saving}
@@ -785,6 +797,7 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                             {[1, 2, 3, 4, 5, 6, 7].map(y => (
                                                                 <option key={y} value={y}>Year {y}</option>
                                                             ))}
+                                                            <option value="graduate">Graduate</option>
                                                         </select>
                                                         <motion.button
                                                             whileHover={{ scale: 1.1 }}
@@ -799,12 +812,12 @@ const AttendeeProfileCard: React.FC<AttendeeProfileCardProps> = ({
                                                 ) : (
                                                     <div className="flex items-center gap-1.5">
                                                         <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                                            {profile.year ? `Year ${profile.year}` : 'Not set'}
+                                                            {profile?.student_status === 'graduate' ? 'Graduate' : (profile.year ? `Year ${profile.year}` : 'Not set')}
                                                         </p>
                                                         <motion.button
                                                             whileHover={{ scale: 1.1 }}
                                                             whileTap={{ scale: 0.9 }}
-                                                            onClick={() => { setEditYear(profile.year ?? 1); setEditingYear(true); }}
+                                                            onClick={() => { setEditYear(profile?.student_status === 'graduate' ? null : (profile.year ?? 1)); setEditingYear(true); }}
                                                             className="text-gray-400 hover:text-red-500 dark:hover:text-red-400 p-0.5 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
                                                             title="Edit year"
                                                         >

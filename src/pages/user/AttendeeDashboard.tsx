@@ -146,6 +146,7 @@ const AttendeeDashboard = () => {
       enrollment_proof_url: profile.attendee?.enrollment_proof_url,
       registration_status: profile.attendee?.registration_status,
       payment_status: profile.attendee?.payment_status,
+      student_status: profile.attendee?.student_status,
       registered_at: profile.attendee?.registered_at
     };
   }, [profile]);

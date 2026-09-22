@@ -31,6 +31,7 @@ interface GetMyProfileResponse {
     enrollment_proof_url: string;
     registered_at: string;
     year?: number | null;
+    student_status?: string | null;
     allow_non_asu_attendees?: boolean;
   } | null;
   volunteer: {

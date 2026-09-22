@@ -13,6 +13,7 @@ export interface AttendeeProfile {
     faculty?: string;
     department?: string;
     year?: number | null;
+    student_status?: string | null;
     payment_status?: string;
     cv_url?: string;
     nationality?: string | null;
