@@ -418,8 +418,7 @@ export const EmployerDashboard: React.FC = () => {
                                     setSelectedJob(null);
                                     setShowJobModal(true);
                                 }}
-                                className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 active:scale-95"
-                                style={{ backgroundColor: '#DC2626' }}
+                                className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-600/20 active:scale-95"
                             >
                                 <span className="material-symbols-outlined">add</span>
                                 Post New Job

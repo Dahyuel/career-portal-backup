@@ -32,7 +32,15 @@ export interface ColourPreset {
 
 export const COLOUR_PRESETS: ColourPreset[] = [
   { label: 'Red', hex: '#dc2626' },
-  { label: 'Orange', hex: '#ea580c' }
+  { label: 'Orange', hex: '#ea580c' },
+  { label: 'Amber', hex: '#d97706' },
+  { label: 'Emerald', hex: '#059669' },
+  { label: 'Teal', hex: '#0d9488' },
+  { label: 'Blue', hex: '#2563eb' },
+  { label: 'Indigo', hex: '#4f46e5' },
+  { label: 'Violet', hex: '#7c3aed' },
+  { label: 'Fuchsia', hex: '#c026d3' },
+  { label: 'Rose', hex: '#e11d48' }
 ];
 
 export const DEFAULT_ACCENT = COLOUR_PRESETS[0].hex;
@@ -125,6 +133,8 @@ export const buildThemeVars = (theme: Partial<LandingTheme> | string | null | un
   for (const [shade, { lightness, saturation }] of Object.entries(SHADES)) {
     const [sr, sg, sb] = hslToRgb(h, Math.min(100, s * saturation), lightness);
     vars[`--a-${shade}`] = `rgb(${sr} ${sg} ${sb})`;
+    // Tailwind's <alpha-value> pattern needs raw R G B triplets separated by spaces (not commas).
+    vars[`--a-${shade}-rgb`] = `${sr} ${sg} ${sb}`;
     for (const alpha of ALPHAS) {
       vars[`--a-${shade}-${alpha}`] = `rgb(${sr} ${sg} ${sb} / ${alpha / 100})`;
     }

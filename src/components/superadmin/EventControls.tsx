@@ -15,12 +15,15 @@ import {
   type EventControl,
   type EventControlName,
   type EventControlsState,
+  type EventDetail,
   type EventSettings,
   type EventSummary,
   type MaintenanceState,
   type Notify
 } from './sadminApi';
 import { Badge, ConfirmDialog, ErrorBlock, LoadingBlock, MIcon, PageHeader, Panel, RefreshButton, Toggle } from './ui';
+import { COLOUR_PRESETS, applyTheme } from '../../lib/theme';
+import { mergeLanding, type LandingContent } from '../../lib/landingContent';
 
 const DEFAULT_MESSAGE = 'System is under maintenance. Please try again later.';
 const STATUS_OPTIONS = ['draft', 'published', 'ongoing', 'completed', 'cancelled'];
@@ -93,6 +96,7 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
   const [maintenanceEnds, setMaintenanceEnds] = useState('');
   const [maintenanceDialog, setMaintenanceDialog] = useState<'on' | 'off' | null>(null);
   const [form, setForm] = useState<EventForm | null>(null);
+  const [landingData, setLandingData] = useState<LandingContent | null>(null);
   const [saveDialog, setSaveDialog] = useState(false);
 
   useEffect(() => {
@@ -114,8 +118,12 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
     setLoading(true);
     try {
       const r = await callSadmin<SettingsResult>('sadmin_get_event_settings', { _event_id: targetEventId }, 'Could not load the event settings.');
+      const detail = await callSadmin<EventDetail>('sadmin_get_event', { _event_id: targetEventId }, 'Could not load the event detail.');
       setData(r);
       setForm(toForm(r.event));
+      const mergedLanding = mergeLanding(detail.landing);
+      setLandingData(mergedLanding);
+      applyTheme(mergedLanding.theme); // Apply the theme of the selected event
       setMaintenanceMessage(r.maintenance.stored_enabled ? r.maintenance.message : DEFAULT_MESSAGE);
       // Seed the schedule inputs from what is stored for this event.
       setSchedule(Object.fromEntries(SWITCHES.map((s) => {
@@ -227,6 +235,22 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
       load();
     } catch (err) {
       notify(errorText(err, 'Could not save the event details.'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveTheme = async (newAccent: string) => {
+    if (!landingData) return;
+    setBusy(true);
+    try {
+      const draft = { ...landingData, theme: { ...landingData.theme, accent: newAccent } };
+      await callSadmin('sadmin_update_landing', { _event_id: targetEventId, _landing: draft }, 'Could not save the theme.');
+      setLandingData(draft);
+      applyTheme(draft.theme); // Instantly apply so Superadmin sees the change
+      notify('Dashboard theme saved.', 'success');
+    } catch (err) {
+      notify(errorText(err, 'Could not save the theme.'), 'error');
     } finally {
       setBusy(false);
     }
@@ -469,6 +493,31 @@ const EventControls: React.FC<{ notify: Notify }> = ({ notify }) => {
         onConfirm={() => applyMaintenance(false)}
         description={<p>Everyone can use the site again straight away.</p>}
       />
+
+      {/* Dashboard Theme */}
+      <Panel
+        title="Dashboard Theme"
+        subtitle="The accent colour used across all dashboards (Attendee, Admin, Employer, etc.). Every change takes effect immediately."
+      >
+        <div className="flex flex-wrap gap-4 mt-2">
+          {COLOUR_PRESETS.map((preset) => (
+            <button
+              key={preset.hex}
+              onClick={() => saveTheme(preset.hex)}
+              disabled={busy}
+              className={`w-12 h-12 rounded-full shadow-sm flex items-center justify-center transition-transform hover:scale-110 focus:outline-none focus:ring-4 focus:ring-offset-2 focus:ring-offset-slate-900 focus:ring-white disabled:opacity-50 ${
+                landingData?.theme?.accent?.toLowerCase() === preset.hex.toLowerCase() ? 'ring-4 ring-offset-2 ring-offset-slate-900 ring-white scale-110' : ''
+              }`}
+              style={{ backgroundColor: preset.hex }}
+              title={preset.label}
+            >
+              {landingData?.theme?.accent?.toLowerCase() === preset.hex.toLowerCase() && (
+                <MIcon name="check" className="text-white text-xl" />
+              )}
+            </button>
+          ))}
+        </div>
+      </Panel>
 
       <ConfirmDialog
         open={saveDialog}

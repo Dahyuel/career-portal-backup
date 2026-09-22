@@ -10,6 +10,7 @@ import {
   type ReportOptions
 } from './eventReport';
 import type { EventStatistics } from './statisticsShared';
+import { COLOUR_PRESETS } from '../../lib/theme';
 
 const OPTIONS_STORAGE_KEY = 'admin.eventReport.options';
 
@@ -161,6 +162,23 @@ const EventReportModal: React.FC<EventReportModalProps> = ({ stats, generatedBy,
               </div>
 
               <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Brand Color</h3>
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {COLOUR_PRESETS.map((preset) => (
+                    <button
+                      key={preset.hex}
+                      onClick={() => setOptions({ ...options, accentColor: preset.hex })}
+                      className="w-6 h-6 rounded-full shadow-sm hover:scale-110 transition-transform focus:outline-none flex items-center justify-center"
+                      style={{ backgroundColor: preset.hex }}
+                      title={preset.label}
+                    >
+                      {options.accentColor === preset.hex && (
+                        <span className="material-symbols-outlined text-white text-[14px]">check</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">Chart style</h3>
                 <div className="flex gap-2 mb-3">
                   {([['bar', 'All bars', 'bar_chart'], ['pie', 'All pies', 'pie_chart']] as const).map(([value, label, icon]) => (

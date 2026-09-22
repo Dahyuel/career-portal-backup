@@ -59,18 +59,20 @@ export type ReportChartType = 'bar' | 'pie';
 export interface ReportOptions {
   charts: Record<ReportChartId, ReportChartType>;
   sections: Record<ReportSectionId, boolean>;
+  accentColor: string;
 }
 
 export const defaultReportOptions = (): ReportOptions => ({
   charts: Object.fromEntries(REPORT_CHARTS.map((c) => [c.id, 'bar'])) as Record<ReportChartId, ReportChartType>,
-  sections: Object.fromEntries(REPORT_SECTIONS.map((s) => [s.id, true])) as Record<ReportSectionId, boolean>
+  sections: Object.fromEntries(REPORT_SECTIONS.map((s) => [s.id, true])) as Record<ReportSectionId, boolean>,
+  accentColor: '#dc2626'
 });
 
 /** Accepts anything (e.g. saved JSON) and returns valid options, falling back to defaults. */
 export const normalizeReportOptions = (raw: unknown): ReportOptions => {
   const result = defaultReportOptions();
   if (!raw || typeof raw !== 'object') return result;
-  const r = raw as { charts?: Record<string, unknown>; sections?: Record<string, unknown> };
+  const r = raw as { charts?: Record<string, unknown>; sections?: Record<string, unknown>; accentColor?: unknown };
   for (const c of REPORT_CHARTS) {
     const v = r.charts?.[c.id];
     if (v === 'bar' || v === 'pie') result.charts[c.id] = v;
@@ -78,6 +80,9 @@ export const normalizeReportOptions = (raw: unknown): ReportOptions => {
   for (const s of REPORT_SECTIONS) {
     const v = r.sections?.[s.id];
     if (typeof v === 'boolean') result.sections[s.id] = v;
+  }
+  if (typeof r.accentColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(r.accentColor)) {
+    result.accentColor = r.accentColor;
   }
   return result;
 };
@@ -329,6 +334,11 @@ export function buildEventReportHtml(stats: EventStatistics, meta: ReportMeta = 
   const generatedAt = meta.generatedAt ?? new Date();
   const on = (id: ReportSectionId) => options.sections[id];
   const chartType = (id: ReportChartId) => options.charts[id];
+
+  // Apply the chosen report accent color dynamically to the primary palette slots
+  C.accent = options.accentColor;
+  C.series[0] = options.accentColor;
+  C.categorical[0] = options.accentColor;
 
   const f = stats.funnel;
   const a = stats.attendees;

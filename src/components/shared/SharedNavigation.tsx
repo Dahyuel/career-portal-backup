@@ -70,10 +70,9 @@ const SidebarButton = memo(forwardRef<HTMLButtonElement, {
         whileHover={{ scale: 1.02, x: 5 }}
         whileTap={{ scale: 0.98 }}
         className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-colors ${isActive
-            ? 'bg-primary/10 text-primary'
-            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-primary'
+            ? 'bg-red-600/10 text-red-600'
+            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-red-600'
             }`}
-        style={isActive ? { color: '#DC2626', backgroundColor: 'rgba(220, 38, 38, 0.1)' } : {}}
     >
         <span className="material-symbols-outlined">{item.icon}</span>
         <span>{item.label}</span>
@@ -125,10 +124,9 @@ const MobileDockItem = memo(({ item, isActive, onItemChange }: {
         whileHover={{ y: -5 }}
         whileTap={{ scale: 0.9 }}
         className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors ${isActive
-            ? 'text-primary'
+            ? 'text-red-600'
             : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
             }`}
-        style={isActive ? { color: '#DC2626' } : {}}
     >
         <span className="material-symbols-outlined">{item.icon}</span>
         <span className="text-[10px] font-bold">{item.label}</span>
@@ -149,7 +147,7 @@ const NotificationItem = memo(({ notification, onClick }: {
     >
         <div className="flex gap-3">
             <div className="shrink-0 mt-1">
-                <span className="material-symbols-outlined text-primary" style={{ color: '#DC2626' }}>
+                <span className="material-symbols-outlined text-red-600">
                     {notification.type === 'success' ? 'check_circle' : 'info'}
                 </span>
             </div>
